@@ -202,6 +202,16 @@ function onMessage(raw, isBinary) {
       sendNav(store);
       break;
     }
+    case 'core-set': {
+      // Ship settings the relay has checked: alert status, transporter lockout.
+      const store = storeFor(msg.ship);
+      if (!store || !store.primary || !msg.set) return;
+      for (const k of ['alert', 'lockout']) if (k in msg.set) store.nav[k] = msg.set[k];
+      log(`${store.ship}: ${Object.entries(msg.set).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+      store.saveNav();
+      sendNav(store);
+      break;
+    }
     case 'core-nav-sync': {
       // A copy of the ship's position from the computer that's flying it.
       const store = storeFor(msg.ship);

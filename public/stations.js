@@ -305,6 +305,8 @@
 
   const STATIONS = {
     Captain: (ship) => ({ code: 'CMD 01', color: 'gold', panels: [
+      // Alert status and orders (client.js fills it in).
+      panel('st-command', 'Command', 'red', true, h('div', { 'data-command': '' })),
       panel('st-status', 'Ship status', 'gold', true, h('div', { class: 'ops-readouts' },
         live(readout('Alert status', 'sky'), () => 'Condition green'),
         live(readout('Shields', 'sky', '%'), drift(100, 92, 100, 1.5), Math.round),
@@ -317,6 +319,7 @@
         [`${ship}: holding position, all departments reporting`], ['Long range sensors: no contacts of note'], ['Science: survey of system complete'], ['Engineering: warp core at optimum efficiency']])),
     ] }),
     'First Officer': (ship) => ({ code: 'XO 02', color: 'red', panels: [
+      panel('st-assign', 'Reassign crew', 'peach', true, h('div', { 'data-reassign': '' })),
       panel('st-roster', 'Duty roster', 'gold', true, h('ul', { class: 'st-roster', 'data-roster': '' })),
       panel('st-dept', 'Department readiness', 'blue', false, h('ul', { class: 'st-depts', 'data-depts': '' })),
       panel('st-status', 'Ship status', 'orange', false,
@@ -354,6 +357,8 @@
       ] };
     },
     Security: (ship) => ({ code: 'SEC 05', color: 'gold', panels: [
+      // Transporter lockout, confinement, beam-in alerts (client.js fills it in).
+      panel('st-secctl', 'Security control', 'red', true, h('div', { 'data-security': '' })),
       panel('st-decks', 'Internal sensors · deck status', 'gold', true, deckGrid(14, 10)),
       panel('st-fields', 'Force fields', 'blue', false,
         ...['Brig', 'Main bridge', 'Engineering', 'Armory'].map((n) => live(gauge(n, 'blue'), drift(1, 0.95, 1, 0.01)))),
@@ -383,12 +388,8 @@
       panel('st-neural', 'Neural activity', 'violet', false, trace(100, 'violet', (t) => 0.4 * Math.sin(t * 23) * Math.sin(t * 3.1) + 0.25 * Math.sin(t * 41) + rand(-0.1, 0.1), 140, 'Neural activity'),
         live(gauge('Cortical function', 'violet'), drift(0.94, 0.9, 0.98, 0.01)),
         live(gauge('Synaptic response', 'lilac'), drift(0.9, 0.84, 0.96, 0.01))),
-      panel('st-beds', 'Sickbay', 'blue', false, h('ul', { class: 'st-list' },
-        h('li', {}, 'Biobed 1', h('span', {}, 'Observation')),
-        h('li', {}, 'Biobed 2', h('span', {}, 'Available')),
-        h('li', {}, 'Biobed 3', h('span', {}, 'Available')),
-        h('li', {}, 'Surgical bay', h('span', {}, 'Ready'))),
-        live(readout('Medical supplies', 'gold', '%'), drift(87, 85, 90, 0.2), Math.round)),
+      // Real crew: admit to and discharge from sickbay (client.js fills it in).
+      panel('st-sickbay', 'Sickbay · life signs', 'blue', true, h('div', { 'data-medical': '' })),
       panel('st-cell', 'Cellular analysis', 'peach', false, spectrum(110, ['peach', 'lilac'], 24, 'Cellular analysis')),
     ] }),
     Science: () => ({ code: 'SCI 08', color: 'blue', panels: [
@@ -462,14 +463,15 @@
       // Rosters list who is actually aboard, by station.
       setCrew(users) {
         const aboard = users.filter((u) => u.ship.toLowerCase() === ship.toLowerCase());
+        const tags = (u) => `${u.station}${u.sickbay ? ' · sickbay' : ''}${u.confined ? ' · confined' : ''}`;
         for (const ul of container.querySelectorAll('[data-roster]')) {
-          ul.replaceChildren(...(aboard.length ? aboard : [{ name: 'No one else aboard', station: '' }]).map((u) => h('li', {}, u.name, h('span', {}, u.station))));
+          ul.replaceChildren(...(aboard.length ? aboard : [{ name: 'No one else aboard', station: '' }]).map((u) => h('li', {}, u.name, h('span', {}, tags(u)))));
         }
         // Department readiness: how many are at each duty station; the label is
         // green when manned, red when not.
         for (const ul of container.querySelectorAll('[data-depts]')) {
           ul.replaceChildren(...DEPARTMENTS.map((d) => {
-            const n = aboard.filter((u) => u.station === d).length;
+            const n = aboard.filter((u) => u.station === d && !u.sickbay).length; // sickbay is off duty
             return h('li', { 'data-dept': d, 'data-manned': n > 0 },
               h('span', { class: 'st-dept-label' }, d),
               h('span', { class: 'st-dept-count' }, n ? `${n} on duty` : 'Unmanned'));

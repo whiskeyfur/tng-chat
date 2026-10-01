@@ -192,4 +192,12 @@ button.lcars-nav-button { font: inherit; font-size: 17px; letter-spacing: inheri
 .bcast--listening { --accent: var(--lcars-gold); }
 .bcast--radio { --accent: var(--lcars-violet); }
 .bcast--alert { --accent: var(--lcars-red); animation: lcars-blink 1s steps(2) infinite; }
+.bcast--yellow { --accent: var(--lcars-gold); animation: none; }
+.bcast--order { --accent: var(--lcars-sky); }
+.bcast--order .bcast-text { white-space: normal; }
+
+/* Alert status: the console's frame turns red (or yellow) aboard the ship. */
+body[data-alert='red'] .lcars-elbow, body[data-alert='red'] .lcars-bar__seg, body[data-alert='red'] .lcars-sidebar__fill { background: var(--lcars-red) !important; animation: lcars-blink 1.4s steps(2) infinite; }
+body[data-alert='yellow'] .lcars-elbow, body[data-alert='yellow'] .lcars-bar__seg, body[data-alert='yellow'] .lcars-sidebar__fill { background: var(--lcars-gold) !important; }
+@media (prefers-reduced-motion: reduce) { body[data-alert='red'] .lcars-elbow { animation: none; } }
 .radio-ship-ctl { display: flex; justify-content: flex-end; }

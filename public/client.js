@@ -84,6 +84,7 @@ function signedOut(reason) {
   stationView = null;
   navPanel = null;
   lastNav = null;
+  document.body.dataset.alert = 'green';
   ops = null;
   $('ops-view').hidden = true;
   $('transfer-form').hidden = true;
@@ -154,6 +155,7 @@ function showStation() {
   shipStateSig = '';
   powerDraft = null;
   renderPower();
+  renderCrewPanels();
   renderShipState();
   fillReassign();
   renderTraffic();
@@ -208,7 +210,11 @@ let shipStateSig = '';
 function renderShipState() {
   if (!me) return;
   const p = ownPower();
-  bc.setAlert(p && p.lifeSupport < 50 ? `Life support at ${p.lifeSupport}%` : null);
+  bc.setAlert('life', p && p.lifeSupport < 50 ? `Life support at ${p.lifeSupport}%` : null);
+  // Alert status: red or yellow frame and a bar on every console aboard.
+  const alert = lastNav?.own?.alert || 'green';
+  document.body.dataset.alert = alert;
+  bc.setAlert('alert', alert === 'green' ? null : `${alert === 'red' ? 'Red' : 'Yellow'} alert`, { level: alert });
   if (!stationView) return;
   const up = !!ownShip()?.shields;
   const crew = comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station !== 'Operations');
@@ -255,6 +261,98 @@ function renderShipState() {
     const status = el('p', { className: 'ops-notice', id: 'beam-status', textContent: blocked || tr.querySelector('#beam-status')?.textContent || '' });
     const reach = el('p', { className: 'ops-hint', id: 'beam-range', textContent: range != null ? `Transporter range ${Math.round(range)} units (sensor power ${p?.sensors ?? 100}%)` : '' });
     tr.replaceChildren(form, status, reach);
+  }
+}
+
+// --- Captain, First Officer, Security, Medical controls --------------------------
+const securityAlerts = []; // beam-ins Security has been told about
+
+function renderCrewPanels() {
+  if (!me || !stationView) return;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const button = (text, onclick, extra = '') => el('button', { type: 'button', className: `lcars-button lcars-button--pill ${extra}`, textContent: text, onclick });
+  const aboard = comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase());
+  const crew = aboard.filter((u) => u.station !== 'Operations');
+  const status = (u) => (u.sickbay ? 'Sickbay' : u.confined ? 'Confined to quarters' : 'On duty');
+  // Rebuild a panel only when what it shows has changed (buttons stay put).
+  const changed = (node, ...state) => { const sig = JSON.stringify(state); if (node.dataset.sig === sig) return false; node.dataset.sig = sig; return true; };
+  const crewSig = crew.map((u) => [u.id, u.station, !!u.sickbay, !!u.confined]);
+  const pickCrew = (id, list, keep) => {
+    const sel = el('select', { className: 'ops-select', id, ariaLabel: 'crew member' }, ...list.map((u) => new Option(u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`, u.id)));
+    if (keep && list.some((u) => u.id === keep)) sel.value = keep;
+    return sel;
+  };
+
+  // Captain: alert status and orders.
+  const cmd = document.querySelector('[data-command]');
+  if (cmd) {
+    if (!cmd.firstChild) {
+      const text = el('input', { className: 'ops-input', id: 'order-text', placeholder: 'Orders to all hands aboard', autocomplete: 'off' });
+      const form = el('form', { className: 'ops-form' }, text, el('button', { className: 'lcars-button lcars-button--pill', id: 'order-send', textContent: 'Issue order' }));
+      form.onsubmit = (e) => { e.preventDefault(); if (text.value.trim()) send({ type: 'order', text: text.value.trim() }); text.value = ''; };
+      cmd.append(
+        el('p', { className: 'st-state', id: 'alert-state' }),
+        el('div', { className: 'ops-form', id: 'alert-buttons' },
+          ...[['green', 'Condition green', ''], ['yellow', 'Yellow alert', 'alert-yellow'], ['red', 'Red alert', 'lcars-button--alert']].map(([lvl, t, c]) => {
+            const b = button(t, () => send({ type: 'alert', level: lvl }), c);
+            b.dataset.level = lvl;
+            return b;
+          })),
+        el('p', { className: 'ops-hint', textContent: 'Red alert raises shields if they have power, and turns every console aboard red.' }),
+        form);
+    }
+    const level = lastNav?.own?.alert || 'green';
+    cmd.querySelector('#alert-state').textContent = level === 'green' ? 'Condition green' : `${level} alert`;
+    cmd.querySelector('#alert-state').dataset.level = level;
+    for (const b of cmd.querySelectorAll('#alert-buttons button')) b.setAttribute('aria-pressed', String(b.dataset.level === level));
+  }
+
+  // First Officer: reassign crew.
+  const ra = document.querySelector('[data-reassign]');
+  if (ra && changed(ra, crewSig, stations)) {
+    const keep = ra.querySelector('#xo-who')?.value, keepSt = ra.querySelector('#xo-station')?.value;
+    const who = pickCrew('xo-who', crew, keep);
+    const st = el('select', { className: 'ops-select', id: 'xo-station', ariaLabel: 'station' }, ...stations.map((n) => new Option(n, n)));
+    if (keepSt) st.value = keepSt;
+    ra.replaceChildren(
+      el('div', { className: 'ops-form' }, el('span', { textContent: 'Reassign' }), who, el('span', { textContent: 'to' }), st,
+        button('Reassign', () => send({ type: 'reassign', who: who.value, station: st.value }))),
+      el('p', { className: 'ops-hint', textContent: 'Covers unmanned departments: the crew member\'s console switches to the new station.' }));
+  }
+
+  // Security: transporter lockout, confinement, beam-in alerts.
+  const sec = document.querySelector('[data-security]');
+  if (sec && changed(sec, crewSig, !!lastNav?.own?.lockout, securityAlerts.length)) {
+    const lockout = !!lastNav?.own?.lockout;
+    const keep = sec.querySelector('#sec-who')?.value;
+    const others = crew.filter((u) => u.id !== me.id);
+    const who = pickCrew('sec-who', others, keep);
+    const confined = others.filter((u) => u.confined);
+    sec.replaceChildren(
+      el('div', { className: 'st-control' },
+        el('p', { className: 'st-state', textContent: lockout ? 'Transporter lockout: force field up' : 'Transporter lockout: off' }),
+        button(lockout ? 'Drop force field' : 'Raise force field', () => send({ type: 'lockout', on: !lockout }), lockout ? '' : 'lcars-button--alert')),
+      el('div', { className: 'ops-form' }, el('span', { textContent: 'Quarters' }), who,
+        button('Confine', () => send({ type: 'confine', who: who.value, on: true }), 'lcars-button--alert'),
+        button('Release', () => send({ type: 'confine', who: who.value, on: false }))),
+      el('p', { className: 'ops-hint', textContent: confined.length ? `Confined: ${confined.map((u) => u.name).join(', ')}` : 'Nobody is confined to quarters' }),
+      el('h3', { className: 'ops-subhead', textContent: 'Beam-in alerts' }),
+      el('ul', { className: 'lcars-log', id: 'sec-alerts' }, ...(securityAlerts.length ? securityAlerts.slice(-8).reverse().map((t) => el('li', { className: 'lcars-log__line lcars-log__line--warn', textContent: t })) : [el('li', { className: 'lcars-log__line', textContent: 'No unauthorized arrivals' })])));
+  }
+
+  // Medical: sickbay and life signs.
+  const med = document.querySelector('[data-medical]');
+  if (med && changed(med, crewSig, ownPower()?.lifeSupport)) {
+    const p = ownPower();
+    med.replaceChildren(
+      el('p', { className: 'ops-hint', textContent: p ? `Life support ${p.lifeSupport}%${p.lifeSupport < 50 ? ': crew at risk' : ''}` : '' }),
+      el('ul', { className: 'st-list st-patients' }, ...crew.map((u) => {
+        const li = el('li', {}, `${u.name}${u.id === me.id ? ' (you)' : ''}`, el('span', { textContent: `${u.station} · ${status(u)}` }),
+          u.sickbay ? button('Discharge', () => send({ type: 'sickbay', who: u.id, on: false })) : button('Admit', () => send({ type: 'sickbay', who: u.id, on: true }), 'lcars-button--alert'));
+        li.dataset.crew = u.id;
+        return li;
+      })),
+      el('p', { className: 'ops-hint', textContent: 'Crew in sickbay are off duty: they don\'t count in department readiness.' }));
   }
 }
 
@@ -344,6 +442,7 @@ async function onMessage(msg) {
   }
   if (msg.type === 'users') {
     stationView?.setCrew(msg.users);
+    queueMicrotask(renderCrewPanels);
     queueMicrotask(renderShipState); // transporter crew list
     setLink(msg.ops ? 'online' : 'error', msg.ops ? `${relayName} · ops on duty` : `${relayName} · ops offline`);
   }
@@ -401,6 +500,7 @@ async function onMessage(msg) {
       stationView?.setNav(msg.own);
       renderShipState();
       renderPower();
+      renderCrewPanels();
       break;
     case 'course-plotted':
       log(`${msg.by.name} plotted a course to ${msg.label}`);
@@ -408,6 +508,15 @@ async function onMessage(msg) {
       break;
     case 'scan-result':
       navPanel?.scanned(msg);
+      break;
+    case 'order':
+      log(`Captain's orders (${msg.from.name}): ${msg.text}`);
+      bc.addOrder(msg.from, msg.text);
+      break;
+    case 'security-alert':
+      securityAlerts.push(`${new Date(msg.at).toLocaleTimeString()} ${msg.text}`);
+      bc.setAlert(`intruder-${msg.at}`, `Security: ${msg.text}`, { dismiss: true });
+      renderCrewPanels();
       break;
     case 'hello': {
       opsKeyRequired = msg.opsKey !== false; // older relays don't say: show it

@@ -910,6 +910,75 @@ const audioBytes = (page) => page.evaluate(async () => {
     odell.close();
     await scotty.close();
 
+    // Phase 3. Security: the force field refuses a beam-in; once it's down,
+    // Security is alerted when someone beams aboard.
+    const worf = await openAs(browser, 'worf', 'worf', 'Enterprise', 'Security');
+    await worf.waitForFunction(() => window.__voice.myName === 'worf');
+    await screen(worf, 'st-secctl');
+    await worf.click('[data-security] button:has-text("Raise force field")');
+    await worf.waitForSelector('[data-security] .st-state:has-text("force field up")');
+    const randBeams = () => rand.send(JSON.stringify({ type: 'beam', who: id('rand', 'Defiant'), ship: 'Enterprise' }));
+    randBeams();
+    await waitFor(() => randMsgs.some((m) => m.type === 'notice' && /transporter lockout/.test(m.text)));
+    await worf.click('[data-security] button:has-text("Drop force field")');
+    await worf.waitForSelector('[data-security] .st-state:has-text("lockout: off")');
+    randBeams();
+    await worf.waitForSelector('#sec-alerts li:has-text("rand (Transporter) beamed aboard from the Defiant")');
+    await worf.waitForSelector('.bcast--alert:has-text("Security: rand")', { state: 'attached' });
+    step('Security: the force field refused a beam-in; with it down, Security was alerted when rand beamed aboard');
+
+    // Security confines alice to quarters: she can call Security, not the First Officer.
+    const riker = await openAs(browser, 'riker', 'riker', 'Enterprise', 'First Officer');
+    await riker.waitForFunction(() => window.__voice.myName === 'riker');
+    await worf.waitForSelector('#sec-who option[value="alice@enterprise"]', { state: 'attached' });
+    await worf.selectOption('#sec-who', id('alice'));
+    await worf.click('[data-security] button:has-text("Confine")');
+    await alice.waitForFunction(() => window.__voice.me && window.__comms.users.find((u) => u.name === 'alice')?.confined);
+    await callFrom(alice, 'riker');
+    await alice.waitForFunction(() => window.__voice.state === 'idle');
+    assert.match(await alice.textContent('#log'), /confined to quarters/);
+    await callFrom(alice, 'worf');
+    await worf.waitForSelector('.v-incoming:not([hidden])');
+    await worf.click('.v-decline');
+    await alice.waitForFunction(() => window.__voice.state === 'idle');
+    await closeComms(worf);
+    await worf.selectOption('#sec-who', id('alice'));
+    await worf.click('[data-security] button:has-text("Release")');
+    await alice.waitForFunction(() => !window.__comms.users.find((u) => u.name === 'alice')?.confined);
+    step('Security confined alice to quarters: she could call Security but not the First Officer; then released her');
+
+    // First Officer reassigns bob to Medical; Medical admits carol to sickbay,
+    // and Tactical shows unmanned on the Captain's readiness.
+    await screen(riker, 'st-assign');
+    await riker.selectOption('#xo-who', id('bob'));
+    await riker.selectOption('#xo-station', 'Medical');
+    await riker.click('[data-reassign] button:has-text("Reassign")');
+    await bob.waitForFunction(() => window.__voice.me.station === 'Medical');
+    const picard = await openAs(browser, 'picard', 'picard', 'Enterprise', 'Captain');
+    await picard.waitForSelector('#st-dept li[data-dept="Tactical"][data-manned]', { state: 'attached' });
+    await closeComms(bob);
+    await screen(bob, 'st-sickbay');
+    await bob.click('.st-patients li[data-crew="carol@enterprise"] button:has-text("Admit")');
+    await picard.waitForSelector('#st-dept li[data-dept="Tactical"]:not([data-manned])', { state: 'attached' });
+    await bob.click('.st-patients li[data-crew="carol@enterprise"] button:has-text("Discharge")');
+    await picard.waitForSelector('#st-dept li[data-dept="Tactical"][data-manned]', { state: 'attached' });
+    step('the First Officer reassigned bob to Medical; carol in sickbay left Tactical unmanned until discharged');
+
+    // The Captain: orders to every console, red alert (shields up, frames red), then green.
+    await screen(picard, 'st-command');
+    await picard.fill('#order-text', 'All hands, prepare for first contact');
+    await picard.click('#order-send');
+    await bob.waitForSelector('.bcast--order:has-text("prepare for first contact")', { state: 'attached' });
+    await picard.click('#alert-buttons button[data-level="red"]');
+    await bob.waitForFunction(() => document.body.dataset.alert === 'red');
+    await carol.waitForSelector('[data-shield-control] .st-state:has-text("Shields up")', { state: 'attached' });
+    await picard.click('#alert-buttons button[data-level="green"]');
+    await bob.waitForFunction(() => document.body.dataset.alert === 'green');
+    await carol.click('[data-shield-control] button:has-text("Lower shields")');
+    await carol.waitForSelector('[data-shield-control] .st-state:has-text("Shields down")', { state: 'attached' });
+    step("the Captain's orders reached every console; red alert raised shields and turned consoles red, then condition green");
+    for (const page of [worf, riker, picard]) await page.close();
+
     sulu.close();
     rand.close();
     await spock.close();

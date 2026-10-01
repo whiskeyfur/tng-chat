@@ -112,6 +112,16 @@
     .nav-scan-list li { display: flex; justify-content: space-between; gap: 10px; border-bottom: 2px dotted #333; color: var(--lcars-tan); }
     .nav-scan-list b { color: var(--lcars-sky); font-weight: 400; text-align: right; }
     @media (max-width: 900px) { .nav-panel { flex-direction: column; } .nav-side { flex: 0 0 auto; } }
+    /* Command, security, medical */
+    .alert-yellow { --accent: var(--lcars-gold); }
+    #alert-buttons [aria-pressed='true'] { outline: 3px solid #fff; outline-offset: 2px; }
+    #alert-state { margin: 0; font-size: 28px; text-transform: uppercase; color: #66cc66; }
+    #alert-state[data-level='yellow'] { color: var(--lcars-gold); }
+    #alert-state[data-level='red'] { color: var(--lcars-red); animation: lcars-blink 1.2s steps(2) infinite; }
+    [data-command] .ops-input { flex: 1 1 260px; min-width: 0; }
+    [data-command], [data-security], [data-medical], [data-reassign] { display: flex; flex-direction: column; gap: 12px; }
+    .st-patients li { align-items: center; }
+    .st-patients .lcars-button { min-height: 32px; font-size: 13px; margin-left: 10px; }
     /* Engineering power routing */
     .pw { display: flex; flex-direction: column; gap: 8px; text-transform: uppercase; }
     .pw-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 60px; align-items: center; gap: 12px; }

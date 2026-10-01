@@ -96,7 +96,8 @@ const linkRequests = new Map(); // request id -> { id, fromShip, toShip }
 const clean = (s) => (typeof s === 'string' ? s.trim().replace(/\s+/g, ' ') : '');
 const shipKey = (ship) => ship.toLowerCase();
 const userId = (name, ship) => `${name.toLowerCase()}@${shipKey(ship)}`;
-const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station });
+const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station,
+  ...(ws.sickbay ? { sickbay: true } : {}), ...(ws.confined ? { confined: true } : {}) });
 const crewOf = (key) => [...users.values()].filter((u) => u.shipKey === key);
 const opsOf = (key) => [...operators].filter((op) => op.shipKey === key);
 const shipName = (key) => ships.get(key) || key;
@@ -461,6 +462,8 @@ function beam(u, toKey) {
   broadcastCrew(toKey);
   broadcastShips();
   opLog(toKey, `${u.name} (${u.station}) beamed aboard from the ${from}`);
+  // Security is told whenever someone beams aboard.
+  for (const s of crewOf(toKey)) if (s.station === 'Security' && s !== u) send(s, { type: 'security-alert', text: `${u.name} (${u.station}) beamed aboard from the ${from}`, at: Date.now() });
   console.log(`${u.name} beamed from the ${from} to the ${u.ship}`);
 }
 
@@ -748,6 +751,8 @@ function scheduleNav() {
 function coreNav(c, key, nav) {
   if (!nav || typeof nav.x !== 'number' || typeof nav.y !== 'number') return;
   const clean = { x: nav.x, y: nav.y, heading: Number(nav.heading) || 0, warp: Number(nav.warp) || 0, dest: nav.dest || null };
+  if (ALERTS.includes(nav.alert)) clean.alert = nav.alert;
+  if (nav.lockout) clean.lockout = true;
   if (nav.power && typeof nav.power === 'object') clean.power = Object.fromEntries(SYSTEMS.map((s) => [s, Math.max(0, Math.min(100, Number(nav.power[s]) || 0))]));
   const current = primaryCore.get(key);
   if (!current) {
@@ -858,6 +863,95 @@ function navCommand(ws, msg) {
     const helm = crewOf(key).filter((u) => u.station === 'Helm');
     for (const u of helm) send(u, { type: 'course-plotted', by: info(ws), dest, label: d.name ? `the ${d.name}` : `${Math.round(d.x)}, ${Math.round(d.y)}` });
     return note(helm.length ? `Course plotted for Helm: ${d.name ? `the ${d.name}` : `${Math.round(d.x)}, ${Math.round(d.y)}`}` : 'Course plotted, but nobody is at Helm');
+  }
+}
+
+// --- command, security, medical (phase 3) ----------------------------------------
+//
+// Captain: alert status (green / yellow / red; red raises shields if they have
+// power) and orders shown on every console aboard. First Officer: reassign
+// crew to stations. Security: alerts when anyone beams aboard, a transporter
+// lockout (force field) refusing beam-ins, and confining crew to quarters
+// (they can only call Security, Medical or ops). Medical: sickbay, which takes
+// crew off duty. Alert status and lockout are kept by the ship's computer.
+
+const ALERTS = ['green', 'yellow', 'red'];
+const CONFINED_MAY_CALL = new Set(['Security', 'Medical', 'Operations']);
+const alertOf = (k) => navState.get(k)?.alert || 'green';
+const lockoutOf = (k) => !!navState.get(k)?.lockout;
+
+function crewCommand(ws, msg) {
+  const note = (text) => send(ws, { type: 'notice', text });
+  const key = ws.shipKey;
+  const aboard = (id) => { const u = typeof id === 'string' && users.get(id); return u && u.shipKey === key ? u : null; };
+  const setShip = (set) => {
+    const core = primaryCore.get(key);
+    if (!core) { note("No ship's computer is running the ship"); return false; }
+    send(core, { type: 'core-set', ship: ws.ship, set });
+    return true;
+  };
+
+  switch (msg.type) {
+    case 'alert': {
+      if (ws.station !== 'Captain') return note('Only the Captain sets alert status');
+      const level = ALERTS.includes(msg.level) ? msg.level : 'green';
+      if (!setShip({ alert: level })) return;
+      // Red alert: shields up, if there's the power for them.
+      if (level === 'red' && !shields.has(key) && powerOf(key).shields >= MIN_SHIELD_POWER) { shields.add(key); broadcastShips(); }
+      opLog(key, `${ws.name}: ${level} alert`);
+      for (const u of crewOf(key)) send(u, { type: 'notice', text: `${level === 'green' ? 'Condition green' : `${level[0].toUpperCase()}${level.slice(1)} alert`}: ${ws.name}` });
+      return;
+    }
+    case 'order': {
+      if (ws.station !== 'Captain') return note("Only the Captain gives the ship's orders");
+      const text = clean(msg.text).slice(0, 200);
+      if (!text) return;
+      for (const u of crewOf(key)) send(u, { type: 'order', from: info(ws), text, at: Date.now() });
+      opLog(key, `Captain's orders: ${text}`);
+      return;
+    }
+    case 'reassign': {
+      if (ws.station !== 'First Officer') return note('Only the First Officer reassigns crew');
+      const u = aboard(msg.who);
+      if (!u) return note('That crew member is not aboard');
+      if (u.operator) return note('The ops station can only be left by the operator');
+      if (!STATIONS.includes(msg.station)) return note('No such station');
+      if (u.station === msg.station) return;
+      const was = u.station;
+      u.station = msg.station;
+      send(u, { type: 'registered', ...info(u), token: u.token });
+      send(u, { type: 'notice', text: `${ws.name} (First Officer) reassigned you from ${was} to ${u.station}` });
+      broadcastCrew(key);
+      opLog(key, `${ws.name} reassigned ${u.name} from ${was} to ${u.station}`);
+      return note(`${u.name} reassigned to ${u.station}`);
+    }
+    case 'lockout': {
+      if (ws.station !== 'Security') return note('Only Security controls the transporter lockout');
+      if (!setShip({ lockout: !!msg.on })) return;
+      opLog(key, `${ws.name}: transporter lockout ${msg.on ? 'on' : 'off'}`);
+      return;
+    }
+    case 'confine': {
+      if (ws.station !== 'Security') return note('Only Security confines crew to quarters');
+      const u = aboard(msg.who);
+      if (!u || u === ws) return note('Pick someone else aboard');
+      if (u.operator) return note('The ops station cannot be confined');
+      u.confined = !!msg.on;
+      send(u, { type: 'notice', text: u.confined ? `Security: you are confined to quarters (you can only call Security, Medical or ops)` : 'Security: you are released from quarters' });
+      broadcastCrew(key);
+      opLog(key, `${ws.name} ${u.confined ? 'confined' : 'released'} ${u.name}`);
+      return note(`${u.name} ${u.confined ? 'confined to quarters' : 'released'}`);
+    }
+    case 'sickbay': {
+      if (ws.station !== 'Medical') return note('Only Medical admits crew to sickbay');
+      const u = aboard(msg.who);
+      if (!u) return note('That crew member is not aboard');
+      u.sickbay = !!msg.on;
+      send(u, { type: 'notice', text: u.sickbay ? `${ws.name}: you are in sickbay (off duty)` : `${ws.name}: you are discharged from sickbay` });
+      broadcastCrew(key);
+      opLog(key, `${ws.name} ${u.sickbay ? 'admitted' : 'discharged'} ${u.name} ${u.sickbay ? 'to' : 'from'} sickbay`);
+      return note(`${u.name} ${u.sickbay ? 'admitted to' : 'discharged from'} sickbay`);
+    }
   }
 }
 
@@ -1207,6 +1301,7 @@ wss.on('connection', (ws) => {
       if (!cores.has(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
       if (toKey === ws.shipKey) return fail(`${u.name} is already aboard`);
       for (const k of [ws.shipKey, toKey]) if (shields.has(k)) return fail(`cannot beam through the shields of the ${shipName(k)}`);
+      if (lockoutOf(toKey)) return fail(`the ${shipName(toKey)} has a transporter lockout: Security's force field is up`);
       if (users.has(userId(u.name, shipName(toKey)))) return fail(`someone called ${u.name} is already aboard the ${shipName(toKey)}`);
       if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to the ${shipName(toKey)}` });
       beam(u, toKey);
@@ -1248,6 +1343,7 @@ wss.on('connection', (ws) => {
     }
 
     if ((msg.type === 'helm' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return navCommand(ws, msg);
+    if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay'].includes(msg.type) && ws.id) return crewCommand(ws, msg);
 
     // Call waiting, "join": bring the person calling us into the call we're in.
     // Everyone in it is told, and the caller connects to each of them.
@@ -1269,6 +1365,11 @@ wss.on('connection', (ws) => {
       // Crew can only place calls on their data network (their own ship when
       // unlinked); other ships go through ops.
       if (!target || (msg.type === 'call' && !sameNetwork(ws.shipKey, target.shipKey))) return send(ws, { type: 'unavailable', id: msg.to });
+      // Confined to quarters: only Security, Medical or ops can be called.
+      if (msg.type === 'call' && ws.confined && !CONFINED_MAY_CALL.has(target.station)) {
+        send(ws, { type: 'notice', text: 'You are confined to quarters: you can only call Security, Medical or ops' });
+        return send(ws, { type: 'unavailable', id: msg.to });
+      }
       send(target, { ...msg, to: undefined, from: ws.id, fromInfo: info(ws) });
     }
   });

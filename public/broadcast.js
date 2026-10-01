@@ -25,7 +25,8 @@
     let speaking = null;            // { bid, label, stream, ready, pcs: Map(listener id -> pc) }
     const listening = new Map();    // bid -> { bid, from, label, pc, audio, muted }
     let radio = null;               // { name, url, by, audio, muted }
-    let alert = null;               // a ship-wide warning, e.g. life support low
+    const alerts = new Map();       // ship-wide warnings by key, e.g. life support, red alert
+    const orders = [];              // the Captain's orders, until dismissed
 
     const sig = (to, bid, data) => send({ type: 'bsignal', to, bid, data });
 
@@ -145,7 +146,8 @@
       bar.replaceChildren();
       const pill = (cls, text, ...buttons) => bar.append(el('div', { className: `bcast ${cls}` }, el('span', { className: 'bcast-text', textContent: text }), ...buttons));
       const button = (text, onclick, alert) => { const b = el('button', { type: 'button', className: `lcars-button lcars-button--pill${alert ? ' lcars-button--alert' : ''}`, textContent: text }); b.onclick = onclick; return b; };
-      if (alert) pill('bcast--alert', alert);
+      for (const [k, a] of alerts) pill(`bcast--alert bcast--${a.level || 'red'}`, a.text, ...(a.dismiss ? [button('Dismiss', () => { alerts.delete(k); render(); })] : []));
+      for (const o of orders) pill('bcast--order', `Captain's orders · ${o.from.name}: ${o.text}`, button('Acknowledge', () => { orders.splice(orders.indexOf(o), 1); render(); }));
       if (speaking) {
         pill('bcast--speaking', `On air: ${speaking.label}`, button('End broadcast', () => send({ type: 'bcast-end', bid: speaking.bid }), true));
       }
@@ -165,6 +167,8 @@
 
     // Signed out: drop everything.
     function reset() {
+      alerts.clear();
+      orders.length = 0;
       stopSpeaking();
       [...listening.keys()].forEach(stopListening);
       setShipRadio(null);
@@ -175,8 +179,15 @@
     return {
       handle,
       reset,
-      // A warning shown to everyone aboard (null clears it).
-      setAlert(text) { if (text !== alert) { alert = text; render(); } },
+      // A warning shown on this console (text null clears it). level: red | yellow.
+      setAlert(key, text, { level = 'red', dismiss = false } = {}) {
+        const cur = alerts.get(key);
+        if (!text) { if (cur) { alerts.delete(key); render(); } return; }
+        if (cur?.text === text) return;
+        alerts.set(key, { text, level, dismiss });
+        render();
+      },
+      addOrder(from, text) { orders.push({ from, text }); render(); },
       get speaking() { return speaking ? { bid: speaking.bid, label: speaking.label, listeners: speaking.pcs.size } : null; },
       get listening() { return [...listening.values()].map((l) => ({ bid: l.bid, from: l.from.name, connected: l.pc?.connectionState === 'connected', pc: l.pc })); },
       get shipRadio() { return radio ? { name: radio.name, url: radio.url, playing: !radio.audio.paused } : null; },

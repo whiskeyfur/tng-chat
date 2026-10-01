@@ -38,13 +38,13 @@ Each crew member gets an LCARS console for their station, styled with `public/lc
 
 | Station | Displays |
 | --- | --- |
-| Captain | ship status, tactical plot, **department readiness** (how many are on duty at each station aboard: green when manned, red when not), senior staff on duty, captain's log |
-| First Officer | duty roster (who is actually aboard), department readiness (real, as for the Captain), ship status, duty log |
+| Captain | **command** (alert status: condition green, yellow or red alert; orders to all hands), ship status, tactical plot, **department readiness** (how many are on duty at each station aboard: green when manned, red when not), senior staff on duty, captain's log |
+| First Officer | **reassign crew** to any station, duty roster (who is actually aboard), department readiness (real, as for the Captain), ship status, duty log |
 | Helm | **navigation**: the sector map, course (a ship, or click the map for a waypoint) and speed (impulse, warp 1-9), Engage / All stop, courses plotted by Science; forward view starfield at the ship's real speed; helm systems |
 | Tactical | shield grid, weapons, **shield control** (raise/lower the ship's shields), targeting scan |
-| Security | internal sensors deck grid, force fields, security log |
+| Security | **security control** (transporter lockout force field, confine crew to quarters, beam-in alerts), internal sensors deck grid, force fields, security log |
 | Engineering | side view of the ship with the warp core, warp field harmonics, **power distribution** (route the reactor between engines, shields, sensors, transporter, weapons and life support) |
-| Medical | patient monitor with ECG and vitals, neural activity, sickbay, cellular analysis |
+| Medical | patient monitor with ECG and vitals, neural activity, **sickbay** (admit and discharge crew; patients are off duty), cellular analysis |
 | Science | **long range sensors**: the sector map and every contact on sensors with distance and speed, **Scan** (distance, position, heading and speed, shields, ops, life signs by station) and **Plot course** for Helm; spectral analysis, anomaly readings, science log |
 | Communications | **comm traffic** (every call in progress or ringing, every hail waiting for an answer, and every all-hands broadcast, on the ship and its data network: who, and for how long; no listening in), subspace bands, carrier signal, message traffic |
 | Transporter | transporter controls (beam crew to another ship), transporter pad, pattern buffer |
@@ -75,6 +75,13 @@ Ships have a real position in a 1000 × 1000 sector, flown by their ship's compu
 - **Transporter range (20):** beaming needs the ships close: have Helm intercept the other ship first.
 
 When several computers run one ship, the relay picks one to fly it; the others keep a copy of its position and the next one takes over if it stops. Positions are saved in `<data>/<ship>/.nav.json`.
+
+## Command, security and medical
+
+- **Captain:** sets **alert status**. Red alert turns the frame of every console aboard red, shows a "Red alert" bar and raises shields if they have power; yellow alert turns them gold; condition green clears it. **Orders** go to every console aboard as a bar to acknowledge.
+- **First Officer:** **reassigns** any crew member to another station (not ops); their console switches over, with a note saying who moved them.
+- **Security:** a **transporter lockout** (force field) refuses anyone beaming aboard; every beam-in otherwise raises a **beam-in alert** for Security. **Confine to quarters**: a confined crew member can only call Security, Medical or ops until released.
+- **Medical:** **admits** crew to sickbay and **discharges** them. Patients are off duty: department readiness doesn't count them, and the Comms directory and rosters mark them.
 
 ## Power (Engineering)
 
@@ -131,6 +138,7 @@ npm test
 Starts the server and drives headless Chromium pages with a fake microphone through crew consoles and ops consoles:
 
 - **Crew calls:** decline; accept with audio both ways; chat; a 300 KB file arrives byte-for-byte; hang-up; a peer going offline.
+- **Command, security, medical:** the force field refusing a beam-in and Security's beam-in alert; confinement (can call Security, not the First Officer); the First Officer reassigning bob; sickbay leaving Tactical unmanned until discharge; the Captain's orders, red alert (shields up, consoles red) and condition green.
 - **Power:** over capacity can't be routed; sensors at 20% shrink every range so beaming falls short; no engine power refuses warp; no shield power disables Raise shields; low life support warns the crew.
 - **Navigation:** Science scanning the Defiant and plotting a course for Helm; Helm flying out of subspace range at warp 9 (the data link drops, the Defiant leaves hailing range, beaming is out of range), then intercepting the Defiant (back in range, beaming works).
 - **Broadcasts:** Communications seeing a hail before it's answered; all hands to the ship (heard, receive-only, other ships don't hear it); all hands to the fleet over a data link, ended by ops; the fleet radio playing on crew consoles and switching off.
@@ -170,6 +178,10 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 | `{type:"change-station", station, key?}` | move to another station aboard your ship; reply `registered`, or `operator-ok` for Operations (`station-failed` if the key is wrong) |
 | `{type:"shields", up}` | Tactical only: raise or lower the ship's shields |
 | `{type:"helm", dest?, heading?, warp}` | Helm only: `dest` `{ship}` or `{x, y}`, speed `0` (all stop), `0.25` (impulse) or 1-9 |
+| `{type:"alert", level}` / `{type:"order", text}` | Captain only: `green`, `yellow` or `red` alert / orders to everyone aboard (`order`) |
+| `{type:"reassign", who, station}` | First Officer only: move a crew member to another station |
+| `{type:"lockout", on}` / `{type:"confine", who, on}` | Security only: the transporter lockout / confining someone to quarters |
+| `{type:"sickbay", who, on}` | Medical only: admit to or discharge from sickbay |
 | `{type:"power", power}` | Engineering only: `{engines, shields, sensors, transporter, weapons, lifeSupport}` in percent, totalling at most 450 |
 | `{type:"scan", ship}` / `{type:"plot-course", dest}` | Science only: scan a ship on sensors (reply `scan-result`) / send Helm a course (`course-plotted`) |
 | `{type:"ship-radio", url, name, scope}` | Communications or ops: put a stream on the ship's (`ship`) or fleet's (`network`) radio; `url: null` switches it off |

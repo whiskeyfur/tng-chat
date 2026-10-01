@@ -110,7 +110,7 @@
           const name = document.createElement('span');
           name.textContent = u.name;
           const station = document.createElement('small');
-          station.textContent = isHome ? u.station : `${u.station}, ${u.ship}`;
+          station.textContent = `${isHome ? u.station : `${u.station}, ${u.ship}`}${u.sickbay ? ' · sickbay' : ''}${u.confined ? ' · confined' : ''}`;
           name.append(station);
           const btn = document.createElement('button');
           btn.type = 'button';
