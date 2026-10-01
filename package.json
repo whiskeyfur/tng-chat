@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/e2e.js",
+    "test": "node test/e2e.js && node test/restart.js",
     "export-pages": "node tools/export-pages.js",
     "shipcore": "node tools/shipcore.js"
   },

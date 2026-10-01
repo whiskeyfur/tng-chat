@@ -514,8 +514,9 @@ function renderCombat() {
         if (!allowed.includes(n)) { tr.append(el('td', { className: 'grid-na', textContent: '·', title: `can't be tied to ${NODE_NAMES[n]}` })); continue; }
         const box = el('input', { type: 'checkbox', checked: grid.ties[key].includes(n), ariaLabel: `${label}: ${NODE_NAMES[n]}` });
         box.dataset.node = n;
-        // One tie: tapping another moves it, tapping the lit one unties it. The crosslink takes several.
-        box.onchange = () => send({ type: 'grid', ties: { [key]: key === 'crosslink' ? COLS.filter((m) => (m === n ? box.checked : grid.ties[key].includes(m))) : box.checked ? [n] : [] } });
+        // One tie for sources and EPS loads: tapping another moves it, tapping the lit one unties it.
+        // Several for low-power loads (their load split evenly) and the crosslink.
+        box.onchange = () => send({ type: 'grid', ties: { [key]: grid.multi.includes(key) ? COLS.filter((m) => (m === n ? box.checked : grid.ties[key].includes(m))) : box.checked ? [n] : [] } });
         const v = grid.cells[cellKey]?.[n] || 0;
         const text = !v ? '' : v < 0 || !plus ? `−${Math.abs(v)}` : `+${v}`;
         tr.append(el('td', {}, el('label', { className: 'grid-tie' }, box, el('span', { className: `grid-flow${text.startsWith('+') ? ' grid-flow--in' : ''}`, textContent: text }))));

@@ -1090,8 +1090,10 @@ const SOURCES = ['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'co
 // impulse drives' outputs). The warp core itself spans both: its
 // subsystems on A/B, its output on the EPS.
 const SOURCE_NODES = { ship: AB, solar: AB, dock: AB, impulsePort: ['EPS'], impulseStarboard: ['EPS'], core: ['EPS'], battery: AB, containment: AB, crosslink: AB };
-// The crosslink is the one tie that takes several: the buses checked are one pool.
-const MULTI_TIES = new Set(['crosslink']);
+// Low-power loads may tie to several of Bus A, B and C (their load split
+// evenly); so may the crosslink (the buses checked are one pool). Sources and
+// EPS loads tie to one.
+const isMulti = (k) => k === 'crosslink' || ((k === 'containment' || /^(console|system|sub):/.test(k)) && !tieNodes(k).includes('EPS'));
 const SHIP_FEED_MAX = 500; // what Engineering can offer a ship docked with us
 const SYSTEM_BUS = { lifeSupport: 'A', sensors: 'A', replicators: 'B', recreation: 'B', engines: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
@@ -1190,7 +1192,7 @@ function freshEng(saved, { cold = false } = {}) {
   const tiesOf = (k, v, d) => {
     const list = Array.isArray(v) ? v : typeof v === 'string' ? [v] : v === null ? [] : null;
     if (!list) return d;
-    const ok = NODES.filter((n) => list.includes(n) && tieNodes(k).includes(n)).slice(0, MULTI_TIES.has(k) ? 4 : 1); // one tie: Bus A, B or C, or the EPS
+    const ok = NODES.filter((n) => list.includes(n) && tieNodes(k).includes(n)).slice(0, isMulti(k) ? 4 : 1); // sources and EPS loads: one tie
     return !ok.length && list.length ? d : ok;
   };
   // Older saves: crosslinks per pair, thrusters on/off.
@@ -1286,51 +1288,51 @@ function flow(k) {
     if (bus) { bus.need += amt; bus.have += got; }
     return got;
   };
-  // What's tied to each node (counted where a load draws first), for the breakers.
+  // What's tied to each node, for the breakers (a split load counts its share on each).
   const tied = blank();
   const trippable = [];
-  // A load draws from its ties in turn; its cell row records where from.
-  const load = (key, amt) => {
+  // Breakers watch sustained load: startup surges don't count.
+  const sustained = (key, amt) => (key === 'sub:constriction' && e.core === 'starting' ? GRID.constriction.run : key.endsWith('Pump') && key !== 'sub:corePump' ? 0 : amt);
+  // Power for a docked ship goes out the way it comes in.
+  const tiesFor = (key) => (key === 'feed' ? e.ties.ship : e.ties[key]) || [];
+  // A load tied to several buses is split evenly across them (each bus
+  // serves its share); its cell row records where its power came from.
+  const serve = (key, amt) => {
     const row = cells[key] || (cells[key] = blank());
-    const first = (e.ties[key] || [])[0];
-    // Breakers watch sustained load: the core's startup surge doesn't count.
-    const counted = key === 'sub:constriction' && e.core === 'starting' ? GRID.constriction.run : key.endsWith('Pump') && key !== 'sub:corePump' ? 0 : amt;
-    if (first && counted > 0) { tied[first] += counted; if (!NEVER_TRIP.has(key)) trippable.push({ key, node: first, amt: counted }); }
+    const ties = tiesFor(key);
+    if (!ties.length || amt <= 0) return 0;
+    const part = amt / ties.length, counted = sustained(key, amt) / ties.length;
     let got = 0;
-    for (const n of e.ties[key] || []) if (got < amt) { const t = take(n, amt - got); row[n] += t; got += t; }
+    for (const n of ties) {
+      if (counted > 0) { tied[n] += counted; if (!NEVER_TRIP.has(key)) trippable.push({ key, node: n, amt: counted }); }
+      const t = take(n, part); row[n] += t; got += t;
+    }
     return got;
   };
-  // Containment first, from any of its feeds.
-  const contained = e.antimatter > 0 ? load('containment', GRID.containment) : 0;
-  const containmentOk = e.antimatter <= 0 || contained >= GRID.containment;
-  // The reactors' subsystems.
-  const subOk = {};
-  const sub = (name, amt) => {
-    const got = load(`sub:${name}`, amt);
-    subOk[name] = got >= amt && (c.damage[name] || 0) < SUB_FAIL_DAMAGE;
-    return subOk[name];
-  };
-  const coreOn = e.core === 'online' || e.core === 'starting';
-  const coreSubsOk = [sub('constriction', !coreOn ? 0 : e.core === 'starting' ? GRID.constriction.start : GRID.constriction.run), sub('corePump', coreOn ? GRID.corePump : 0), sub('injector', coreOn ? GRID.injector : 0)].every(Boolean);
-  for (const d of DRIVES) sub(`${d}Pump`, e.drives[d].state === 'starting' ? GRID.impulsePump : 0); // running drives power their own pumps
-  for (const d of DRIVES) sub(`${d}Thrusters`, e.drives[d].state === 'running' ? GRID.thrusters : 0);
-  const crew = crewOf(k);
-  const consoleOk = {};
-  for (const st of Object.keys(CONSOLE_BUS)) {
-    const n = crew.filter((u) => u.station === st).length * GRID.console;
-    consoleOk[st] = load(`console:${st}`, n) >= n;
+  // Antimatter containment first, ahead of everything: from its feeds in turn.
+  let contained = 0;
+  if (e.antimatter > 0) {
+    const row = cells.containment;
+    for (const n of e.ties.containment) { tied[n] += GRID.containment / e.ties.containment.length; if (contained < GRID.containment) { const t = take(n, GRID.containment - contained); row[n] += t; contained += t; } }
   }
-  for (const name of ['rf', 'radio', 'subspace']) sub(name, GRID.comms);
-  let fed = 0;
-  if (net > 0) for (const n of e.ties.ship) if (fed < net) { const got = take(n, net - fed); cells.feed[n] += got; fed += got; }
-  e.fed = fed;
-  // Systems, a bus at a time (Bus A, Bus B, then loads on the EPS alone),
-  // each in priority order. Batteries charge from a bus they're tied to right
-  // after that bus is served, from what's left that reaches it: a brownout on
-  // another bus doesn't take their share. Batteries supply only when nothing
-  // else will (see take), so they drain into a bus that's short.
-  const delivered = {};
-  let tractorOk = true;
+  const containmentOk = e.antimatter <= 0 || contained >= GRID.containment;
+  // Every other load, in priority order: the reactors' subsystems, consoles,
+  // Communications, power for a docked ship, then the systems.
+  const coreOn = e.core === 'online' || e.core === 'starting';
+  const crew = crewOf(k);
+  const loads = [
+    ['sub:constriction', !coreOn ? 0 : e.core === 'starting' ? GRID.constriction.start : GRID.constriction.run],
+    ['sub:corePump', coreOn ? GRID.corePump : 0], ['sub:injector', coreOn ? GRID.injector : 0],
+    ...DRIVES.map((d) => [`sub:${d}Pump`, e.drives[d].state === 'starting' ? GRID.impulsePump : 0]), // running drives power their own pumps
+    ...DRIVES.map((d) => [`sub:${d}Thrusters`, e.drives[d].state === 'running' ? GRID.thrusters : 0]),
+    ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => u.station === st).length * GRID.console]),
+    ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
+    ['feed', Math.max(0, net)],
+    ...SYSTEM_PRIORITY.map((sys) => [`system:${sys}`, sys === 'tractor' ? (e.towing ? TRACTOR.draw : 0) : demand[sys]]),
+  ];
+  // Each bus serves the loads tied to it alone first (priority order), then
+  // its batteries charge, then loads split over two buses, then over three.
+  const got = {};
   const bt = e.ties.battery;
   const usedOf = (name) => { const src = srcs.find((x) => x.name === name); return src.ties.length ? cap[name] - src.left : 0; };
   let charging = 0;
@@ -1351,15 +1353,21 @@ function flow(k) {
     }
   };
   for (const X of NODES) {
-    for (const sys of SYSTEM_PRIORITY) {
-      if ((e.ties[`system:${sys}`] || [])[0] !== X) continue;
-      if (sys === 'tractor') { if (e.towing) tractorOk = load('system:tractor', TRACTOR.draw) >= TRACTOR.draw; continue; }
-      delivered[sys] = load(`system:${sys}`, demand[sys]);
-    }
+    for (const [key, amt] of loads) if (tiesFor(key).length === 1 && tiesFor(key)[0] === X) got[key] = serve(key, amt);
     if (X !== 'EPS') chargeFrom(X);
   }
-  if (e.towing && !(e.ties['system:tractor'] || []).length) tractorOk = false;
-  for (const sys of SYSTEMS) if (!(sys in delivered)) delivered[sys] = 0; // not tied in: no power
+  for (const n of [2, 3]) for (const [key, amt] of loads) if (tiesFor(key).length === n) got[key] = serve(key, amt);
+  const amtOf = Object.fromEntries(loads);
+  const full = (key) => (got[key] || 0) >= amtOf[key] - 1e-9;
+  const subOk = {};
+  for (const name of Object.keys(SUBSYSTEMS)) subOk[name] = full(`sub:${name}`) && (c.damage[name] || 0) < SUB_FAIL_DAMAGE;
+  const coreSubsOk = ['constriction', 'corePump', 'injector'].every((x) => subOk[x]);
+  const consoleOk = Object.fromEntries(Object.keys(CONSOLE_BUS).map((st) => [st, full(`console:${st}`)]));
+  const fed = got.feed || 0;
+  e.fed = fed;
+  cells.feed = cells.feed || blank();
+  const delivered = Object.fromEntries(SYSTEMS.map((sys) => [sys, got[`system:${sys}`] || 0]));
+  const tractorOk = !e.towing || full('system:tractor');
   for (const X of BUSES) {
     const sys = SYSTEMS.filter((x) => e.ties[`system:${x}`]?.includes(X));
     const want = sys.reduce((n, x) => n + demand[x], 0);
@@ -1446,7 +1454,7 @@ function gridView(k) {
     selfDestruct: e.selfDestruct ? { seconds: Math.max(0, Math.ceil((e.selfDestruct.at - Date.now()) / 1000)), by: e.selfDestruct.by } : null,
     buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: Math.round(b.need), have: Math.round(b.have), src: r(b.src), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
     consoleOk: f.consoleOk, stationSystems: STATION_SYSTEMS, subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
-    tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), busMax: BUS_MAX,
+    tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: BUS_MAX,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
   };
 }
@@ -1508,7 +1516,7 @@ function gridCommand(ws, msg) {
     const allowed = tieNodes(k);
     if (v.some((n) => !allowed.includes(n))) return note(`${NAME[k] || k.split(':')[1]} can only be tied to ${feeds(allowed)}`);
     const list = NODES.filter((n) => v.includes(n));
-    if (list.length > 1 && !MULTI_TIES.has(k)) return note(`${NAME[k] || k.split(':')[1]} ties to one: Bus A, B or C (crosslinks join buses)`);
+    if (list.length > 1 && !isMulti(k)) return note(`${NAME[k] || k.split(':')[1]} ties to one: Bus A, B or C (the crosslink joins buses)`);
     if (k === 'containment' && !list.length && e.antimatter > 0) return note('antimatter containment can\'t be switched off with antimatter aboard (only self-destruct does that): leave it at least one feed');
     e.ties[k] = list;
     said.push(`${NAME[k] || (k.startsWith('console:') ? `${k.slice(8)} console` : k.startsWith('sub:') ? SUBSYSTEMS[k.slice(4)].name : SYSTEM_NAMES[k.slice(7)] || k.slice(7))} ${k === 'containment' ? 'fed from' : 'tied to'} ${feeds(list)}`);

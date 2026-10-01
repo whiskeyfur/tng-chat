@@ -1334,6 +1334,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => barclay.nav()?.own.grid.totals.B.tied <= 300);
     step(`over its 300 max, Bus B's breaker tripped loads off (${barclay.msgs.filter((m) => m.type === 'notice' && /breaker tripped/.test(m.text)).map((m) => m.text.split(': ').pop()).join('; ')})`);
 
+    // A low-power system tied to two buses splits its load evenly between them.
+    barclay.send({ type: 'grid', ties: { 'system:lifeSupport': ['A', 'C'] }, tap: { bus: 'C', amount: 300 } });
+    await waitFor(() => { const c = barclay.nav()?.own.grid.cells['system:lifeSupport']; return c && c.A === 50 && c.C === 50; });
+    step('life support tied to Bus A and Bus C drew half its load from each');
+
     // Communications' local RF without power: no calls aboard.
     barclay.send({ type: 'grid', ties: { 'sub:rf': [] } });
     await waitFor(() => barclay.nav()?.own.grid.subOk.rf === false);
