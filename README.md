@@ -50,7 +50,7 @@ Each crew member gets an LCARS console for their station, styled with `public/lc
 | Transporter | transporter controls (beam crew to another ship), transporter pad, pattern buffer |
 | Crew | ship schematic, ship status, deck status |
 
-Every console fits the window: there's no page scrolling. The left-hand menu switches between full-window screens: **Comms** at the top, then one screen per display, the console log, and **Library** at the bottom. Long lists scroll inside their own panel.
+Every console fits the window: there's no page scrolling. The left-hand menu switches between full-window screens: **Comms** at the top, then one screen per display; at the bottom, on every console, **Console log**, **Station** and **Library**. Long lists scroll inside their own panel.
 
 Comms opens an LCARS modal, the same for every role, ops included:
 
