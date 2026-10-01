@@ -316,6 +316,7 @@
         [`${ship}: holding position, all departments reporting`], ['Long range sensors: no contacts of note'], ['Science: survey of system complete'], ['Engineering: warp core at optimum efficiency']])),
     ] }),
     'First Officer': (ship) => ({ code: 'XO 02', color: 'red', panels: [
+      panel('st-orders', 'Orders', 'red', true, h('div', { 'data-orders': '' })),
       panel('st-assign', 'Reassign crew', 'peach', true, h('div', { 'data-reassign': '' })),
       panel('st-roster', 'Duty roster', 'gold', true, h('ul', { class: 'st-roster', 'data-roster': '' })),
       panel('st-dept', 'Department readiness', 'blue', false, h('ul', { class: 'st-depts', 'data-depts': '' })),

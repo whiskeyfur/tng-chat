@@ -1011,6 +1011,21 @@ const audioBytes = (page) => page.evaluate(async () => {
     await picard.fill('#order-text', 'All hands, prepare for first contact');
     await picard.click('#order-send');
     await bob.waitForSelector('.bcast--order:has-text("prepare for first contact")', { state: 'attached' });
+    assert.equal(await picard.locator('.bcast--order').count(), 0, 'the Captain is not asked to acknowledge his own order');
+    await bob.click('.bcast--order:has-text("prepare for first contact") button');
+    await picard.waitForSelector('.order-tally li:has-text("prepare for first contact"):has-text("acknowledged")', { state: 'attached' });
+    assert.doesNotMatch(await picard.textContent('.order-tally li'), /waiting for [^·]*\bpicard\b/);
+    // The First Officer's orders: neither the First Officer nor the Captain is asked.
+    await screen(riker, 'st-orders');
+    await riker.fill('#order-text', 'Drill on deck 8');
+    await riker.click('#order-send');
+    await bob.waitForSelector('.bcast--order:has-text("Drill on deck 8")', { state: 'attached' });
+    await riker.waitForSelector('.order-tally li:has-text("Drill on deck 8")', { state: 'attached' });
+    assert.equal(await riker.locator('.bcast--order:has-text("Drill on deck 8")').count(), 0);
+    assert.equal(await picard.locator('.bcast--order:has-text("Drill on deck 8")').count(), 0);
+    assert.doesNotMatch(await riker.textContent('.order-tally li'), /picard|riker/);
+    await bob.click('.bcast--order:has-text("Drill on deck 8") button');
+    step("orders: the Captain and the First Officer aren't asked to acknowledge their own (nor the Captain the First Officer's); bob's acknowledgement showed in the tally");
     await picard.click('#alert-buttons button[data-level="red"]');
     await bob.waitForFunction(() => document.body.dataset.alert === 'red');
     await carol.waitForSelector('[data-shield-control] .st-state:has-text("Shields up")', { state: 'attached' });

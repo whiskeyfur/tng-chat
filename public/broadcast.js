@@ -147,7 +147,7 @@
       const pill = (cls, text, ...buttons) => bar.append(el('div', { className: `bcast ${cls}` }, el('span', { className: 'bcast-text', textContent: text }), ...buttons));
       const button = (text, onclick, alert) => { const b = el('button', { type: 'button', className: `lcars-button lcars-button--pill${alert ? ' lcars-button--alert' : ''}`, textContent: text }); b.onclick = onclick; return b; };
       for (const [k, a] of alerts) pill(`bcast--alert bcast--${a.level || 'red'}`, a.text, ...(a.dismiss ? [button('Dismiss', () => { alerts.delete(k); render(); })] : []));
-      for (const o of orders) pill('bcast--order', `Captain's orders · ${o.from.name}: ${o.text}`, button('Acknowledge', () => { orders.splice(orders.indexOf(o), 1); render(); }));
+      for (const o of orders) pill('bcast--order', `${o.from.station === 'First Officer' ? "First Officer's" : "Captain's"} orders · ${o.from.name}: ${o.text}`, button('Acknowledge', () => { orders.splice(orders.indexOf(o), 1); if (o.id) send({ type: 'order-ack', id: o.id }); render(); }));
       if (speaking) {
         pill('bcast--speaking', `On air: ${speaking.label}`, button('End broadcast', () => send({ type: 'bcast-end', bid: speaking.bid }), true));
       }
@@ -187,7 +187,7 @@
         alerts.set(key, { text, level, dismiss });
         render();
       },
-      addOrder(from, text) { orders.push({ from, text }); render(); },
+      addOrder(from, text, id) { orders.push({ from, text, id }); render(); },
       get speaking() { return speaking ? { bid: speaking.bid, label: speaking.label, listeners: speaking.pcs.size } : null; },
       get listening() { return [...listening.values()].map((l) => ({ bid: l.bid, from: l.from.name, connected: l.pc?.connectionState === 'connected', pc: l.pc })); },
       get shipRadio() { return radio ? { name: radio.name, url: radio.url, playing: !radio.audio.paused } : null; },

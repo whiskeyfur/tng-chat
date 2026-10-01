@@ -1072,6 +1072,14 @@ const CONFINED_MAY_CALL = new Set(['Security', 'Medical', 'Operations']);
 const alertOf = (k) => navState.get(k)?.alert || 'green';
 const lockoutOf = (k) => !!navState.get(k)?.lockout;
 
+// Orders and who has acknowledged them, for whoever gave them.
+const orders = new Map(); // id -> { id, ship, by, from, text, at, pending, acked }
+function orderStatus(o) {
+  const by = users.get(o.by);
+  const names = (ids) => [...ids].map((id) => users.get(id)?.name).filter(Boolean);
+  if (by) send(by, { type: 'order-status', id: o.id, text: o.text, at: o.at, acked: names(o.acked), pending: names(o.pending) });
+}
+
 function crewCommand(ws, msg) {
   const note = (text) => send(ws, { type: 'notice', text });
   const key = ws.shipKey;
@@ -1095,11 +1103,25 @@ function crewCommand(ws, msg) {
       return;
     }
     case 'order': {
-      if (ws.station !== 'Captain') return note("Only the Captain gives the ship's orders");
+      // The Captain's or the First Officer's orders, to acknowledge. Whoever
+      // gives them isn't asked; nor is the Captain for the First Officer's.
+      if (ws.station !== 'Captain' && ws.station !== 'First Officer') return note("Only the Captain or the First Officer gives the ship's orders");
       const text = clean(msg.text).slice(0, 200);
       if (!text) return;
-      for (const u of crewOf(key)) send(u, { type: 'order', from: info(ws), text, at: Date.now() });
-      opLog(key, `Captain's orders: ${text}`);
+      const skip = ws.station === 'First Officer' ? ['Captain', 'First Officer'] : ['Captain'];
+      const to = crewOf(key).filter((u) => u !== ws && !skip.includes(u.station) && !u.operator);
+      const o = { id: newId('o-'), ship: key, by: ws.id, from: info(ws), text, at: Date.now(), pending: new Set(to.map((u) => u.id)), acked: new Set() };
+      orders.set(o.id, o);
+      for (const u of to) send(u, { type: 'order', id: o.id, from: o.from, text, at: o.at });
+      orderStatus(o);
+      opLog(key, `${ws.station === 'Captain' ? "Captain's" : "First Officer's"} orders: ${text}`);
+      return;
+    }
+    case 'order-ack': {
+      const o = orders.get(msg.id);
+      if (!o || !o.pending.delete(ws.id)) return;
+      o.acked.add(ws.id);
+      orderStatus(o);
       return;
     }
     case 'reassign': {
@@ -2620,7 +2642,7 @@ wss.on('connection', (ws) => {
     }
 
     if ((msg.type === 'helm' || msg.type === 'autopilot' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return consoleDark(ws) && msg.type !== 'power' ? darkNote(ws) : navCommand(ws, msg);
-    if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : crewCommand(ws, msg);
+    if (['alert', 'order', 'order-ack', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : crewCommand(ws, msg);
     if (['lock', 'fire', 'repair', 'arm'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : combatCommand(ws, msg);
     if (msg.type === 'grid' && ws.id) return gridCommand(ws, msg); // emergency power: works with the console dark
     if (msg.type === 'tractor' && ws.id) return consoleDark(ws) ? darkNote(ws) : tractorCommand(ws, msg);

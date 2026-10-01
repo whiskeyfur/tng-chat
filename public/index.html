@@ -118,7 +118,10 @@
     #alert-state { margin: 0; font-size: 28px; text-transform: uppercase; color: #66cc66; }
     #alert-state[data-level='yellow'] { color: var(--lcars-gold); }
     #alert-state[data-level='red'] { color: var(--lcars-red); animation: lcars-blink 1.2s steps(2) infinite; }
-    [data-command] .ops-input { flex: 1 1 260px; min-width: 0; }
+    [data-command] .ops-input, [data-orders] .ops-input { flex: 1 1 260px; min-width: 0; }
+    [data-orders] { display: flex; flex-direction: column; gap: 12px; }
+    .order-tally { grid-template-columns: 1fr; }
+    .order-tally li { text-transform: none; font-size: 16px; }
     [data-command], [data-security], [data-medical], [data-reassign] { display: flex; flex-direction: column; gap: 12px; }
     .st-patients li { align-items: center; }
     .st-patients .lcars-button { min-height: 32px; font-size: 13px; margin-left: 10px; }
