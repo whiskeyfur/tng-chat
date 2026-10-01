@@ -1269,13 +1269,15 @@ function flow(k) {
   const poolOf = Object.fromEntries(BUSES.map((X) => [X, new Set([X])]));
   if (e.ties.crosslink.length >= 2) { const m = new Set(e.ties.crosslink); for (const y of m) poolOf[y] = m; }
   const pool = (X) => [...poolOf[X]];
-  const busRoom = (node) => pool(node).reduce((n, X) => n + BUS_MAX[X] - buses[X].have, 0);
+  // A damaged bus carries less: its max scales with its condition.
+  const maxOf = (X) => BUS_MAX[X] * Math.max(0, 1 - (c.damage[`bus${X}`] || 0) / 100);
+  const busRoom = (node) => pool(node).reduce((n, X) => n + maxOf(X) - buses[X].have, 0);
   const tapRoom = (node) => pool(node).reduce((n, X) => n + Math.max(0, e.taps[X] - buses[X].tapUsed), 0);
   const take = (node, amt) => {
     let got = 0;
     const bus = buses[node];
     const pull = (s, eps, side = node) => {
-      const room = Math.min(bus ? busRoom(node) - got : Infinity, eps ? BUS_MAX.EPS - viaEps : Infinity, bus && eps ? tapRoom(node) : Infinity);
+      const room = Math.min(bus ? busRoom(node) - got : Infinity, eps ? maxOf('EPS') - viaEps : Infinity, bus && eps ? tapRoom(node) : Infinity);
       const t = Math.min(s.left, amt - got, room, s.share && !eps ? s.share[side] : Infinity);
       if (t <= 0) return;
       s.left -= t; got += t;
@@ -1386,10 +1388,11 @@ function flow(k) {
   // The grid table's footer: per bus (and the EPS), power used, available and the most it carries.
   const epsLeft = srcs.filter((x) => x.ties.includes('EPS')).reduce((m, x) => m + x.left, 0);
   const totals = Object.fromEntries(NODES.map((n) => {
-    if (n === 'EPS') return [n, { used: Math.round(viaEps), available: Math.round(Math.min(BUS_MAX.EPS, viaEps + epsLeft)), max: BUS_MAX.EPS, tied: Math.round(tied.EPS) }];
+    const cond = Math.round(100 - (c.damage[`bus${n}`] || 0));
+    if (n === 'EPS') return [n, { used: Math.round(viaEps), available: Math.round(Math.min(maxOf('EPS'), viaEps + epsLeft)), max: Math.round(maxOf('EPS')), fullMax: BUS_MAX.EPS, condition: cond, tied: Math.round(tied.EPS) }];
     const direct = srcs.filter((x) => pool(n).some((y) => x.ties.includes(y))).reduce((m, x) => m + x.left, 0);
     const have = buses[n].have;
-    return [n, { used: Math.round(have), available: Math.round(Math.min(BUS_MAX[n], have + direct + Math.min(epsLeft, tapRoom(n)))), max: BUS_MAX[n], tied: Math.round(tied[n]), tap: e.taps[n], pool: pool(n).join('') }];
+    return [n, { used: Math.round(have), available: Math.round(Math.min(maxOf(n), have + direct + Math.min(epsLeft, tapRoom(n)))), max: Math.round(maxOf(n)), fullMax: BUS_MAX[n], condition: cond, tied: Math.round(tied[n]), tap: e.taps[n], pool: pool(n).join('') }];
   }));
   const f = {
     cells, totals, buses, consoleOk, demand, delivered, containmentOk, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
@@ -1415,7 +1418,7 @@ function tripBreakers(k) {
     const f = flow(k);
     // A crosslinked pool trips as one: its load against the sum of its maxes.
     const poolOf = (n) => (n === 'EPS' ? ['EPS'] : (f.totals[n].pool || n).split(''));
-    const over = NODES.find((n) => { const p = poolOf(n); return p.reduce((m, x) => m + f.tied[x], 0) > p.reduce((m, x) => m + BUS_MAX[x], 0) && f.trippable.some((t) => p.includes(t.node)); });
+    const over = NODES.find((n) => { const p = poolOf(n); return p.reduce((m, x) => m + f.tied[x], 0) > p.reduce((m, x) => m + f.totals[x].max, 0) && f.trippable.some((t) => p.includes(t.node)); });
     if (!over) return;
     const pick = f.trippable.filter((t) => poolOf(over).includes(t.node));
     const t = pick[Math.floor(Math.random() * pick.length)];
@@ -1424,7 +1427,7 @@ function tripBreakers(k) {
     const name = t.key.startsWith('console:') ? `${t.key.slice(8)} console` : t.key.startsWith('sub:') ? SUBSYSTEMS[t.key.slice(4)].name : SYSTEM_NAMES[t.key.slice(7)] || t.key;
     const p = poolOf(over);
     const where = over === 'EPS' ? 'the EPS' : `Bus ${p.join('+')}`;
-    const load = Math.round(p.reduce((m, x) => m + f.tied[x], 0)), max = p.reduce((m, x) => m + BUS_MAX[x], 0);
+    const load = Math.round(p.reduce((m, x) => m + f.tied[x], 0)), max = p.reduce((m, x) => m + f.totals[x].max, 0);
     opLog(k, `breaker tripped on ${where} (${load} tied, ${max} max): ${name} untied`);
     for (const u of crewOf(k)) if (u.station === 'Engineering' || u.station === 'Captain') send(u, { type: 'notice', text: `Engineering: breaker tripped on ${where} (${load} of ${max}): ${name} untied` });
   }
@@ -1747,9 +1750,9 @@ const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
 const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', lifeSupport: 'life support', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam',
   corePump: "warp core's deuterium pump", injector: 'antimatter injector', portPump: "port impulse drive's deuterium pump", starboardPump: "starboard impulse drive's deuterium pump",
-  rf: 'local RF', radio: 'radio', subspace: 'subspace relay' };
+  rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
 // What a hit can damage: the systems, and the subsystems that fail when badly damaged.
-const DAMAGEABLE = [...SYSTEMS, 'corePump', 'injector', 'portPump', 'starboardPump', 'rf', 'radio', 'subspace'];
+const DAMAGEABLE = [...SYSTEMS, 'corePump', 'injector', 'portPump', 'starboardPump', 'rf', 'radio', 'subspace', 'busA', 'busB', 'busC', 'busEPS'];
 const combat = new Map(); // ship key -> { hull, shield, damage, torpedoes, repair, lock, armed, phaserCharge, torpedoAt, restockAt, hitAt, hitBy, dirty }
 
 function freshCombat(saved) {

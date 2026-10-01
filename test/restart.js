@@ -25,6 +25,7 @@ fs.mkdirSync(path.join(DATA, 'Oldship'), { recursive: true });
 fs.writeFileSync(path.join(DATA, 'Oldship', '.nav.json'), JSON.stringify({
   x: 498.5, y: 117.5, heading: 0, warp: 0, dest: null,
   power: { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100 },
+  combat: { hull: 100, shield: 100, damage: { busB: 50 }, torpedoes: 10 },
   eng: {
     core: 'online', antimatter: 900, deuterium: 1800, docked: 'Starbase 47', battery: { charge: 3000 },
     taps: { A: true, B: false }, crosslink: true, thrusters: { port: false },
@@ -61,6 +62,11 @@ async function look() {
     assert.deepEqual(g.ties.thrustersStarboard, ['EPS'], 'thrusters otherwise tied in');
     assert.deepEqual(g.ties.dock, ['A']);
     step('an older save came through: taps, crosslink, batteries on two buses, EPS ties moved to their bus, thrusters off');
+    // (it's been repairing itself since it signed on)
+    assert.ok(g.totals.B.condition >= 50 && g.totals.B.condition < 70, `Bus B condition ${g.totals.B.condition}`);
+    assert.ok(Math.abs(g.totals.B.max - 3 * g.totals.B.condition) <= 3, 'a damaged bus carries its condition share of its max');
+    assert.equal(g.totals.A.max, 300);
+    step(`a damaged Bus B (saved at 50%, now ${g.totals.B.condition}%) carries ${g.totals.B.max} of its 300`);
 
     await wait(5500); // the relay hands the computer a copy every 5 s
     await stop(r); r = relay(); await wait(4000);

@@ -610,7 +610,12 @@ function renderCombat() {
         el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), ...COLS.map((n) => el('th', { scope: 'col', textContent: NODE_NAMES[n] })))),
         el('tbody', {}, ...rows),
         el('tfoot', {}, el('tr', {}, el('th', { scope: 'row', textContent: 'Used / available / max' }),
-          ...COLS.map((n) => { const t = grid.totals[n]; const td = el('td', { id: `grid-total-${n}`, textContent: `${t.used} / ${t.available} / ${t.max}` }); td.toggleAttribute('data-over', t.tied > t.max); return td; }))));
+          ...COLS.map((n) => {
+            const t = grid.totals[n];
+            const td = el('td', { id: `grid-total-${n}` }, `${t.used} / ${t.available} / ${t.max}`, ...(t.condition < 100 ? [el('small', { className: 'grid-note', textContent: `damaged: ${t.condition}% condition` })] : []));
+            td.toggleAttribute('data-over', t.tied > t.max || t.condition < 100);
+            return td;
+          }))));
     };
     // Power offered to a ship docked with us (they may offer some back: the difference flows).
     const feedControl = () => {
@@ -677,6 +682,9 @@ function renderCombat() {
         ...POWER.map(([k, label]) => row(k, label, c.damage[k] ? `${c.damage[k]}% damaged` : 'Operational',
           own.power[k] < own.allocated[k] ? `gets ${own.power[k]}% of ${own.allocated[k]}% set` : `${own.power[k]}%`)),
         // Subsystems fail outright when badly damaged (50% or more).
+        // The buses: a damaged bus carries less (its max scales with its condition).
+        ...['A', 'B', 'C', 'EPS'].map((X) => row(`bus${X}`, X === 'EPS' ? 'EPS grid' : `Bus ${X}`, c.damage[`bus${X}`] ? `${c.damage[`bus${X}`]}% damaged` : 'Operational',
+          `carries ${grid.totals[X].max} of ${grid.totals[X].fullMax}`)),
         ...Object.entries(grid.subsystems).filter(([x]) => x in c.damage).map(([x, v]) => row(x, `${v.parent === 'Communications' ? '' : v.parent === 'core' ? 'Warp core ' : v.parent === 'impulsePort' ? 'Port drive ' : 'Starboard drive '}${v.name}`,
           c.damage[x] ? `${c.damage[x]}% damaged` : 'Operational', c.damage[x] >= 50 ? 'FAILED: repair below 50%' : ''))),
       el('p', { className: 'ops-notice', id: 'damage-status', textContent: status }),
