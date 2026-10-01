@@ -38,6 +38,7 @@
           ({ users: roster, ships, incoming, outgoing, links, network, linkIncoming, linkOutgoing } = msg);
           graph = msg.graph || graph;
           broadcasts = msg.broadcasts || [];
+          remoteBlock = !!msg.remoteBlock;
           render();
           return true;
         case 'op-ok':
@@ -58,6 +59,17 @@
         }
       }
       return false;
+    }
+
+    // Remote control of our stations by other vessels: allowed or blocked.
+    let remoteBlock = false;
+    const blockBtn = document.getElementById('remote-block');
+    if (blockBtn) blockBtn.onclick = () => send({ type: 'remote-block', on: !remoteBlock });
+    function renderRemoteBlock() {
+      if (!blockBtn) return;
+      blockBtn.textContent = remoteBlock ? 'Remote control: blocked' : 'Remote control: allowed';
+      blockBtn.setAttribute('aria-pressed', String(remoteBlock));
+      blockBtn.classList.toggle('lcars-button--alert', remoteBlock);
     }
 
     // Note arrivals and departures in the comm log (not on the first roster).
@@ -137,6 +149,7 @@
     }
 
     function render() {
+      renderRemoteBlock();
       renderMap();
 
       // All hands: who's on air, and the speaker picker (captain first).

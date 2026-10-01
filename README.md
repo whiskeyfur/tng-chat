@@ -185,10 +185,11 @@ node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-
 - Anyone aboard can upload and download; ops can **delete** from their own ship's library. File names are cleaned up (no folders, control characters or leading dots; a taken name gets " (2)"). Uploads and downloads go over HTTP with a per-session token handed out at sign-in. With `OPERATOR_KEY` set, ship's computers need `--key` too.
 - To bring in files from an older version that kept them in the relay's `data/<ship>/`, point a computer at that folder: `node tools/shipcore.js --data ./data <ship>`.
 
-## Crewless ships: forced data links and remote control
+## Data links to crewless ships, and remote control
 
 - **Forcing a data link:** a ship with nobody aboard (only its ship's computer) has no one to accept or refuse a data link, so ops' link request opens it at once ("forced"). Crewless ships are listed for ops to link to.
-- **Remote control:** linked to a crewless ship, the Station screen lists its stations under "By data link (no crew aboard)". Tap one to take that station by remote control: your console moves aboard as a remote operator (marked as such), with every system there, its Helm, Engineering and so on. **Return to the …** brings you back to your own station; if the data link closes, remote control ends and you're returned automatically. A ship with real crew aboard can't be taken over, and ops isn't run remotely.
+- **Remote control:** like controls like. Over a working data link, a console can run the **same station** aboard another vessel (a ship or a starbase) while that station there is unmanned, whoever else is aboard. Each station screen shows vessel buttons at the top right: one per vessel this console can run, and our own ship at the far right. Tap a vessel and the console shows and controls that vessel's station (a yellow bar says so); tap our own ship to come back. It snaps back by itself, with a notice, if the link drops, someone takes that station there, or that vessel's ops block it.
+- **Blocking it:** ops' Status screen has a **Remote control: allowed / blocked** toggle for their own vessel (off by default). With nobody at ops, nobody can block it.
 
 ## Ops console (Operations station)
 

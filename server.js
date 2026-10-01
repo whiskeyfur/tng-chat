@@ -97,7 +97,7 @@ const clean = (s) => (typeof s === 'string' ? s.trim().replace(/\s+/g, ' ') : ''
 const shipKey = (ship) => ship.toLowerCase();
 const userId = (name, ship) => `${name.toLowerCase()}@${shipKey(ship)}`;
 const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station,
-  ...(ws.sickbay ? { sickbay: true } : {}), ...(ws.confined ? { confined: true } : {}), ...(ws.remoteFrom ? { remoteFrom: shipName(ws.remoteFrom) } : {}) });
+  ...(ws.sickbay ? { sickbay: true } : {}), ...(ws.confined ? { confined: true } : {}) });
 const crewOf = (key) => [...users.values()].filter((u) => u.shipKey === key);
 const opsOf = (key) => [...operators].filter((op) => op.shipKey === key);
 const shipName = (key) => ships.get(key) || key;
@@ -161,7 +161,7 @@ function broadcastOps(key) {
     .sort((a, b) => a.name.localeCompare(b.name));
   // Ships in range: ops on duty, within subspace (comms) range.
   // (crewless ships too: a data link can be forced onto them)
-  const crewless = [...cores.keys()].filter((k2) => !isBase(k2) && !crewOf(k2).some((u) => !u.remoteFrom));
+  const crewless = [...cores.keys()].filter((k2) => !isBase(k2) && !crewOf(k2).length);
   const otherShips = [...new Set([...[...operators].map((op) => op.shipKey), ...BASE_KEYS, ...crewless])]
     .filter((k) => k !== key && commsOk(key, k)).map(shipName).sort();
   const describe = (h) => ({ id: h.id, fromShip: shipName(h.fromShip), toShip: shipName(h.toShip), caller: peerInfo(h.caller) });
@@ -179,6 +179,7 @@ function broadcastOps(key) {
     linkIncoming: requests.filter((r) => r.to === key).map(({ id, fromShip }) => ({ id, fromShip })),
     linkOutgoing: requests.filter((r) => r.from === key).map(({ id, toShip }) => ({ id, toShip })),
     graph: networkGraph(),
+    remoteBlock: !!engOf(key).remoteBlock,
     broadcasts: [...broadcasts.values()].filter((b) => b.ships.has(key) || users.get(b.speaker)?.shipKey === key)
       .map((b) => ({ id: b.bid, speaker: peerInfo(b.speaker), label: b.label, since: b.since })),
   };
@@ -369,7 +370,7 @@ function operatorMessage(op, msg) {
       const target = shipKey(clean(msg.ship));
       if (target === op.shipKey) return fail('that is this ship');
       // Nobody aboard at all (only its computer): the link is forced, nobody's there to refuse it.
-      const crewless = present(target) && !isBase(target) && !crewOf(target).some((u) => !u.remoteFrom);
+      const crewless = present(target) && !isBase(target) && !crewOf(target).length;
       if (!opsOf(target).length && !isBase(target) && !crewless) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
       if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
       if (!commsUp(op.shipKey, 'subspace')) return fail('our subspace relay has no power: data links need it');
@@ -415,6 +416,15 @@ function operatorMessage(op, msg) {
       opLog(other, msg.type === 'link-decline' ? `the ${shipName(op.shipKey)} declined the data link` : `the ${shipName(op.shipKey)} withdrew its data link request`);
       broadcastAllOps();
       return ok(msg.type === 'link-decline' ? `declined the data link from the ${shipName(other)}` : `withdrew the data link request to the ${shipName(other)}`);
+    }
+    case 'remote-block': {
+      // Ops can refuse remote control of this vessel's stations from other ships.
+      engOf(op.shipKey).remoteBlock = !!msg.on;
+      engOf(op.shipKey).dirty = true;
+      opLog(op.shipKey, `${op.name}: remote control by other vessels ${msg.on ? 'blocked' : 'allowed'}`);
+      scheduleNav();
+      broadcastOps(op.shipKey);
+      return ok(`remote control by other vessels ${msg.on ? 'blocked' : 'allowed'}`);
     }
     case 'link-close': {
       const other = shipKey(clean(msg.ship));
@@ -782,8 +792,6 @@ function navMessage(key) {
     own: own ? { name: shipName(key), ...own, power: powerOf(key), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
       autopilot: autopilots.get(key)?.target || null,
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
-      // Crewless ships on a data link with us: their stations can be taken by remote control.
-      remoteTargets: linkedTo(key).filter((t) => present(t) && !isBase(t) && !crewOf(t).some((u) => !u.remoteFrom)).map(shipName),
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
     bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
     ships: seen.map((k) => ({ name: shipName(k), ...navState.get(k), ops: opsOf(k).length > 0, shields: shields.has(k), distance: k === key ? 0 : distance(key, k) })),
@@ -868,10 +876,12 @@ function scheduleNav() {
     const keys = [...new Set([...cores.keys(), ...BASE_KEYS])].sort();
     const sig = keys.flatMap((a, i) => keys.slice(i + 1).filter((b) => commsOk(a, b)).map((b) => `${a}|${b}`)).join(',');
     if (sig !== lastRangeSig) { lastRangeSig = sig; broadcastAllOps(); }
+    checkRemotes();
     const byShip = new Map();
     for (const u of users.values()) {
-      if (!byShip.has(u.shipKey)) byShip.set(u.shipKey, navMessage(u.shipKey));
-      send(u, byShip.get(u.shipKey));
+      const k = u.controlling || u.shipKey;
+      if (!byShip.has(k)) byShip.set(k, navMessage(k));
+      send(u, { ...byShip.get(k), remote: { vessels: remoteVessels(u).map(shipName), controlling: u.controlling ? shipName(u.controlling) : null, home: u.ship } });
     }
   }, 500);
 }
@@ -1358,6 +1368,7 @@ function freshEng(saved, { cold = false } = {}) {
     taps: Object.fromEntries(BUSES.map((X) => { const t = s.taps?.[X]; return [X, typeof t === 'number' ? Math.max(0, Math.min(BUS_MAX[X], t)) : t === false ? 0 : t === true || X !== 'C' ? BUS_MAX[X] : 0]; })), ties,
 
     transfer: null, feed: 0, fed: 0, // power offered to a ship docked with us, and what actually went
+    remoteBlock: !!s.remoteBlock, // ops refuse remote control by other vessels
     forcefields: Array.isArray(s.forcefields) ? s.forcefields.filter((st) => STATIONS.includes(st)) : [], // stations Security has isolated
     // Docked with another ship: kept across restarts (it's checked once both are back).
     dockedShip: typeof s.dockedShip === 'string' ? shipKey(s.dockedShip) : null, partnerGoneAt: typeof s.dockedShip === 'string' ? Date.now() : 0,
@@ -1371,7 +1382,7 @@ const savedEng = (k) => {
   const e = engOf(k);
   return {
     core: e.core === 'starting' ? 'offline' : e.core, drives: Object.fromEntries(DRIVES.map((d) => [d, e.drives[d].state === 'running' ? 'running' : 'off'])),
-    antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, battery: { charge: Math.round(e.battery.charge) }, docked: e.docked,
+    antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, battery: { charge: Math.round(e.battery.charge) }, docked: e.docked,
     ...(e.dockedShip ? { dockedShip: shipName(e.dockedShip) } : {}),
   };
 };
@@ -2078,15 +2089,6 @@ function combatCommand(ws, msg) {
 let combatTick = 0;
 setInterval(() => {
   combatTick++;
-  // Remote controllers whose data link has gone come back to their own ship.
-  for (const u of [...users.values()]) {
-    if (!u.remoteFrom || links.has(linkKey(u.shipKey, u.remoteFrom))) continue;
-    const home = u.remoteFrom, st = u.remoteStation || 'Crew';
-    u.remoteFrom = null;
-    if (users.has(userId(u.name, shipName(home)))) continue;
-    send(u, { type: 'notice', text: `Data link lost: remote control of the ${u.ship} ended` });
-    beam(u, home, st, 'returned');
-  }
   const now = Date.now();
   let changed = false;
   for (const k of [...cores.keys()]) {
@@ -2203,6 +2205,110 @@ setInterval(() => {
   if (changed) scheduleNav();
 }, 1000).unref();
 
+
+// Station commands, from a console (or a console remote-controlling another vessel).
+function stationCommand(ws, msg) {
+  const t = msg.type;
+  const gate = (fn) => { if (consoleDark(ws)) darkNote(ws); else fn(ws, msg); return true; };
+  if (t === 'shields') return shieldsCommand(ws, msg), true;
+  if (t === 'beam') return beamCommand(ws, msg), true;
+  if (['helm', 'autopilot', 'scan', 'plot-course'].includes(t)) return gate(navCommand);
+  if (t === 'power') return navCommand(ws, msg), true;
+  if (['alert', 'order', 'order-ack', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(t)) return gate(crewCommand);
+  if (['lock', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
+  if (t === 'grid') return gridCommand(ws, msg), true; // emergency power: works with the console dark
+  if (t === 'tractor') return gate(tractorCommand);
+  if (t === 'dock') return gate(dockCommand);
+  if (t === 'self-destruct') return gate(selfDestructCommand);
+  return false;
+}
+
+// Remote control. Like controls like: a console can run the same station
+// aboard another vessel over a working data link while that station there is
+// unmanned (whoever else is aboard), unless that vessel's ops have blocked it.
+function remoteOk(ws, t) {
+  if (!t || t === ws.shipKey || !present(t) || !links.has(linkKey(ws.shipKey, t))) return false;
+  if (ws.operator || ws.station === 'Crew') return false;
+  if (crewOf(t).some((u) => u.station === ws.station)) return false; // manned there
+  if ([...users.values()].some((u) => u !== ws && u.controlling === t && u.station === ws.station)) return false; // someone else has it
+  return !(engOf(t).remoteBlock && opsOf(t).length);
+}
+const remoteVessels = (ws) => linkedTo(ws.shipKey).filter((t) => remoteOk(ws, t) || ws.controlling === t);
+// A stand-in for the console, aboard the vessel it controls.
+function actorFor(ws) {
+  const a = Object.create(ws);
+  a.shipKey = ws.controlling;
+  a.ship = shipName(ws.controlling);
+  a.send = (data) => ws.send(data);
+  return a;
+}
+function controlCommand(ws, msg) {
+  const t = msg.ship ? shipKey(clean(msg.ship)) : null;
+  if (!t || t === ws.shipKey) {
+    if (ws.controlling) { opLog(ws.controlling, `${ws.name} (${ws.ship}) released remote control of ${ws.station}`); send(ws, { type: 'notice', text: `Remote control of the ${shipName(ws.controlling)} ended` }); }
+    ws.controlling = null;
+  } else {
+    if (!remoteOk(ws, t)) return send(ws, { type: 'notice', text: `Remote control: can't run the ${shipName(t)}'s ${ws.station} (needs a data link, the station unmanned there, and its ops not blocking)` });
+    ws.controlling = t;
+    opLog(t, `${ws.name} of the ${ws.ship} took remote control of ${ws.station} over the data link`);
+    send(ws, { type: 'notice', text: `Remote control: running the ${shipName(t)}'s ${ws.station}` });
+  }
+  scheduleNav();
+}
+// Consoles whose remote control no longer holds go back to their own ship.
+function checkRemotes() {
+  for (const u of users.values()) {
+    if (!u.controlling || remoteOk(u, u.controlling)) continue;
+    const t = u.controlling;
+    const why = !links.has(linkKey(u.shipKey, t)) ? 'the data link dropped' : crewOf(t).some((x) => x.station === u.station) ? `someone took ${u.station} there` : engOf(t).remoteBlock ? 'its ops blocked remote control' : 'it is no longer available';
+    u.controlling = null;
+    send(u, { type: 'notice', text: `Remote control of the ${shipName(t)} ended: ${why}` });
+  }
+}
+
+// Tactical raises or lowers the ship's shields.
+function shieldsCommand(ws, msg) {
+  if (ws.station !== 'Tactical') return send(ws, { type: 'notice', text: 'Only Tactical can raise or lower shields' });
+  if (consoleDark(ws)) return darkNote(ws);
+  if (msg.up && powerOf(ws.shipKey).shields < MIN_SHIELD_POWER) return send(ws, { type: 'notice', text: `Tactical: not enough power to raise shields (needs ${MIN_SHIELD_POWER}%; ask Engineering)` });
+  if (msg.up && combatOf(ws.shipKey).shield < MIN_SHIELD_STRENGTH) return send(ws, { type: 'notice', text: `Tactical: the shield generators are recharging (${Math.floor(combatOf(ws.shipKey).shield)}%; they hold from ${MIN_SHIELD_STRENGTH}%)` });
+  if (msg.up) shields.add(ws.shipKey); else shields.delete(ws.shipKey);
+  opLog(ws.shipKey, `${ws.name}: shields ${msg.up ? 'up' : 'down'}`);
+  broadcastShips();
+  return;
+}
+
+// The transporter beams someone aboard this ship to another ship (or within it).
+function beamCommand(ws, msg) {
+  const fail = (text) => send(ws, { type: 'notice', text: `Transporter: ${text}` });
+  if (ws.station !== 'Transporter') return fail('only the transporter room can beam people');
+  if (consoleDark(ws)) return fail('console offline, no power on its bus');
+  const u = typeof msg.who === 'string' && users.get(msg.who);
+  const toKey = shipKey(clean(msg.ship));
+  if (!u || u.shipKey !== ws.shipKey) return fail('that person is not aboard');
+  if (u.operator) return fail('the ops station cannot be beamed');
+  const station = msg.station == null ? null : STATIONS.includes(msg.station) && msg.station !== 'Operations' ? msg.station : undefined;
+  if (station === undefined) return fail('no such station to beam to');
+  if (toKey === ws.shipKey) {
+    // Site to site, within the ship: inside our own shields and lockout.
+    if (!station || station === u.station) return fail(`${u.name} is already at ${u.station}: pick another station`);
+    if (powerOf(ws.shipKey).transporter <= 0) return fail('no power to the transporter: ask Engineering');
+    if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to ${station}` });
+    beam(u, toKey, station);
+    if (u !== ws) send(ws, { type: 'notice', text: `Transporter: ${u.name} beamed to ${station}` });
+    return;
+  }
+  if (powerOf(ws.shipKey).transporter <= 0) return fail('no power to the transporter: ask Engineering');
+  if (toKey !== ws.shipKey && present(toKey) && !transporterOk(ws.shipKey, toKey)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(ws.shipKey, toKey)}; get within ${Math.round(rangesOf(ws.shipKey).transporter)})`);
+  if (!present(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
+  for (const k of [ws.shipKey, toKey]) if (shields.has(k)) return fail(`cannot beam through the shields of the ${shipName(k)}`);
+  if (lockoutOf(toKey)) return fail(`the ${shipName(toKey)} has a transporter lockout: Security's force field is up`);
+  if (users.has(userId(u.name, shipName(toKey)))) return fail(`someone called ${u.name} is already aboard the ${shipName(toKey)}`);
+  if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to the ${shipName(toKey)}` });
+  beam(u, toKey, station);
+  if (u !== ws) send(ws, { type: 'notice', text: `Transporter: ${u.name} beamed to the ${shipName(toKey)}${station ? `'s ${station}` : ''}` });
+  return;
+}
 
 // POST   /api/library            upload to your own ship (X-Token, X-Filename)
 // GET    /api/library/<ship>/<f> download, from any ship on your data network
@@ -2512,30 +2618,9 @@ wss.on('connection', (ws) => {
       // Force fields: nobody walks out of an isolated station, or into one (aboard here or across a dock).
       const target = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey;
       if (!ws.operator && sealed(ws.shipKey, ws.station)) return send(ws, { type: 'station-failed', reason: `a Security force field isolates ${ws.station}: nobody walks out (the transporter can beam you)` });
-      if (msg.station !== OPS_STATION && present(target) && sealed(target, msg.station) && !(msg.remote)) return send(ws, { type: 'station-failed', reason: `a Security force field isolates ${msg.station}${target !== ws.shipKey ? ` aboard the ${shipName(target)}` : ''}: nobody walks in` });
+      if (msg.station !== OPS_STATION && present(target) && sealed(target, msg.station)) return send(ws, { type: 'station-failed', reason: `a Security force field isolates ${msg.station}${target !== ws.shipKey ? ` aboard the ${shipName(target)}` : ''}: nobody walks in` });
       // Across the dock: walk over to a station aboard a vessel docked with this one.
       const there = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey;
-      // By data link: take a station aboard a crewless ship by remote control
-      // (or return home from one).
-      if (there !== ws.shipKey && (msg.remote || there === ws.remoteFrom)) {
-        const home = there === ws.remoteFrom;
-        if (!home) {
-          if (!linkedTo(ws.shipKey).includes(there)) return send(ws, { type: 'station-failed', reason: `no data link with the ${clean(msg.ship)}` });
-          if (crewOf(there).some((u) => !u.remoteFrom)) return send(ws, { type: 'station-failed', reason: `the ${shipName(there)} has crew aboard: remote control is only for a crewless ship` });
-          if (msg.station === OPS_STATION) return send(ws, { type: 'station-failed', reason: 'ops can\'t be run by remote control' });
-        }
-        if (users.has(userId(ws.name, shipName(there)))) return send(ws, { type: 'station-failed', reason: `someone called ${ws.name} is already aboard the ${shipName(there)}` });
-        if (ws.operator) leaveOps(ws);
-        const from = ws.shipKey;
-        if (home) { const st = ws.remoteStation || 'Crew'; ws.remoteFrom = null; beam(ws, there, msg.station === OPS_STATION ? st : msg.station || st, 'returned'); return; }
-        ws.remoteStation = ws.station;
-        opLog(from, `${ws.name} took remote control of the ${shipName(there)} (${msg.station}) over the data link`);
-        beam(ws, there, msg.station, 'remote');
-        ws.remoteFrom = from;
-        send(ws, { type: 'registered', ...info(ws), token: ws.token, remoteFrom: shipName(from) });
-        broadcastCrew(there);
-        return;
-      }
       if (there !== ws.shipKey) {
         if (!dockedWith(ws.shipKey).includes(there)) return send(ws, { type: 'station-failed', reason: `not docked with the ${clean(msg.ship)}` });
         if (msg.station === OPS_STATION && OPERATOR_KEY && msg.key !== OPERATOR_KEY) return send(ws, { type: 'station-failed', reason: 'wrong operator key' });
@@ -2561,50 +2646,6 @@ wss.on('connection', (ws) => {
       broadcastCrew(ws.shipKey);
       broadcastTraffic();
       opLog(ws.shipKey, `${ws.name} moved from ${was} to ${ws.station}`);
-      return;
-    }
-
-    // Tactical raises or lowers the ship's shields.
-    if (msg.type === 'shields' && ws.id) {
-      if (ws.station !== 'Tactical') return send(ws, { type: 'notice', text: 'Only Tactical can raise or lower shields' });
-      if (consoleDark(ws)) return darkNote(ws);
-      if (msg.up && powerOf(ws.shipKey).shields < MIN_SHIELD_POWER) return send(ws, { type: 'notice', text: `Tactical: not enough power to raise shields (needs ${MIN_SHIELD_POWER}%; ask Engineering)` });
-      if (msg.up && combatOf(ws.shipKey).shield < MIN_SHIELD_STRENGTH) return send(ws, { type: 'notice', text: `Tactical: the shield generators are recharging (${Math.floor(combatOf(ws.shipKey).shield)}%; they hold from ${MIN_SHIELD_STRENGTH}%)` });
-      if (msg.up) shields.add(ws.shipKey); else shields.delete(ws.shipKey);
-      opLog(ws.shipKey, `${ws.name}: shields ${msg.up ? 'up' : 'down'}`);
-      broadcastShips();
-      return;
-    }
-
-    // The transporter beams someone aboard this ship to another ship.
-    if (msg.type === 'beam' && ws.id) {
-      const fail = (text) => send(ws, { type: 'notice', text: `Transporter: ${text}` });
-      if (ws.station !== 'Transporter') return fail('only the transporter room can beam people');
-      if (consoleDark(ws)) return fail('console offline, no power on its bus');
-      const u = typeof msg.who === 'string' && users.get(msg.who);
-      const toKey = shipKey(clean(msg.ship));
-      if (!u || u.shipKey !== ws.shipKey) return fail('that person is not aboard');
-      if (u.operator) return fail('the ops station cannot be beamed');
-      const station = msg.station == null ? null : STATIONS.includes(msg.station) && msg.station !== 'Operations' ? msg.station : undefined;
-      if (station === undefined) return fail('no such station to beam to');
-      if (toKey === ws.shipKey) {
-        // Site to site, within the ship: inside our own shields and lockout.
-        if (!station || station === u.station) return fail(`${u.name} is already at ${u.station}: pick another station`);
-        if (powerOf(ws.shipKey).transporter <= 0) return fail('no power to the transporter: ask Engineering');
-        if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to ${station}` });
-        beam(u, toKey, station);
-        if (u !== ws) send(ws, { type: 'notice', text: `Transporter: ${u.name} beamed to ${station}` });
-        return;
-      }
-      if (powerOf(ws.shipKey).transporter <= 0) return fail('no power to the transporter: ask Engineering');
-      if (toKey !== ws.shipKey && present(toKey) && !transporterOk(ws.shipKey, toKey)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(ws.shipKey, toKey)}; get within ${Math.round(rangesOf(ws.shipKey).transporter)})`);
-      if (!present(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
-      for (const k of [ws.shipKey, toKey]) if (shields.has(k)) return fail(`cannot beam through the shields of the ${shipName(k)}`);
-      if (lockoutOf(toKey)) return fail(`the ${shipName(toKey)} has a transporter lockout: Security's force field is up`);
-      if (users.has(userId(u.name, shipName(toKey)))) return fail(`someone called ${u.name} is already aboard the ${shipName(toKey)}`);
-      if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to the ${shipName(toKey)}` });
-      beam(u, toKey, station);
-      if (u !== ws) send(ws, { type: 'notice', text: `Transporter: ${u.name} beamed to the ${shipName(toKey)}${station ? `'s ${station}` : ''}` });
       return;
     }
 
@@ -2641,13 +2682,10 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if ((msg.type === 'helm' || msg.type === 'autopilot' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return consoleDark(ws) && msg.type !== 'power' ? darkNote(ws) : navCommand(ws, msg);
-    if (['alert', 'order', 'order-ack', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : crewCommand(ws, msg);
-    if (['lock', 'fire', 'repair', 'arm'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : combatCommand(ws, msg);
-    if (msg.type === 'grid' && ws.id) return gridCommand(ws, msg); // emergency power: works with the console dark
-    if (msg.type === 'tractor' && ws.id) return consoleDark(ws) ? darkNote(ws) : tractorCommand(ws, msg);
-    if (msg.type === 'dock' && ws.id) return consoleDark(ws) ? darkNote(ws) : dockCommand(ws, msg);
-    if (msg.type === 'self-destruct' && ws.id) return consoleDark(ws) ? darkNote(ws) : selfDestructCommand(ws, msg);
+    // Remote control: this console runs the same station aboard another vessel.
+    if (msg.type === 'control' && ws.id) return controlCommand(ws, msg);
+    // Station commands act on the vessel this console is controlling (else its own ship).
+    if (ws.id && stationCommand(ws.controlling && msg.type !== 'order-ack' ? actorFor(ws) : ws, msg)) return;
 
     // Text messages, no call needed: to one person or several, anyone the
     // sender could call (aboard, or on the data network). Local RF carries

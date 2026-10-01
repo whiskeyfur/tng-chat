@@ -1308,28 +1308,30 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.click('#link-form button');
     await op.waitForFunction(() => window.__operator.network.includes('Reliant'));
     await op.waitForSelector('#ops-log li:has-text("forced")', { state: 'attached' });
-    const data = await crewWs('data', 'Enterprise', 'Crew');
-    await waitFor(() => data.nav()?.own?.remoteTargets?.includes('Reliant'));
-    data.send({ type: 'change-station', station: 'Helm', ship: 'Reliant', remote: true });
-    await waitFor(() => data.msgs.some((m) => m.type === 'registered' && m.ship === 'Reliant' && m.station === 'Helm' && m.remoteFrom === 'Enterprise'));
-    data.send({ type: 'helm', heading: 90, warp: 0.25 });
-    await waitFor(() => data.nav()?.own?.name === 'Reliant' && data.nav().own.warp > 0);
+    // Remote control: the Enterprise's Helm runs the Reliant's (unmanned) Helm
+    // from its own console, over the data link.
+    const data = await crewWs('data', 'Enterprise', 'Helm');
+    await waitFor(() => data.nav()?.remote?.vessels?.includes('Reliant'));
+    data.send({ type: 'control', ship: 'Reliant' });
+    await waitFor(() => data.nav()?.remote?.controlling === 'Reliant' && data.nav().own?.name === 'Reliant');
     // Autopilot follow: the Reliant tails the Enterprise at 25 units; then matches it.
     data.send({ type: 'autopilot', target: 'Enterprise', mode: 'follow', range: 25, warp: 1 });
     await waitFor(() => { const n = data.nav(); const e = n?.ships.find((x) => x.name === 'Enterprise'); return n?.own?.autopilotMode?.mode === 'follow' && e && e.distance > 20 && e.distance < 32; }, 30000);
     data.send({ type: 'autopilot', target: 'Enterprise', mode: 'match' });
     await waitFor(() => data.nav()?.own?.autopilotMode?.mode === 'match' && data.nav().own.warp === 0); // the Enterprise is stopped
-    step('autopilot: the Reliant followed the Enterprise at 25 units, then matched its heading and speed');
+    step('autopilot (run remotely): the Reliant followed the Enterprise at 25 units, then matched its heading and speed');
     data.send({ type: 'autopilot', target: null });
-    data.send({ type: 'change-station', station: 'Crew', ship: 'Enterprise' });
-    await waitFor(() => data.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && !m.remoteFrom));
-    step('the Enterprise forced a data link onto the crewless Reliant; Data took its Helm by remote control, flew it, and came back');
-    data.send({ type: 'change-station', station: 'Helm', ship: 'Reliant', remote: true });
-    await waitFor(() => data.msgs.filter((m) => m.type === 'registered' && m.ship === 'Reliant').length >= 2);
+    data.send({ type: 'control', ship: null });
+    await waitFor(() => !data.nav()?.remote?.controlling && data.nav().own?.name === 'Enterprise');
+    step("the Enterprise forced a data link onto the crewless Reliant; its Helm console ran the Reliant's Helm by remote control, then switched back");
+    // The link closes: remote control snaps back.
+    data.send({ type: 'control', ship: 'Reliant' });
+    await waitFor(() => data.nav()?.remote?.controlling === 'Reliant');
+    await screen(op, 'link');
     await op.click('#links li:has-text("Reliant") button');
-    await waitFor(() => data.msgs.some((m) => m.type === 'notice' && /remote control of the Reliant ended/.test(m.text)));
-    await waitFor(() => [...data.msgs].reverse().find((m) => m.type === 'registered')?.ship === 'Enterprise');
-    step("when the data link closed, remote control ended and Data was back aboard the Enterprise");
+    await waitFor(() => data.msgs.some((m) => m.type === 'notice' && /Remote control of the Reliant ended: the data link dropped/.test(m.text)));
+    await waitFor(() => !data.nav()?.remote?.controlling);
+    step('when the data link closed, remote control snapped back to the Enterprise');
     data.close();
     await stopComputer(reliantCore);
 

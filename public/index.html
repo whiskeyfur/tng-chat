@@ -148,6 +148,10 @@
     .comms-compose #msg-text { flex: 1 1 220px; min-width: 0; }
     .comms-msg-pick[aria-pressed='true'] { outline: 3px solid #fff; outline-offset: 2px; }
     .comms-reply { min-height: 26px; font-size: 12px; }
+    /* Remote control: vessel buttons, top right of the station screens */
+    .vessel-bar { position: absolute; top: 4px; right: 8px; z-index: 6; display: flex; gap: 6px; }
+    .vessel-bar[hidden] { display: none; }
+    .vessel-bar .tr-tap { min-height: 28px; font-size: 12px; }
     /* A console without power */
     .lcars-content { position: relative; }
     #console-dark { position: absolute; inset: 0; z-index: 5; background: rgba(0, 0, 0, 0.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-transform: uppercase; }
@@ -280,6 +284,7 @@
 
       <div id="home" hidden style="display: contents">
         <div id="station-view" style="display: contents"></div>
+        <div id="vessel-bar" class="vessel-bar" role="group" aria-label="vessel this console runs" hidden></div>
         <div id="console-dark" hidden><p>Console offline</p><small>No power on this console's bus: ask Engineering. Comms still work.</small></div>
         <div id="ops-view" style="display: contents" hidden>
         <div class="screen" data-screen="status" hidden>
@@ -292,6 +297,10 @@
                 <div class="lcars-readout"><span class="lcars-readout__label">Standing by</span><span class="lcars-readout__value" id="count-idle">0</span></div>
                 <div class="lcars-readout"><span class="lcars-readout__label">Ships in range</span><span class="lcars-readout__value" id="count-ships">0</span></div>
                 <div class="lcars-readout"><span class="lcars-readout__label">Shields</span><span class="lcars-readout__value" id="shield-state">Down</span></div>
+              </div>
+              <div class="ops-form">
+                <button type="button" class="lcars-button lcars-button--pill" id="remote-block" aria-pressed="false">Remote control: allowed</button>
+                <span class="ops-hint">Other vessels on a data link may run our unmanned stations; block it here.</span>
               </div>
               <p id="status" role="status"></p>
             </div>
