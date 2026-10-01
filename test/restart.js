@@ -54,7 +54,7 @@ async function look() {
     assert.equal(g.docked, 'Starbase 47');
     assert.deepEqual(g.taps, { A: 300, B: 0, C: 0 });
     assert.deepEqual(g.ties.crosslink, ['A', 'B']);
-    assert.deepEqual(g.ties.battery, ['A', 'B'], 'batteries may share two buses');
+    assert.ok(['A', 'B', 'C'].every((n) => g.stores[n].level >= 90 && g.stores[n].breaker), `the old battery shared across Battery A, B and C, in service (${JSON.stringify(g.stores)})`);
     assert.deepEqual(g.ties.containment, ['A'], 'containment no longer takes the EPS');
     assert.deepEqual(g.ties['system:transporter'], ['B'], 'the transporter no longer takes the EPS');
     assert.deepEqual(g.ties['console:Helm'], ['A', 'B'], 'a console may share two buses');

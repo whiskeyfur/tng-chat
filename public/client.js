@@ -734,7 +734,7 @@ function renderCombat() {
     // A row: label (with a note and maybe controls), then a cell per node:
     // the tie checkbox (only where this row may tie) and the power through it,
     // + for supply, − for draw.
-    const SOURCE_ROWS = new Set(['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'core', 'battery']);
+    const SOURCE_ROWS = new Set(['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'core', 'stores']);
     const ties = (key, label, cellKey = key, { level = 0, note = '', controls = [], sign } = {}) => {
       const th = el('th', { scope: 'row' }, el('span', { textContent: label }), ...controls, ...(note ? [el('small', { className: 'grid-note', textContent: note })] : []));
       if (level) th.className = `grid-indent grid-indent--${level}`;
@@ -816,7 +816,25 @@ function renderCombat() {
       ]),
       ties('solar', 'Solar', 'solar', { level: 1 }),
     ];
-    const batteryRows = () => [ties('battery', `Batteries ${grid.battery.charge}%`, 'battery', { level: 1, note: grid.battery.charging ? 'charging' : grid.battery.supplying ? 'supplying' : '' })];
+    // The stores, one per column under the headings: each bus's battery and
+    // the EPS manifold's pressure, how full, and charging (−) or covering a shortfall (+).
+    const storesRow = () => {
+      const tr = el('tr', { id: 'grid-stores', className: 'grid-stores' }, el('th', { scope: 'row', textContent: 'Batteries · EPS pressure' }));
+      for (const n of COLS) {
+        const st = grid.stores?.[n];
+        if (!st) { tr.append(el('td', { className: 'grid-na' })); continue; }
+        const flow = st.supplying ? `+${st.supplying}` : st.charging ? `−${st.charging}` : '';
+        // A battery's main breaker: a tap to put it in or out of service.
+        const brk = st.breaker == null ? [] : [(() => {
+          const box = el('input', { type: 'checkbox', checked: st.breaker, ariaLabel: `Battery ${n} main breaker`, id: `breaker-${n}` });
+          box.onchange = () => send({ type: 'grid', breaker: { bus: n, on: box.checked } });
+          return box;
+        })()];
+        tr.append(el('td', {}, ...brk, el('span', { className: 'grid-store-level', textContent: `${n === 'EPS' ? 'Pressure' : 'Battery'} ${st.level}%` }), el('span', { className: `grid-flow${st.supplying ? ' grid-flow--in' : ''}`, textContent: flow })));
+      }
+      tr.querySelectorAll('td').forEach((td) => td.toggleAttribute('data-low', /\b([0-9]|1[0-9]|2[0-4])%/.test(td.textContent)));
+      return tr;
+    };
     const table = () => {
       const SYS = { ...Object.fromEntries(POWER), tractor: 'Tractor beam' };
       const crewAt = (st) => comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st).length;
@@ -849,7 +867,7 @@ function renderCombat() {
       const rows = [];
       if (gridOrder === 'operations') {
         // Management layout: power sources, the crosslink, batteries, then the consoles.
-        rows.push(header('Power sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl()]), header('Batteries'), ...divide(batteryRows()));
+        rows.push(header('Power sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl()]));
         for (const st of consoles) rows.push(...consoleRows(st));
       } else {
         // Startup / Shutdown: a checklist, worked top to bottom.
@@ -876,8 +894,8 @@ function renderCombat() {
         const steps = [
           { title: 'Dock power, Solar', rows: sourceRows, state: () => (cells('dock') + cells('solar') + cells('ship') > 0 ? 'Online' : 'Cold'),
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
-          { title: 'Batteries', rows: batteryRows, state: () => (grid.ties.battery.length ? 'Online' : 'Cold'),
-            off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
+          // (The stores sit under the column headings; this step has no controls.)
+          { title: 'Bus batteries and EPS pressure', rows: () => [], state: () => (Object.values(grid.stores || {}).some((x) => x.breaker && x.level > 0) ? 'Online' : 'Cold') },
           { title: 'Bus crosslink', rows: () => [xl()], state: () => (grid.ties.crosslink.length >= 2 ? 'Online' : 'Cold'),
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
           { title: 'Engineering console', rows: engNoReactors, state: () => (grid.ties['console:Engineering'].length ? (grid.consoleOk.Engineering ? 'Online' : 'Startup') : 'Cold'),
@@ -915,7 +933,7 @@ function renderCombat() {
         });
       }
       return el('table', { className: 'grid-table', id: 'grid-table' },
-        el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), ...COLS.map((n) => el('th', { scope: 'col', textContent: NODE_NAMES[n] })))),
+        el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), ...COLS.map((n) => el('th', { scope: 'col', textContent: NODE_NAMES[n] }))), storesRow()),
         el('tbody', {}, ...rows),
         el('tfoot', {}, el('tr', {}, el('th', { scope: 'row', textContent: 'Used / available / max' }),
           ...COLS.map((n) => {
@@ -938,7 +956,8 @@ function renderCombat() {
         && Object.values(grid.taps).some((v) => v > 0) && manned.every((st) => grid.consoleOk[st]);
       const COLD_KEEP = ['impulsePort', 'impulseStarboard', 'thrustersPort', 'thrustersStarboard'];
       const cold = !['online', 'starting'].includes(grid.core) && Object.values(grid.drives).every((d) => d.state === 'off')
-        && Object.values(grid.taps).every((v) => !v) && Object.entries(grid.ties).every(([k, v]) => COLD_KEEP.includes(k) || !v.length);
+        && Object.values(grid.taps).every((v) => !v) && Object.entries(grid.ties).every(([k, v]) => COLD_KEEP.includes(k) || !v.length)
+        && Object.values(grid.stores || {}).every((x) => !x.breaker);
       const text = gridOrder === 'startup' && ready ? 'Ready for departure' : gridOrder === 'shutdown' && cold ? 'Cold ship' : '';
       const b = el('p', { className: 'st-state grid-banner', id: 'grid-banner', textContent: text, hidden: !text });
       b.toggleAttribute('data-up', !!text);
