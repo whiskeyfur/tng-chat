@@ -39,9 +39,10 @@ const library = createLibrary($('library-view'), { token: () => token, base: rel
 function signIn(name, shipName, key) {
   setLink('connecting', 'Subspace link: connecting');
   try {
+    if (!relay.ws()) throw new Error('no relay');
     ws = new WebSocket(relay.ws());
   } catch {
-    $('login-error').textContent = 'That comm relay address is not valid';
+    $('login-error').textContent = relay.ws() ? 'That comm relay address is not valid' : 'Enter the comm relay address to connect';
     $('login-form').querySelector('button').disabled = false;
     return;
   }

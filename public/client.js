@@ -34,6 +34,11 @@ function setLink(status, text) {
 // If the link drops, sign out locally and reconnect.
 function connect() {
   setLink('connecting', 'Comm relay: connecting');
+  if (!relay.ws()) {
+    setLink('error', 'No comm relay set');
+    $('register-error').textContent = 'Enter the comm relay address below to connect.';
+    return;
+  }
   try {
     ws = new WebSocket(relay.ws());
   } catch {

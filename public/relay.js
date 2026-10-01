@@ -29,9 +29,13 @@
     try { return localStorage.getItem(KEY) || ''; } catch { return ''; }
   }
 
+  // Static hosts (GitHub Pages) never run the relay themselves, so there the
+  // address stays blank until someone enters one.
+  const staticHost = /\.github\.io$/i.test(location.hostname) || location.protocol === 'file:';
+
   function current() {
     return normalize(params.get('relay')) || normalize(stored()) || normalize(window.STCHAT_RELAY)
-      || normalize(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
+      || (staticHost ? null : normalize(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`));
   }
 
   window.relay = {
