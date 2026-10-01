@@ -26,6 +26,8 @@
       <div id="comms-extras"></div>
       <h3 class="ops-subhead">Directory</h3>
       <ul class="comms-dir" id="users"></ul>
+      <h3 class="ops-subhead">Subspace radio</h3>
+      <div class="radio" id="radio"></div>
     </div>`;
 
   window.createComms = function createComms(opts) {
@@ -55,9 +57,13 @@
         prev = state;
         renderButton();
         renderDirectory();
+        radio?.render();
         opts.onChange?.(state);
       },
     });
+
+    // Subspace radio: listen, or patch a station into the call.
+    const radio = window.createRadio ? createRadio($('radio'), { voice, log: opts.log }) : null;
 
     function open() {
       if (!dialog.open) dialog.showModal();
@@ -146,6 +152,7 @@
       open,
       close,
       voice,
+      radio,
       setOps,
       get users() { return users; },
       get isOpen() { return dialog.open; },

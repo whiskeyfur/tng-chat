@@ -7,6 +7,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const http = require('http');
 const { chromium } = require('playwright');
 
 process.env.PORT = process.env.PORT || '8099';
@@ -17,6 +18,21 @@ const server = require('../server');
 const URL = `http://localhost:${process.env.PORT}/`;
 
 const step = (s) => console.log(`ok - ${s}`);
+
+// A stand-in radio station: a 440 Hz tone as WAV, with and without CORS.
+const RADIO_PORT = Number(process.env.PORT) + 1;
+const radioStation = http.createServer((req, res) => {
+  const rate = 8000, secs = 30, n = rate * secs;
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
+  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+  buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)), 44 + i * 2);
+  const headers = { 'Content-Type': 'audio/wav', 'Content-Length': buf.length };
+  if (req.url.startsWith('/cors')) headers['Access-Control-Allow-Origin'] = '*';
+  res.writeHead(200, headers).end(buf);
+}).listen(RADIO_PORT);
 
 async function openAs(browser, name, tag, ship = 'Enterprise', station = 'Crew') {
   const page = await (await browser.newContext()).newPage();
@@ -170,6 +186,33 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.ok(received.every((b, i) => b === ((i * 31 + 7) & 0xff)), 'file contents differ');
     await alice.waitForSelector('.v-chatlog div:has-text("sent test.bin")');
     step(`file transferred intact (${size} bytes)`);
+
+    // Subspace radio: alice tunes a station and patches it into the call.
+    await openComms(alice);
+    const micTrack = await alice.evaluate(() => window.__voice.call.stream.getAudioTracks()[0].id);
+    await alice.fill('#radio-url', `http://localhost:${RADIO_PORT}/cors/tone.wav`);
+    await alice.click('#radio-tune');
+    await alice.waitForFunction(() => window.__comms.radio.canPatch && !document.getElementById('radio-patch').disabled);
+    await alice.click('#radio-patch');
+    await alice.waitForFunction(() => window.__voice.radioPatched);
+    const sending = await alice.evaluate(() => window.__voice.peer('bob').pc.getTransceivers().find((t) => t.receiver.track.kind === 'audio').sender.track.id);
+    assert.notEqual(sending, micTrack, 'radio not mixed into what alice sends');
+    await bob.waitForSelector('.v-chatlog div:has-text("[subspace radio] alice patched in")');
+    await alice.waitForTimeout(1000);
+    assert.equal(await bob.evaluate(() => window.__voice.connectedTo(1)), true);
+    await alice.click('#radio-patch'); // unpatch
+    await alice.waitForFunction(() => !window.__voice.radioPatched);
+    assert.equal(await alice.evaluate(() => window.__voice.peer('bob').pc.getTransceivers().find((t) => t.receiver.track.kind === 'audio').sender.track.id), micTrack);
+    await bob.waitForSelector('.v-chatlog div:has-text("unpatched the radio")');
+    step('subspace radio: alice patched a station into the call and unpatched it');
+
+    // A station without CORS plays locally but can't be patched in.
+    await alice.fill('#radio-url', `http://localhost:${RADIO_PORT}/plain/tone.wav`);
+    await alice.click('#radio-tune');
+    await alice.waitForSelector('#radio-status:has-text("plays here only")');
+    assert.equal(await alice.isDisabled('#radio-patch'), true);
+    await alice.click('#radio-stop');
+    step('subspace radio: a station without cross-site access plays locally only');
 
     // Call waiting: carol calls alice while alice is talking to bob.
     const carol = await openAs(browser, 'carol', 'carol');
@@ -634,6 +677,7 @@ const audioBytes = (page) => page.evaluate(async () => {
   } finally {
     await browser.close();
     server.close();
+    radioStation.close();
     fs.rmSync(DATA_DIR, { recursive: true, force: true });
     console.log(ok ? 'PASS' : 'FAIL');
     process.exit(ok ? 0 : 1);

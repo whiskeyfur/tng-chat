@@ -168,3 +168,16 @@ button.lcars-nav-button { font: inherit; font-size: 17px; letter-spacing: inheri
   .lib-date { display: none; }
   .lib-size { grid-row: 2; }
 }
+
+/* ---------- Subspace radio (radio.js) ---------- */
+
+.radio { display: flex; flex-direction: column; gap: 8px; text-transform: uppercase; }
+.radio-form .ops-input { flex: 1 1 200px; min-width: 0; font-size: 16px; }
+.radio-now { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 0 6px 14px; border-left: 8px solid var(--lcars-violet); }
+.radio-title { flex: 1 1 200px; color: var(--lcars-violet); font-size: 20px; }
+.radio-results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.radio-results li { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 12px; align-items: center; padding: 4px 0 4px 6px; border-bottom: 2px solid #1a1a1a; }
+.radio-results .radio-name { color: var(--lcars-gold); font-size: 18px; overflow-wrap: anywhere; }
+.radio-results small { grid-row: 2; color: var(--lcars-tan); font-size: 13px; }
+.radio-results .lcars-button { grid-row: 1 / 3; grid-column: 2; min-height: 34px; }
+.radio-results .empty { display: block; color: var(--lcars-tan); border: 0; }

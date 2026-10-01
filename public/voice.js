@@ -19,6 +19,7 @@
 // });
 // await voice.handle(msg)  // returns true if the message was a call message
 // voice.placeCall(user), voice.end(reason), voice.sys(text), voice.state, voice.call
+// voice.setRadio(stream | null, title)  // mix a radio stream into what we send
 (function () {
   const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
   const CHUNK = 16 * 1024;           // file chunk size; safe across browsers
@@ -242,8 +243,11 @@
 
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       p.pc = pc;
-      if (stream) stream.getTracks().forEach((t) => pc.addTrack(t, stream));
-      else pc.addTransceiver('audio', { direction: 'recvonly' });
+      // One audio sender per connection: the mic, or the mic mixed with patched-in
+      // radio. Without a mic it starts silent but can still send radio later.
+      const out = outgoingTrack(c);
+      if (out) pc.addTrack(out, stream || new MediaStream([out]));
+      else pc.addTransceiver('audio', { direction: 'sendrecv' });
 
       // Pre-negotiated channels: both sides create them with fixed ids, so no
       // ondatachannel handshake is needed and they open together with the call.
@@ -294,6 +298,7 @@
       const connected = [...c.peers.values()].some((p) => p.pc);
       c.peers.forEach(closePeer);
       c.stream?.getTracks().forEach((t) => t.stop());
+      closeMixer(c);
       if (reason) log(reason);
       if (connected) chatLine(reason || 'call ended', 'sys');
       setState('idle');
@@ -334,6 +339,54 @@
       opts.send({ type: 'merge', caller: waiting.id });
       waiting = null;
       refresh();
+    }
+
+    // --- radio patched into the call -------------------------------------------
+
+    // What we send: the mic, or (with radio patched in) a mix of mic and radio.
+    function outgoingTrack(c) {
+      if (c.mixer) return c.mixer.track;
+      return c.stream?.getAudioTracks()[0] || null;
+    }
+
+    function closeMixer(c) {
+      if (!c.mixer) return;
+      c.mixer.ctx.close().catch(() => {});
+      c.mixer = null;
+    }
+
+    // Swap the outgoing audio on every connection in the call.
+    async function applyOutgoing(c) {
+      const track = outgoingTrack(c);
+      for (const p of c.peers.values()) {
+        const tr = p.pc?.getTransceivers().find((t) => t.receiver.track.kind === 'audio');
+        if (tr) await tr.sender.replaceTrack(track).catch((err) => log(`radio: ${err.message}`));
+      }
+    }
+
+    // Patch a radio stream into the current call (or unpatch with null). The
+    // mic still works and still mutes on its own.
+    async function setRadio(radioStream, title) {
+      const c = call;
+      if (!c || state !== 'in-call') return false;
+      closeMixer(c);
+      if (radioStream) {
+        await getStream(c);
+        if (call !== c) return false;
+        const ctx = new AudioContext();
+        const dest = ctx.createMediaStreamDestination();
+        if (c.stream) ctx.createMediaStreamSource(c.stream).connect(dest);
+        const gain = ctx.createGain();
+        gain.gain.value = 0.7;
+        ctx.createMediaStreamSource(radioStream).connect(gain).connect(dest);
+        await ctx.resume().catch(() => {});
+        c.mixer = { ctx, track: dest.stream.getAudioTracks()[0], title };
+      }
+      await applyOutgoing(c);
+      const note = radioStream ? `[subspace radio] ${me().name} patched in: ${title}` : `[subspace radio] ${me().name} unpatched the radio`;
+      for (const p of openPeers('chat')) p.chat.send(note);
+      chatLine(note, 'sys');
+      return true;
     }
 
     // --- chat and files ------------------------------------------------------
@@ -474,6 +527,8 @@
       end: (reason) => endCall(reason),
       // A system line in the call's chat, if a call is up.
       sys: (text) => { if (call) chatLine(text, 'sys'); },
+      setRadio,
+      get radioPatched() { return !!call?.mixer; },
       get state() { return state; },
       get call() { return call; },
       get waiting() { return waiting; },
