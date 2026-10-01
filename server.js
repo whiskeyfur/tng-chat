@@ -747,6 +747,12 @@ const transporterOk = (a, b) => a === b || distance(a, b) <= rangesOf(a).transpo
 const navState = new Map();   // ship key -> { x, y, heading, warp, dest }
 const primaryCore = new Map(); // ship key -> computer socket flying it
 const navTargets = new Map();  // ship key -> ship key it's heading for (intercept)
+// Known contacts: where each ship last saw every other ship on its sensors.
+const known = new Map();       // ship key -> Map(other ship key -> { x, y, at })
+// Autopilot: Helm picks a known contact or a starbase and the ship's computer
+// flies there (no one needs to stay at Helm): it intercepts a ship it can see,
+// heads for its last known position if not, and docks at a starbase on arrival.
+const autopilots = new Map();  // ship key -> { target (name), key, base }
 
 function distance(a, b) {
   const p = navState.get(a), q = navState.get(b);
@@ -760,7 +766,9 @@ function navMessage(key) {
   const seen = [...navState.keys()].filter((k) => cores.has(k) && sensorOk(key, k));
   return {
     type: 'nav',
-    own: own ? { name: shipName(key), ...own, power: powerOf(key), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key) } : null,
+    own: own ? { name: shipName(key), ...own, power: powerOf(key), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
+      autopilot: autopilots.get(key)?.target || null,
+      known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
     bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
     ships: seen.map((k) => ({ name: shipName(k), ...navState.get(k), ops: opsOf(k).length > 0, shields: shields.has(k), distance: k === key ? 0 : distance(key, k) })),
     ranges: rangesOf(key),
@@ -778,6 +786,30 @@ function scheduleNav() {
   navTimer = setTimeout(() => {
     navTimer = null;
     tow();
+    // Contacts seen now become known contacts; autopilots follow them, and dock on arrival.
+    const now = Date.now();
+    for (const k of cores.keys()) {
+      if (isBase(k) || !navState.has(k)) continue;
+      if (!known.has(k)) known.set(k, new Map());
+      for (const o of cores.keys()) if (o !== k && !isBase(o) && navState.has(o) && sensorOk(k, o)) known.get(k).set(o, { x: navState.get(o).x, y: navState.get(o).y, at: now });
+    }
+    for (const [k, ap] of autopilots) {
+      const nav = navState.get(k), core = primaryCore.get(k);
+      if (!nav || !core) continue;
+      if (!ap.base && !navTargets.has(k) && navState.has(ap.key) && sensorOk(k, ap.key) && nav.warp > 0) {
+        navTargets.set(k, ap.key); // back on sensors: intercept again
+        opLog(k, `autopilot: the ${ap.target} is back on sensors, intercepting`);
+      }
+      if (nav.warp === 0 && !nav.dest && now - ap.since > 2000) { // (the computer has had time to set off)
+        const base = ap.base && STARBASES.find((b) => b.name === ap.target);
+        if (base && Math.hypot(nav.x - base.x, nav.y - base.y) <= DOCK_RANGE && !engOf(k).docked) {
+          engOf(k).docked = base.name; engOf(k).dirty = true; flowCache.delete(k);
+          opLog(k, `autopilot: docked at ${base.name}`);
+          for (const u of crewOf(k)) send(u, { type: 'notice', text: `Helm: autopilot docked us at ${base.name}` });
+        } else if (!base) for (const u of crewOf(k)) if (u.station === 'Helm') send(u, { type: 'notice', text: `Helm: autopilot arrived at the ${ap.target}${navState.has(ap.key) && sensorOk(k, ap.key) ? '' : "'s last known position"}` });
+        autopilots.delete(k);
+      }
+    }
     for (const [k, t] of navTargets) {
       const nav = navState.get(k), tgt = navState.get(t), core = primaryCore.get(k);
       if (!nav?.dest || !tgt || !core || !sensorOk(k, t)) { navTargets.delete(k); continue; } // lost: carry on to where it was
@@ -884,8 +916,28 @@ function navCommand(ws, msg) {
     return { error: 'no such destination' };
   };
 
+  if (msg.type === 'autopilot') {
+    if (ws.station !== 'Helm') return note('Only Helm sets the autopilot');
+    if (!msg.target) { autopilots.delete(key); return note('Helm: autopilot off (the ship keeps its course and speed)'); }
+    const name = clean(msg.target);
+    const base = STARBASES.find((b) => b.name.toLowerCase() === name.toLowerCase());
+    const t = shipKey(name);
+    let dest;
+    if (base) dest = { base: base.name };
+    else if (navState.has(t) && present(t) && sensorOk(key, t)) dest = { ship: shipName(t) };
+    else {
+      const k2 = known.get(key)?.get(t);
+      if (!k2) return note(`Helm: no known position for the ${name}`);
+      dest = { x: k2.x, y: k2.y };
+    }
+    autopilots.set(key, { target: base ? base.name : shipName(t), key: base ? null : t, base: !!base, since: Date.now() });
+    opLog(key, `Helm (${ws.name}): autopilot to ${base ? base.name : `the ${shipName(t)}`}`);
+    return navCommand(ws, { type: 'helm', dest, warp: Number(msg.warp) || 5, autopilot: true });
+  }
+
   if (msg.type === 'helm') {
     if (ws.station !== 'Helm') return note('Only Helm can set course and speed');
+    if (!msg.autopilot && autopilots.delete(key)) note('Helm: autopilot off, you have the helm');
     const core = primaryCore.get(key);
     if (!core) return note("No ship's computer is flying the ship");
     if (isBase(key)) return note(`Helm: ${shipName(key)} is a starbase: it holds station`);
@@ -2482,7 +2534,7 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if ((msg.type === 'helm' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return (msg.type === 'power' ? sealed(ws.shipKey, ws.station) : consoleDark(ws)) ? darkNote(ws) : navCommand(ws, msg);
+    if ((msg.type === 'helm' || msg.type === 'autopilot' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return (msg.type === 'power' ? sealed(ws.shipKey, ws.station) : consoleDark(ws)) ? darkNote(ws) : navCommand(ws, msg);
     if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : crewCommand(ws, msg);
     if (['lock', 'fire', 'repair', 'arm'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : combatCommand(ws, msg);
     if (msg.type === 'grid' && ws.id) return gridCommand(ws, msg); // emergency power: works with the console dark

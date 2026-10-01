@@ -1087,11 +1087,14 @@ const audioBytes = (page) => page.evaluate(async () => {
     kira.close();
     obrien.close();
 
-    // Starbases: Helm docks at Starbase 12, and the torpedo fired earlier is restocked.
-    helm({ dest: { base: 'Starbase 12' }, warp: 7 });
-    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.near)) === 'Starbase 12', 30000);
-    sulu.send(JSON.stringify({ type: 'dock' }));
-    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.docked)) === 'Starbase 12');
+    // Starbases: Helm sets the autopilot for Starbase 12 and leaves; the ship's
+    // computer flies there and docks. The torpedo fired earlier is restocked.
+    const ap = await crewWs('ensign2', 'Enterprise', 'Helm');
+    await waitFor(() => ap.nav()?.own?.known?.some((k) => k.name === 'Defiant')); // the Defiant is a known contact
+    ap.send({ type: 'autopilot', target: 'Starbase 12', warp: 7 });
+    await waitFor(() => ap.msgs.some((m) => m.type === 'nav' && m.own?.autopilot === 'Starbase 12'));
+    ap.close(); // nobody needs to stay at Helm (sulu keeps his post but does nothing)
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.docked)) === 'Starbase 12', 30000);
     await carol.waitForSelector('#wp-torpedoes:has-text("10 of 10")', { timeout: 15000 });
     // Restarting the ship's computers keeps it docked (saved with the ship).
     await new Promise((r) => setTimeout(r, 5500)); // the relay sends the computers a copy every 5 s
@@ -1099,7 +1102,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     coreA = startComputer('a', 'Enterprise'); coreB = startComputer('b', 'Enterprise');
     await new Promise((r) => setTimeout(r, 3000)); // the computers sign back on
     await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own?.grid?.docked)) === 'Starbase 12', 15000);
-    step("Helm flew to Starbase 12 and docked; the torpedo fired earlier was restocked; still docked after the ship's computers restarted");
+    step("the autopilot flew the Enterprise to Starbase 12 and docked it (the Defiant was a known contact); the torpedo fired earlier was restocked; still docked after the ship's computers restarted");
 
     // The power grid: with the core shut down and the batteries off, Bus B is
     // dead: Tactical's console goes dark and refuses orders. Restarting the

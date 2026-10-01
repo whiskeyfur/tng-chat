@@ -116,6 +116,27 @@
     speedSel.value = '5';
     const button = (text, id, onclick, alert) => { const b = el('button', { type: 'button', className: `lcars-button lcars-button--pill${alert ? ' lcars-button--alert' : ''}`, id, textContent: text }); b.onclick = onclick; return b; };
     const plotted = el('div', { className: 'nav-plotted', hidden: true });
+    // Autopilot: tap a known contact or a starbase; the ship's computer flies
+    // there at the speed set above (and docks at a starbase).
+    const autoBox = el('div', { className: 'nav-autopilot', id: 'autopilot' });
+    let autoSig = '';
+    function renderAutopilot() {
+      const own = nav?.own;
+      if (!own) return;
+      const targets = [...(own.known || []).map((k) => [k.name, `The ${k.name}${k.visible ? '' : ` (last seen ${k.age < 60 ? `${k.age} s` : `${Math.round(k.age / 60)} min`} ago)`}`]), ...(nav.bases || []).map((b) => [b.name, b.name])];
+      const sig = JSON.stringify([targets, own.autopilot]);
+      if (sig === autoSig) return;
+      autoSig = sig;
+      autoBox.replaceChildren(
+        el('p', { className: 'ops-hint', id: 'autopilot-state', textContent: own.autopilot ? `Autopilot: course for ${/^(Starbase|Deep Space) /.test(own.autopilot) ? own.autopilot : `the ${own.autopilot}`}. The ship's computer is flying.` : 'Tap a known contact or a starbase: the ship\'s computer flies there at the speed set above, and docks at a starbase.' }),
+        el('div', { className: 'tr-taps' }, ...targets.map(([name, label]) => {
+          const b = button(label, '', () => send({ type: 'autopilot', target: name, warp: Number(speedSel.value) || 5 }));
+          b.classList.add('tr-tap');
+          b.dataset.target = name;
+          b.setAttribute('aria-pressed', String(own.autopilot === name));
+          return b;
+        }), ...(own.autopilot ? [button('Autopilot off', 'autopilot-off', () => send({ type: 'autopilot', target: null }), true)] : [])));
+    }
     // Docking at a starbase (within 10 units, at all stop).
     const dockBtn = button('Dock', 'helm-dock', () => {
       const g = nav?.own?.grid;
@@ -151,6 +172,8 @@
           }),
           button('All stop', 'helm-stop', () => send({ type: 'helm', warp: 0 }), true)),
         el('div', { className: 'ops-form' }, el('span', { id: 'helm-dock-state' }), dockBtn),
+        el('h3', { className: 'ops-subhead', textContent: 'Autopilot' }),
+        autoBox,
         plotted);
     } else {
       controls.append(el('h3', { className: 'ops-subhead', textContent: 'Contacts' }), contacts, scanOut);
@@ -212,7 +235,7 @@
     function status(text) { note.textContent = text; }
 
     return {
-      update(msg) { nav = msg; renderControls(); draw(); },
+      update(msg) { nav = msg; renderControls(); if (mode === 'helm') renderAutopilot(); draw(); },
       // Helm: Science plotted a course; one click to engage it.
       plotted(msg) {
         if (mode !== 'helm') return;
