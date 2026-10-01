@@ -15,6 +15,7 @@ let stationView = null;
 let ops = null;     // the ops screens, when signed in at Operations
 let traffic = [];   // calls in progress on our data network (Communications)
 let ships = [];     // [{ name, ops, shields }]
+let relayName = 'Comm relay';   // the relay's name, from its hello
 let stations = STATION_NAMES; // what the relay accepts (from its hello); all we know until then
 
 const $ = (id) => document.getElementById(id);
@@ -58,7 +59,7 @@ function connect() {
     setLink('error', 'Comm relay address invalid');
     return;
   }
-  ws.onopen = () => setLink('online', 'Comm relay online');
+  ws.onopen = () => setLink('online', `${relayName} online`);
   // Handle messages one at a time so ICE candidates never race ahead of the SDP.
   let queue = Promise.resolve();
   ws.onmessage = (ev) => { queue = queue.then(() => onMessage(JSON.parse(ev.data))).catch((err) => log(`error: ${err}`, 'error')); };
@@ -92,7 +93,7 @@ function signedOut(reason) {
   $('station-view').replaceChildren();
   $('register-error').textContent = reason;
   $('register-form').querySelector('button').disabled = false;
-  setHeader('LCARS', 'Personnel access', 'Report aboard');
+  setHeader('LCARS', relayName, 'Report aboard');
   document.title = 'LCARS: Report aboard';
 }
 
@@ -266,7 +267,7 @@ async function onMessage(msg) {
   if (msg.type === 'users') {
     stationView?.setCrew(msg.users);
     queueMicrotask(renderShipState); // transporter crew list
-    setLink(msg.ops ? 'online' : 'error', msg.ops ? 'Comm relay online · ops on duty' : 'Ops offline');
+    setLink(msg.ops ? 'online' : 'error', msg.ops ? `${relayName} · ops on duty` : `${relayName} · ops offline`);
   }
   if (await comms.handle(msg)) return;
   switch (msg.type) {
@@ -317,6 +318,11 @@ async function onMessage(msg) {
       renderTraffic();
       break;
     case 'hello': {
+      if (msg.relay) {
+        relayName = msg.relay;
+        setLink('online', `${relayName} online`);
+        if (!me) setHeader('LCARS', relayName, 'Report aboard');
+      }
       // Offer only the stations this relay accepts. If it lacks some this page
       // knows, the relay is older than the pages and needs a restart.
       stations = STATION_NAMES.filter((n) => msg.stations.includes(n));

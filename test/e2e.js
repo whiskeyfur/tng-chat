@@ -8,12 +8,26 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const { spawn } = require('child_process');
 const { chromium } = require('playwright');
 
 process.env.PORT = process.env.PORT || '8099';
-// Ship libraries go to a scratch folder for the test.
+// Ship's computers keep their libraries in a scratch folder for the test.
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-test-'));
-process.env.DATA_DIR = DATA_DIR;
+const computers = new Set();
+// Start a ship's computer (tools/shipcore.js) for some ships, with its own folder.
+function startComputer(folder, ...ships) {
+  const proc = spawn(process.execPath, [path.join(__dirname, '..', 'tools', 'shipcore.js'),
+    '--relay', `ws://localhost:${process.env.PORT}`, '--data', path.join(DATA_DIR, folder), ...ships], { stdio: ['ignore', 'pipe', 'pipe'] });
+  proc.stdout.on('data', (d) => process.stdout.write(String(d).replace(/^(?=.)/gm, `  [computer ${folder}] `)));
+  proc.stderr.on('data', (d) => process.stdout.write(String(d).replace(/^(?=.)/gm, `  [computer ${folder} ERR] `)));
+  computers.add(proc);
+  proc.on('exit', () => computers.delete(proc));
+  return proc;
+}
+const stopComputer = (proc) => new Promise((r) => { proc.once('exit', r); proc.kill(); });
+const stored = (folder, ship, name) => { try { return fs.readFileSync(path.join(DATA_DIR, folder, ship, name), 'utf8'); } catch { return null; } };
+const waitFor = async (fn, ms = 10000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return; await new Promise((r) => setTimeout(r, 100)); } throw new Error('timed out waiting'); };
 const server = require('../server');
 const URL = `http://localhost:${process.env.PORT}/`;
 
@@ -486,16 +500,27 @@ const audioBytes = (page) => page.evaluate(async () => {
     await kor.waitForFunction(() => window.__voice.state === 'idle');
     step('ops opened a data link (shown on the data network map); bob called kor on the K\'Vatch directly');
 
-    // Library: alice uploads to the Enterprise's computer; shipmates see it,
-    // it is stored as data/Enterprise/<file>, and the K'Vatch (linked) can
-    // download it from the Enterprise folder.
-    const briefing = 'Mission briefing: rendezvous with the K\'Vatch at stardate 48632.4\n'.repeat(200);
+    // Library: no ship's computer yet, so it's offline.
     await closeComms(alice);
     await screen(alice, 'library');
+    await alice.waitForSelector('.lib-status:has-text("computer is offline")');
+    assert.equal(await alice.isDisabled('.lib-upload button'), true);
+    step("library: with no ship's computer online, the library is offline");
+
+    // Two computers run the Enterprise, one the K'Vatch. Alice uploads; the
+    // file goes through the relay (not stored there) to one Enterprise
+    // computer and is copied to the other; the K'Vatch (linked) downloads it.
+    const coreA = startComputer('a', 'Enterprise');
+    let coreB = startComputer('b', 'Enterprise');
+    startComputer('k', "K'Vatch");
+    await alice.waitForFunction(() => !document.querySelector('.lib-upload button').disabled);
+    await kor.waitForSelector('.lib-folder[data-ship="K\'Vatch"] .lib-folder-name:not(:has-text("offline"))', { state: 'attached' });
+    const briefing = 'Mission briefing: rendezvous with the K\'Vatch at stardate 48632.4\n'.repeat(200);
     await alice.setInputFiles('.lib-file', { name: 'mission briefing.txt', mimeType: 'text/plain', buffer: Buffer.from(briefing) });
     await alice.click('.lib-upload button');
     await alice.waitForSelector('.lib-status:has-text("Uploaded mission briefing.txt")');
-    assert.equal(fs.readFileSync(path.join(DATA_DIR, 'Enterprise', 'mission briefing.txt'), 'utf8'), briefing);
+    await waitFor(() => stored('a', 'Enterprise', 'mission briefing.txt') === briefing && stored('b', 'Enterprise', 'mission briefing.txt') === briefing);
+    assert.equal(fs.existsSync(path.join(__dirname, '..', 'data', 'Enterprise', 'mission briefing.txt')), false, 'the relay stored the file');
     await bob.waitForSelector('.lib-folder[data-ship="Enterprise"] li:has-text("mission briefing.txt")', { state: 'attached' });
     await kor.waitForSelector('.lib-folder[data-ship="Enterprise"] li:has-text("mission briefing.txt")', { state: 'attached' });
     assert.match(await kor.textContent('.lib-folder:first-child .lib-folder-name'), /K'Vatch/);
@@ -507,7 +532,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     ]);
     assert.equal(download.suggestedFilename(), 'mission briefing.txt');
     assert.equal(fs.readFileSync(await download.path(), 'utf8'), briefing);
-    step('library: alice uploaded a file; it is on disk, bob sees it, and kor downloaded it over the data link');
+    step("library: alice's upload went to both Enterprise computers (not the relay); bob sees it; kor downloaded it over the data link");
 
     await op.click('#links li:has-text("K\'Vatch") button');
     await bob.waitForFunction(() => !window.__comms.users.some((u) => u.name === 'kor'));
@@ -527,8 +552,32 @@ const audioBytes = (page) => page.evaluate(async () => {
     op.once('dialog', (d) => d.accept());
     await op.click('.lib-folder[data-ship="Enterprise"] li:has-text("mission briefing.txt") button:has-text("Delete")');
     await bob.waitForFunction(() => !document.querySelector('.lib-folder li.lib-file-row'));
-    assert.equal(fs.existsSync(path.join(DATA_DIR, 'Enterprise', 'mission briefing.txt')), false);
-    step('library: only ops can delete, and only from their own ship');
+    await waitFor(() => stored('a', 'Enterprise', 'mission briefing.txt') === null && stored('b', 'Enterprise', 'mission briefing.txt') === null);
+    step('library: only ops can delete, and only from their own ship; both computers deleted it');
+
+    // Computers catch up after being offline: B misses an upload and a
+    // deletion, then comes back and gets the new file without reviving the
+    // deleted one.
+    await stopComputer(coreB);
+    await alice.setInputFiles('.lib-file', { name: 'duty roster.txt', mimeType: 'text/plain', buffer: Buffer.from('Alpha shift: Riker') });
+    await alice.click('.lib-upload button');
+    await alice.waitForSelector('.lib-status:has-text("Uploaded duty roster.txt")');
+    coreB = startComputer('b', 'Enterprise');
+    await waitFor(() => stored('b', 'Enterprise', 'duty roster.txt') === 'Alpha shift: Riker');
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(stored('b', 'Enterprise', 'mission briefing.txt'), null, 'a deleted file came back');
+    assert.equal(stored('a', 'Enterprise', 'mission briefing.txt'), null, 'a deleted file came back');
+    step('library: a computer that was offline catches up, and deletions stay deleted');
+
+    // A ship's computer keeps a ship alive with nobody aboard.
+    const voyager = startComputer('v', 'Voyager');
+    const lobby2 = await (await browser.newContext()).newPage();
+    await lobby2.goto(URL);
+    await lobby2.waitForSelector('#ship option[value="Voyager"]', { state: 'attached' });
+    await lobby2.close();
+    await stopComputer(voyager);
+    await op.waitForFunction(() => !window.__operator.graph.ships.some((s) => s.name === 'Voyager'));
+    step("a ship's computer kept the Voyager in the ship list with nobody aboard, until it stopped");
 
     // Changing station aboard the same ship.
     await closeComms(carol);
@@ -752,6 +801,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await browser.close();
     server.close();
     radioStation.close();
+    for (const proc of computers) proc.kill();
     fs.rmSync(DATA_DIR, { recursive: true, force: true });
     console.log(ok ? 'PASS' : 'FAIL');
     process.exit(ok ? 0 : 1);

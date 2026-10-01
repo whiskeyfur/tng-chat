@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node test/e2e.js",
-    "export-pages": "node tools/export-pages.js"
+    "export-pages": "node tools/export-pages.js",
+    "shipcore": "node tools/shipcore.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

@@ -20,9 +20,9 @@
 // pick their ship from that list. If ops drops out, calls in progress carry on
 // (including calls with other ships) and crew can still call each other aboard,
 // but no new off-ship communication can start until ops is back.
-// Each ship has a library (the ship's computer): files uploaded by its crew,
-// stored on disk as data/<ship>/<file>. Crew can download from their own
-// ship's library and from every library on their data network.
+// Each ship has a library: files uploaded by its crew, kept by the ship's
+// computers (tools/shipcore.js), never on this relay. Crew can download from
+// their own ship's library and from every library on their data network.
 // Crew can move to another station aboard their ship. The Transporter station
 // can beam crew to another ship, unless shields are up on either ship; the
 // Tactical station raises and lowers the ship's shields.
@@ -37,13 +37,12 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { pipeline } = require('stream/promises');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 8080;
 const OPERATOR_KEY = process.env.OPERATOR_KEY || '';
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
+const RELAY_NAME = process.env.RELAY_NAME || 'Subspace Relay Station 47';
 const MAX_UPLOAD = Number(process.env.MAX_UPLOAD_MB || 200) * 1024 * 1024;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, ...
@@ -190,11 +189,13 @@ function networkGraph() {
   };
 }
 
-// Ships crew can report aboard: those with an ops station on duty, plus those
-// whose ops dropped out while crew are still aboard (no off-ship comms there).
+// Ships crew can report aboard: those with an ops station on duty or a ship's
+// computer online, plus those whose ops dropped out while crew are still
+// aboard (no off-ship comms there).
 function shipList() {
-  const keys = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey)]);
-  return [...keys].map((k) => ({ name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k) })).sort((a, b) => a.name.localeCompare(b.name));
+  const keys = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys()]);
+  return [...keys].map((k) => ({ name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: cores.has(k) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 // Everyone gets the ship list: the sign-in pull-down, transporter targets,
 // and shield status.
@@ -453,38 +454,60 @@ function beam(u, toKey) {
   console.log(`${u.name} beamed from the ${from} to the ${u.ship}`);
 }
 
-// --- library ----------------------------------------------------------------------
+// --- ship's computers and the library ----------------------------------------------
+//
+// A ship's computer (tools/shipcore.js) connects as one or more ships rather
+// than as a person. While one is connected the ship exists, even with nobody
+// aboard. Each ship's library lives on its computers, not on this relay: the
+// relay only passes files through. Computers running the same ship keep each
+// other in sync: every file change carries a time, the newest wins, and
+// deletions are remembered so they don't come back.
+//
+// Relay <-> computer messages (JSON), plus binary frames for file data, each
+// prefixed with a 12-byte transfer id:
+//   computer -> relay  shipcore {ships, key}, core-index {ship, files}
+//                      core-put-ok {tid} / core-put-error {tid, reason}
+//                      core-data (binary) / core-get-end {tid} / core-get-error {tid, reason}
+//   relay -> computer  shipcore-ok {relay, ships} / shipcore-failed {reason}
+//                      core-put {tid, ship, name, modified} + binary frames + core-put-end {tid}
+//                      core-get {tid, ship, name}
+//                      core-delete {ship, name, at}
 
 // Session tokens let the browser prove who it is on plain HTTP requests.
 const tokens = new Map(); // token -> ws
 
-// A ship's library folder: data/<ship>, matched case-insensitively so the
-// folder survives restarts even if the ship name is typed differently.
-function libraryDir(key, create) {
-  let dirs = [];
-  try { dirs = fs.readdirSync(DATA_DIR, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch {}
-  const found = dirs.find((d) => d.toLowerCase() === key);
-  if (found) return path.join(DATA_DIR, found);
-  if (!create) return null;
-  const dir = path.join(DATA_DIR, shipName(key));
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+const cores = new Map();  // ship key -> Set of computer sockets
+const TID_LEN = 12;
+const newTid = () => crypto.randomBytes(6).toString('hex');
+
+const coresOf = (key) => [...(cores.get(key) || [])];
+
+// Everything the computers of a ship hold, merged: name -> newest entry.
+function mergedIndex(key) {
+  const merged = new Map();
+  for (const c of coresOf(key)) {
+    for (const e of (c.index.get(key) || new Map()).values()) {
+      const cur = merged.get(e.name);
+      if (!cur || e.modified > cur.modified) merged.set(e.name, e);
+    }
+  }
+  return merged;
 }
 
 function listLibrary(key) {
-  const dir = libraryDir(key, false);
-  if (!dir) return [];
-  return fs.readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isFile() && !d.name.startsWith('.'))
-    .map((d) => { const st = fs.statSync(path.join(dir, d.name)); return { name: d.name, size: st.size, modified: st.mtimeMs }; })
+  return [...mergedIndex(key).values()].filter((e) => !e.deleted)
+    .map(({ name, size, modified }) => ({ name, size, modified }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// Every library on this person's data network, their own ship first.
+// Every library on this person's data network, their own ship first. A ship
+// whose computers are all offline shows its library as offline.
 function sendLibrary(ws) {
   const keys = [...network(ws.shipKey)].sort((a, b) => (b === ws.shipKey) - (a === ws.shipKey) || shipName(a).localeCompare(shipName(b)));
-  send(ws, { type: 'library', ships: keys.map((k) => ({ name: shipName(k), own: k === ws.shipKey, files: listLibrary(k) })) });
+  send(ws, { type: 'library', ships: keys.map((k) => ({ name: shipName(k), own: k === ws.shipKey, online: coresOf(k).length > 0, files: listLibrary(k) })) });
 }
+
+const refreshLibraries = (key) => { for (const k of network(key)) for (const u of crewOf(k)) sendLibrary(u); };
 
 // A safe file name: no folders, control characters or leading dots.
 function safeName(raw) {
@@ -492,13 +515,134 @@ function safeName(raw) {
   return name || null;
 }
 
-function uniqueName(dir, name) {
-  if (!fs.existsSync(path.join(dir, name))) return name;
+function uniqueName(key, name) {
+  const taken = (n) => { const e = mergedIndex(key).get(n); return e && !e.deleted; };
+  if (!taken(name)) return name;
   const ext = path.extname(name), base = name.slice(0, name.length - ext.length);
-  for (let i = 2; ; i++) {
-    const candidate = `${base} (${i})${ext}`;
-    if (!fs.existsSync(path.join(dir, candidate))) return candidate;
+  for (let i = 2; ; i++) if (!taken(`${base} (${i})${ext}`)) return `${base} (${i})${ext}`;
+}
+
+// Transfers in flight, by transfer id.
+//  'up'   HTTP upload  -> a computer             { kind, core, res }
+//  'down' a computer   -> HTTP download          { kind, core, res }
+//  'copy' a computer   -> another computer (sync) { kind, core (source), dest, destTid, key, name }
+const transfers = new Map();
+
+const frame = (tid, chunk) => Buffer.concat([Buffer.from(tid, 'ascii'), chunk]);
+
+// Wait for a computer's socket to drain a bit before sending more file data.
+async function drain(c) {
+  while (c.readyState === c.OPEN && c.bufferedAmount > 4 * 1024 * 1024) await new Promise((r) => setTimeout(r, 20));
+}
+
+// Make every computer of a ship hold the newest version of every file (or
+// know it was deleted). Called whenever an index changes; safe to repeat.
+const copying = new Set(); // `${dest id}|${name}|${modified}` in flight
+function syncShip(key) {
+  const merged = mergedIndex(key);
+  for (const c of coresOf(key)) {
+    const mine = c.index.get(key) || new Map();
+    for (const w of merged.values()) {
+      const have = mine.get(w.name);
+      if (have && have.modified >= w.modified) continue;
+      if (w.deleted) { send(c, { type: 'core-delete', ship: shipName(key), name: w.name, at: w.modified }); continue; }
+      const job = `${c.coreId}|${w.name}|${w.modified}`;
+      if (copying.has(job)) continue;
+      const src = coresOf(key).find((o) => o !== c && o.index.get(key)?.get(w.name)?.modified === w.modified && !o.index.get(key).get(w.name).deleted);
+      if (!src) continue;
+      copying.add(job);
+      const tid = newTid(), destTid = newTid();
+      transfers.set(tid, { kind: 'copy', core: src, dest: c, destTid, job });
+      send(c, { type: 'core-put', tid: destTid, ship: shipName(key), name: w.name, modified: w.modified });
+      send(src, { type: 'core-get', tid, ship: shipName(key), name: w.name });
+    }
   }
+}
+
+function endTransfer(tid, error) {
+  const t = transfers.get(tid);
+  if (!t) return;
+  transfers.delete(tid);
+  if (t.kind === 'copy') {
+    copying.delete(t.job);
+    send(t.dest, error ? { type: 'core-put-abort', tid: t.destTid } : { type: 'core-put-end', tid: t.destTid });
+  } else if (t.kind === 'down') {
+    if (error && !t.res.headersSent) t.res.writeHead(502).end(error);
+    else t.res.end();
+  } else if (t.kind === 'up') {
+    if (!t.res.headersSent) t.res.writeHead(error ? 502 : 200, { 'Content-Type': 'application/json' }).end(error ? error : JSON.stringify(t.result));
+  }
+}
+
+// Messages from a ship's computer.
+function coreMessage(c, msg, isBinary) {
+  if (isBinary) {
+    const tid = msg.subarray(0, TID_LEN).toString('ascii');
+    const t = transfers.get(tid);
+    if (!t || t.core !== c) return;
+    const chunk = msg.subarray(TID_LEN);
+    if (t.kind === 'down') t.res.write(chunk);
+    else if (t.kind === 'copy') t.dest.send(frame(t.destTid, chunk));
+    return;
+  }
+  switch (msg.type) {
+    case 'core-index': {
+      const key = shipKey(clean(msg.ship));
+      if (!c.coreShips.has(key) || !Array.isArray(msg.files)) return;
+      const idx = new Map();
+      for (const f of msg.files.slice(0, 10000)) {
+        const name = safeName(f?.name);
+        if (!name || typeof f.modified !== 'number') continue;
+        idx.set(name, { name, size: Number(f.size) || 0, modified: f.modified, deleted: !!f.deleted });
+      }
+      c.index.set(key, idx);
+      syncShip(key);
+      refreshLibraries(key);
+      return;
+    }
+    case 'core-get-end': return endTransfer(msg.tid);
+    case 'core-get-error': return endTransfer(msg.tid, msg.reason || 'transfer failed');
+    case 'core-put-ok': {
+      // The computer stored an upload; its new index follows separately.
+      for (const [tid, t] of transfers) if (t.kind === 'up' && t.core === c && t.coreTid === msg.tid) { t.result = { name: t.name, size: t.size }; endTransfer(tid); }
+      return;
+    }
+    case 'core-put-error': {
+      for (const [tid, t] of transfers) if (t.kind === 'up' && t.core === c && t.coreTid === msg.tid) endTransfer(tid, msg.reason || 'the ship\'s computer could not store the file');
+      return;
+    }
+  }
+}
+
+function coreSignIn(ws, msg) {
+  if (OPERATOR_KEY && msg.key !== OPERATOR_KEY) return send(ws, { type: 'shipcore-failed', reason: 'wrong operator key' });
+  const names = (Array.isArray(msg.ships) ? msg.ships : []).map(clean).filter((n) => NAME_RE.test(n)).slice(0, 20);
+  if (!names.length) return send(ws, { type: 'shipcore-failed', reason: 'name at least one ship' });
+  ws.shipcore = true;
+  ws.coreId = newTid();
+  ws.coreShips = new Set(names.map(registerShip));
+  ws.index = new Map();
+  for (const k of ws.coreShips) { if (!cores.has(k)) cores.set(k, new Set()); cores.get(k).add(ws); }
+  send(ws, { type: 'shipcore-ok', relay: RELAY_NAME, ships: [...ws.coreShips].map(shipName) });
+  console.log(`ship's computer online for ${[...ws.coreShips].map(shipName).join(', ')}`);
+  broadcastShips();
+  for (const k of ws.coreShips) { opLog(k, 'ship\'s computer online'); refreshLibraries(k); }
+}
+
+function coreSignOff(ws) {
+  for (const [tid, t] of transfers) {
+    if (t.core === ws) endTransfer(tid, 'the ship\'s computer went offline');
+    else if (t.kind === 'copy' && t.dest === ws) { transfers.delete(tid); copying.delete(t.job); }
+  }
+  for (const k of ws.coreShips) {
+    cores.get(k)?.delete(ws);
+    if (!cores.get(k)?.size) cores.delete(k);
+    opLog(k, cores.has(k) ? 'a ship\'s computer went offline' : 'ship\'s computer offline: the library is unavailable');
+    refreshLibraries(k);
+    syncShip(k);
+  }
+  console.log(`ship's computer offline for ${[...ws.coreShips].map(shipName).join(', ')}`);
+  broadcastShips();
 }
 
 // POST   /api/library            upload to your own ship (X-Token, X-Filename)
@@ -513,26 +657,30 @@ async function libraryRequest(req, res, urlPath) {
     try { name = safeName(decodeURIComponent(req.headers['x-filename'] || '')); } catch { name = null; }
     if (!name) return res.writeHead(400).end('Missing file name');
     if (Number(req.headers['content-length'] || 0) > MAX_UPLOAD) return res.writeHead(413).end('File too large');
-    const dir = libraryDir(ws.shipKey, true);
-    const tmp = path.join(dir, `.upload-${crypto.randomBytes(6).toString('hex')}`);
-    let size = 0;
+    const core = coresOf(ws.shipKey)[0];
+    if (!core) return res.writeHead(503).end('The ship\'s computer is offline');
+    // Stream straight through to one of the ship's computers; the others
+    // pick it up when they sync.
+    const finalName = uniqueName(ws.shipKey, name);
+    const tid = newTid(), coreTid = newTid();
+    const t = { kind: 'up', core, res, coreTid, name: finalName, size: 0 };
+    transfers.set(tid, t);
+    send(core, { type: 'core-put', tid: coreTid, ship: ws.ship, name: finalName, modified: Date.now() });
     try {
-      await pipeline(req, async function* (chunks) {
-        for await (const chunk of chunks) {
-          size += chunk.length;
-          if (size > MAX_UPLOAD) throw new Error('too large');
-          yield chunk;
-        }
-      }, fs.createWriteStream(tmp));
+      for await (const chunk of req) {
+        t.size += chunk.length;
+        if (t.size > MAX_UPLOAD) throw new Error('too large');
+        if (!transfers.has(tid)) return; // the computer went away
+        core.send(frame(coreTid, chunk));
+        await drain(core);
+      }
+      send(core, { type: 'core-put-end', tid: coreTid });
+      console.log(`${ws.name} uploaded ${finalName} (${t.size} bytes) to the ${ws.ship} library`);
     } catch (err) {
-      fs.rmSync(tmp, { force: true });
-      return res.writeHead(err.message === 'too large' ? 413 : 400).end(err.message === 'too large' ? 'File too large' : 'Upload failed');
+      send(core, { type: 'core-put-abort', tid: coreTid });
+      transfers.delete(tid);
+      if (!res.headersSent) res.writeHead(err.message === 'too large' ? 413 : 400).end(err.message === 'too large' ? 'File too large' : 'Upload failed');
     }
-    const finalName = uniqueName(dir, name);
-    fs.renameSync(tmp, path.join(dir, finalName));
-    console.log(`${ws.name} uploaded ${finalName} (${size} bytes) to the ${ws.ship} library`);
-    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ name: finalName, size }));
-    for (const k of network(ws.shipKey)) for (const u of crewOf(k)) sendLibrary(u);
     return;
   }
 
@@ -544,28 +692,31 @@ async function libraryRequest(req, res, urlPath) {
   if (req.method === 'DELETE') {
     if (!ws.operator) return res.writeHead(403).end('Only ops can delete library files');
     if (key !== ws.shipKey) return res.writeHead(403).end("Ops can only delete from their own ship's library");
-    const dir = libraryDir(key, false);
-    const file = dir && name && path.join(dir, name);
-    if (!file || path.dirname(file) !== dir || !fs.existsSync(file)) return res.writeHead(404).end('No such file');
-    fs.rmSync(file);
+    const entry = name && mergedIndex(key).get(name);
+    if (!entry || entry.deleted) return res.writeHead(404).end('No such file');
+    if (!coresOf(key).length) return res.writeHead(503).end('The ship\'s computer is offline');
+    const at = Math.max(Date.now(), entry.modified + 1);
+    for (const c of coresOf(key)) send(c, { type: 'core-delete', ship: shipName(key), name, at });
     console.log(`${ws.name} deleted ${name} from the ${ws.ship} library`);
     opLog(ws.shipKey, `${ws.name} deleted ${name} from the library`);
-    res.writeHead(204).end();
-    for (const k of network(ws.shipKey)) for (const u of crewOf(k)) sendLibrary(u);
-    return;
+    return res.writeHead(204).end();
   }
+
   if (!sameNetwork(ws.shipKey, key)) return res.writeHead(403).end('That library is not on your data network');
-  const dir = libraryDir(key, false);
-  const file = dir && name && path.join(dir, name);
-  if (!file || path.dirname(file) !== dir || !fs.existsSync(file)) return res.writeHead(404).end('No such file');
-  const st = fs.statSync(file);
+  const entry = name && mergedIndex(key).get(name);
+  if (!entry || entry.deleted) return res.writeHead(404).end('No such file');
+  const core = coresOf(key).find((c) => c.index.get(key)?.get(name)?.modified === entry.modified);
+  if (!core) return res.writeHead(503).end('The ship\'s computer is offline');
   res.writeHead(200, {
     'Content-Type': 'application/octet-stream',
-    'Content-Length': st.size,
+    'Content-Length': entry.size,
     'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
     'Cache-Control': 'no-store',
   });
-  await pipeline(fs.createReadStream(file), res);
+  const tid = newTid();
+  transfers.set(tid, { kind: 'down', core, res });
+  res.on('close', () => { if (transfers.has(tid)) transfers.delete(tid); });
+  send(core, { type: 'core-get', tid, ship: shipName(key), name });
 }
 
 // --- ops station on and off duty --------------------------------------------------
@@ -711,9 +862,17 @@ wss.on('connection', (ws) => {
   ws.cid = null;
   ws.operator = false;
 
-  ws.on('message', (raw) => {
+  ws.on('message', (raw, isBinary) => {
+    // Ship's computers send file data as binary frames.
+    if (ws.shipcore) {
+      if (isBinary) return coreMessage(ws, raw, true);
+      try { return coreMessage(ws, JSON.parse(raw), false); } catch { return; }
+    }
+    if (isBinary) return;
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
+
+    if (msg.type === 'shipcore' && !ws.id && !ws.operator) return coreSignIn(ws, msg);
 
     if (msg.type === 'operator' && !ws.id && !ws.operator) {
       // The ops station is aboard as crew at the Operations station.
@@ -886,15 +1045,16 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     sockets.delete(ws);
     tokens.delete(ws.token);
+    if (ws.shipcore) return coreSignOff(ws);
     if (ws.operator) leaveOps(ws);
     if (ws.id) signOut(ws);
   });
 
   // The relay's own station list, so pages only offer stations it accepts
   // (and can tell when the relay is older than the pages).
-  send(ws, { type: 'hello', stations: STATIONS, version: require('./package.json').version });
+  send(ws, { type: 'hello', relay: RELAY_NAME, stations: STATIONS, version: require('./package.json').version });
   send(ws, { type: 'ships', ships: shipList() });
 });
 
-server.listen(PORT, () => console.log(`Voice chat on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`${RELAY_NAME} on http://localhost:${PORT}`));
 module.exports = server;

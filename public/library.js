@@ -1,5 +1,5 @@
 // The Library screen: the ship's computer. Lists the files uploaded to your
-// ship (data/<ship>/ on the server) and, across data links, the libraries of
+// ship (kept by its ship's computers, tools/shipcore.js) and, across data links, the libraries of
 // every ship on your data network, each in its own folder. Anyone can upload
 // to their own ship's library and download from any listed library; ops can
 // delete files from their own ship's library.
@@ -84,6 +84,10 @@
 
     function render(msg) {
       folders.replaceChildren();
+      const own = msg.ships.find((s) => s.own);
+      upload.disabled = own?.online === false;
+      if (own?.online === false) status.textContent = "The ship's computer is offline: start one (tools/shipcore.js) to use the library";
+      else if (status.textContent.startsWith("The ship's computer is offline")) status.textContent = '';
       for (const ship of msg.ships) {
         const rows = ship.files.map((f) => el('li', { className: 'lib-file-row' },
           el('span', { className: 'lib-name', textContent: f.name }),
@@ -93,8 +97,8 @@
             (() => { const b = el('button', { className: 'lcars-button lcars-button--pill', type: 'button', textContent: 'Download' }); b.onclick = () => download(ship.name, f.name, b); return b; })(),
             opts.canDelete?.(ship) ? (() => { const b = el('button', { className: 'lcars-button lcars-button--pill lcars-button--alert', type: 'button', textContent: 'Delete' }); b.onclick = () => remove(ship.name, f.name, b); return b; })() : '')));
         const folder = el('div', { className: 'lib-folder' },
-          el('h3', { className: `comms-ship lib-folder-name${ship.own ? ' comms-ship--home' : ''}`, textContent: ship.own ? `${ship.name} · this ship` : `${ship.name} · data link` }),
-          el('ul', { className: 'lib-files' }, ...(rows.length ? rows : [el('li', { className: 'empty', textContent: 'No files' })])));
+          el('h3', { className: `comms-ship lib-folder-name${ship.own ? ' comms-ship--home' : ''}`, textContent: `${ship.name} · ${ship.own ? 'this ship' : 'data link'}${ship.online === false ? " · computer offline" : ''}` }),
+          el('ul', { className: 'lib-files' }, ...(rows.length ? rows : [el('li', { className: 'empty', textContent: ship.online === false ? "Ship's computer offline" : 'No files' })])));
         folder.dataset.ship = ship.name;
         folders.append(folder);
       }
