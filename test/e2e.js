@@ -1229,18 +1229,24 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await geordi.isChecked('#ties-battery input[data-node="A"]'), battTied, 'the refused tap changed nothing');
     assert.equal(await geordi.evaluate(() => localStorage.getItem('stchat-grid-order')), 'shutdown');
     await geordi.click('#grid-order-operations');
+    // The warp core's Start / Stop is on its row in the grid, in every order.
+    await geordi.waitForSelector('#ties-core-parent #core-stop');
     // A refresh comes back signed in, at the same station, on the same screen.
     await geordi.reload();
     await geordi.waitForFunction(() => window.__voice.me?.station === 'Engineering' && window.__voice.myName === 'geordi');
     await geordi.waitForSelector('[data-screen="st-grid"]:not([hidden])');
     step('a refresh rejoined geordi at Engineering, on the power grid screen');
-    await geordi.close();
     step('the grid table: Operations order (power sources, crosslink, batteries, consoles), the Startup checklist and Shutdown in reverse, a locked step refusing a tap; the tractor beam on the EPS');
 
-    // Engineering ejects the warp core: no antimatter, no core power.
-    laforge.send({ type: 'grid', eject: true });
+    // Engineering ejects the warp core from Damage control (two presses): no antimatter, no core power.
+    await screen(geordi, 'st-damage');
+    await geordi.click('#core-eject');
+    await geordi.waitForSelector('#core-eject:has-text("Confirm eject")');
+    assert.notEqual(laforge.nav().own.grid.core, 'ejected', 'one press only arms it');
+    await geordi.click('#core-eject');
     await waitFor(() => laforge.nav()?.own.grid.core === 'ejected' && !laforge.nav().own.grid.antimatter);
-    step('Engineering ejected the warp core and antimatter pods');
+    await geordi.close();
+    step('Engineering ejected the warp core and antimatter pods from Damage control (armed by one press, fired by a second)');
 
     // The Defiant comes alongside and tows the crippled Enterprise with a tractor beam.
     const ezri = await crewWs('ezri', 'Defiant', 'Helm');
@@ -1524,6 +1530,9 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /needs antimatter and deuterium/.test(m.text)));
     barclay.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 200 } });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /set a containment feed/.test(m.text)));
+    barclay.send({ type: 'grid', ties: { containment: ['C'] } }); // nothing on Bus C
+    barclay.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 200 } });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /containment's feed \(Bus C\) has no power/.test(m.text)));
     barclay.send({ type: 'grid', ties: { containment: ['A'] } });
     barclay.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 200 } });
     await waitFor(() => barclay.nav()?.own.grid.antimatter >= 200 && !barclay.nav().own.grid.transfer, 15000);

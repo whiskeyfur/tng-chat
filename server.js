@@ -1828,6 +1828,7 @@ function gridCommand(ws, msg) {
       if (!partner) return note('dock at a starbase (or with another ship) to transfer supplies');
       if (inbound && partner !== 'station') return note(`the ${shipName(partner)} sends its own supplies: ask their Engineering`);
       if (inbound && t.resource === 'antimatter' && !e.ties.containment.length) return note('set a containment feed before taking on antimatter');
+      if (inbound && t.resource === 'antimatter' && !e.ties.containment.some((n) => flow(key).totals[n].available >= GRID.containment)) return note(`containment's feed (${feeds(e.ties.containment)}) has no power: energize it before taking on antimatter`);
       if (inbound && t.resource === 'antimatter' && e.core === 'ejected') return note('no warp core to hold antimatter: install one first');
       if (!inbound && partner !== 'station' && t.resource === 'antimatter' && !engOf(partner).ties.containment.length) return note(`the ${shipName(partner)} has no containment feed set: it can't take antimatter`);
       const room = inbound ? FUEL[t.resource] - e[t.resource] : partner === 'station' ? e[t.resource] : Math.min(e[t.resource], FUEL[t.resource] - engOf(partner)[t.resource]);

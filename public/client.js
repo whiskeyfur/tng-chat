@@ -433,6 +433,9 @@ function energizeCheck() {
   setTimeout(() => { rs.forEach((r) => { r.value = 0; }); energizing = false; }, 900);
 }
 
+// Damage control's core eject: armed by the first press, fired by a second within 5 s.
+let ejectArmedAt = 0;
+const ejectArmed = () => Date.now() - ejectArmedAt < 5000;
 // Engineering's grid table order, remembered per console (this browser).
 const GRID_ORDERS = [['startup', 'Startup'], ['operations', 'Operations'], ['shutdown', 'Shutdown']];
 let gridOrder = 'operations';
@@ -753,7 +756,8 @@ function renderCombat() {
     // Engineering's own rows: life support, then every power source and its subsystems.
     const engineeringRows = () => [
       ...(grid.core !== 'ejected' ? [ties('containment', grid.antimatter ? 'Antimatter containment' : 'Containment (no antimatter: may be off)', 'containment', { level: 1, sign: false, note: grid.antimatter ? (grid.containmentOk ? 'holding' : 'FAILING') : '' })] : []),
-      parentRow('ties-core-parent', 'Warp core (M/ARC)', 1, grid.core === 'starting' ? `starting ${grid.start} of ${grid.startSecs} s` : grid.core),
+      parentRow('ties-core-parent', 'Warp core (M/ARC)', 1, grid.core === 'starting' ? `starting ${grid.start} of ${grid.startSecs} s` : grid.core,
+        grid.core === 'ejected' ? [] : grid.core === 'offline' ? [small('Start', 'core-start', () => send({ type: 'grid', core: 'start' }))] : [small('Stop', 'core-stop', () => send({ type: 'grid', core: 'stop' }), true)]),
       ...(grid.core !== 'ejected' ? [
         ties('core', 'Power transfer conduits', 'core', { level: 2, note: c.damage.conduits >= 50 ? 'DAMAGED: no output' : 'carry the core\'s output into the EPS' }),
         ...['constriction', 'corePump', 'injector'].map((x) => subRow(x, 2)),
@@ -818,6 +822,13 @@ function renderCombat() {
         const containment = engineeringRows().filter((r) => r.id === 'ties-containment');
         const coreRows = () => engineeringRows().filter((r) => /^ties-(core|sub-constriction|sub-corePump|sub-injector)/.test(r.id));
         const driveRowsAll = () => [...driveRows('port'), ...driveRows('starboard')];
+        const antimatterButton = () => {
+          const t = grid.transfer?.resource === 'antimatter' ? grid.transfer : null;
+          const dockedShip = Object.values(grid.ports).find((v) => v?.ship)?.ship;
+          if (t) return [small('Stop transfer', 'antimatter-stop', () => send({ type: 'grid', transfer: null }), true)];
+          if (gridOrder === 'startup') return grid.antimatter >= grid.fuelCaps.antimatter ? [] : [small('Onboard antimatter', 'antimatter-onboard', () => send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: grid.fuelCaps.antimatter - grid.antimatter } }))];
+          return !grid.antimatter ? [] : [small('Offload antimatter', 'antimatter-offload', () => send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'out', amount: grid.antimatter, ...(grid.docked ? {} : dockedShip ? { ship: dockedShip } : {}) } }), true)];
+        };
         const steps = [
           { title: 'Dock power, Solar', rows: sourceRows, state: () => (cells('dock') + cells('solar') + cells('ship') > 0 ? 'Online' : 'Cold'),
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
@@ -827,7 +838,7 @@ function renderCombat() {
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
           { title: 'Engineering console', rows: engNoReactors, state: () => (grid.ties['console:Engineering'].length ? (grid.consoleOk.Engineering ? 'Online' : 'Startup') : 'Cold'),
             on: () => (busOn ? '' : 'the Engineering console needs Bus A, B or C energized'), off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
-          { title: 'Antimatter containment', rows: () => containment, state: () => (!grid.antimatter ? 'Cold' : grid.ties.containment.length && grid.containmentOk ? 'Online' : 'Startup'),
+          { title: 'Antimatter containment', rows: () => containment, extra: antimatterButton, state: () => (!grid.antimatter ? 'Cold' : grid.ties.containment.length && grid.containmentOk ? 'Online' : 'Startup'),
             on: () => (grid.core === 'ejected' ? 'no warp core aboard' : busOn ? '' : 'containment needs Bus A, B or C energized'), off: () => (grid.antimatter ? 'containment can\'t be cut with antimatter aboard: offload it at a starbase' : '') },
           { title: 'Impulse drives', rows: driveRowsAll, state: () => (drives.every((d) => d.state === 'running') ? 'Online' : drives.some((d) => d.state !== 'off') ? 'Startup' : 'Cold'),
             on: () => (!grid.deuterium ? 'the impulse drives need deuterium aboard' : busOn ? '' : 'the deuterium pumps need Bus A, B or C energized') },
@@ -839,6 +850,7 @@ function renderCombat() {
             on: () => (busOn ? '' : 'the consoles need Bus A, B or C energized') },
         ];
         const list = gridOrder === 'shutdown' ? [...steps].reverse() : steps;
+        // Startup takes antimatter aboard from the dock (to a full tank); Shutdown offloads it all.
         const tripped = new Set((grid.tripped || []).map((k) => `ties-${k.replace(':', '-')}`));
         list.forEach((step, i) => {
           const body = step.rows();
@@ -846,7 +858,7 @@ function renderCombat() {
           const why = (gridOrder === 'shutdown' ? step.off : step.on)?.() || '';
           const chip = el('span', { className: 'grid-chip', textContent: state });
           chip.dataset.state = state.toLowerCase();
-          const head = header(`${i + 1}. ${step.title}`, [chip, ...(why ? [el('small', { className: 'grid-note grid-locked-why', textContent: `Locked: ${why}` })] : [])]);
+          const head = header(`${i + 1}. ${step.title}`, [chip, ...(step.extra?.() || []), ...(why ? [el('small', { className: 'grid-note grid-locked-why', textContent: `Locked: ${why}` })] : [])]);
           head.dataset.step = step.title;
           rows.push(head);
           for (const r of body) {
@@ -926,11 +938,9 @@ function renderCombat() {
     gp.replaceChildren(
       el('div', { className: 'st-control' },
         el('p', { className: 'st-state', id: 'core-state', textContent: `Warp core (M/ARC): ${coreText}` }),
-        el('div', { className: 'ops-form' },
-          ...(grid.docked && grid.core !== 'online' && grid.core !== 'starting' ? [button(grid.core === 'ejected' ? 'Install new warp core and pods' : 'Replace warp core and pods', 'core-refit', () => send({ type: 'grid', refit: true }))] : []),
-          grid.core === 'ejected' ? el('span')
-            : grid.core === 'offline' ? button('Start warp core', 'core-start', () => send({ type: 'grid', core: 'start' })) : button('Shut down warp core', 'core-stop', () => send({ type: 'grid', core: 'stop' }), 'lcars-button--alert'),
-          ...(grid.core !== 'ejected' ? [button('Eject warp core', 'core-eject', () => { if (confirm('Eject the warp core and antimatter pods? The ship is left with solar and batteries until a new core is installed at a starbase.')) send({ type: 'grid', eject: true }); }, 'lcars-button--alert')] : []))),
+        // (Start and stop are on the warp core's row; eject is in Damage control;
+        // replacing the core waits for the shipyard's drydock.)
+        ),
       orderTaps(),
       banner(),
       table(),
@@ -961,6 +971,15 @@ function renderCombat() {
         row('hull', 'Hull', `${c.hull}%`, c.hull < 100 ? 'Damaged: at 0% the ship is destroyed' : 'Intact'),
         ...POWER.map(([k, label]) => row(k, label, c.damage[k] ? `${c.damage[k]}% damaged` : 'Operational',
           own.power[k] < own.allocated[k] ? `gets ${own.power[k]}% of ${own.allocated[k]}% set` : `${own.power[k]}%`)),
+        ...(grid.core !== 'ejected' ? [el('li', { className: 'dc-row', id: 'dc-eject' },
+          el('span', { className: 'dc-label', textContent: 'Warp core and antimatter pods' }),
+          el('span', { className: 'dc-value', textContent: ejectArmed() ? 'EJECT ARMED' : grid.core }),
+          el('span', { className: 'dc-note', textContent: ejectArmed() ? 'press again within 5 s to eject' : 'eject: press twice within 5 s' }),
+          button(ejectArmed() ? 'Confirm eject' : 'Eject core', 'core-eject', () => {
+            if (ejectArmed()) { ejectArmedAt = 0; send({ type: 'grid', eject: true }); return; }
+            ejectArmedAt = Date.now(); dc.dataset.sig = ''; renderCombat();
+            setTimeout(() => { dc.dataset.sig = ''; renderCombat(); }, 5100);
+          }, 'lcars-button--alert'))] : []),
         row('conduits', 'Warp core power transfer conduits', c.damage.conduits ? `${c.damage.conduits}% damaged` : 'Operational', c.damage.conduits >= 50 ? 'FAILED: no core output' : ''),
         // Subsystems fail outright when badly damaged (50% or more).
         // The buses: a damaged bus carries less (its max scales with its condition).
