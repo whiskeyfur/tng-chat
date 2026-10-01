@@ -33,6 +33,7 @@ function startComputer(folder, ...ships) {
 startComputer.cold = (folder, ship) => startComputer(folder, ship, { cold: true });
 const stopComputer = (proc) => new Promise((r) => { proc.once('exit', r); proc.kill(); });
 const stored = (folder, ship, name) => { try { return fs.readFileSync(path.join(DATA_DIR, folder, ship, name), 'utf8'); } catch { return null; } };
+const SYSTEMS_SHORT = (own) => Object.keys(own.grid.demand).filter((k) => own.grid.delivered[k] < own.grid.demand[k]);
 const waitFor = async (fn, ms = 10000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return; await new Promise((r) => setTimeout(r, 100)); } throw new Error('timed out waiting'); };
 const server = require('../server');
 const URL = `http://localhost:${process.env.PORT}/`;
@@ -1271,6 +1272,16 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', ties: { dock: ['A'], core: [], impulse: ['B'] } });
     await waitFor(() => { const n = barclay.nav()?.own; return n?.grid.impulseUsed > 0 && barclay.nav().maxWarp < 0.25; });
     step(`the impulse reactor powered Bus B (${barclay.nav().own.grid.impulseUsed}), so the Excelsior has only ${Math.round(barclay.nav().maxWarp * 400)}% of impulse speed left`);
+    // #2: a battery on Bus A charges from Bus A's surplus even while Bus B and
+    // the EPS are short (Bus A is served, and its batteries charged, first).
+    barclay.send({ type: 'grid', ties: { impulse: [], battery: ['B'] } }); // Bus B on the battery alone: drain it a little
+    await waitFor(() => barclay.nav()?.own.grid.battery.charge <= 97, 15000);
+    barclay.send({ type: 'power', power: { engines: 100, shields: 100, transporter: 100, replicators: 100, recreation: 100 } });
+    barclay.send({ type: 'grid', ties: { battery: ['A'], core: ['EPS'], dock: [] } });
+    barclay.send({ type: 'grid', tap: { bus: 'A', on: true } });
+    barclay.send({ type: 'grid', tap: { bus: 'B', on: true } });
+    await waitFor(() => { const n = barclay.nav()?.own; return n && n.grid.battery.charging > 0 && SYSTEMS_SHORT(n).length > 0; });
+    step(`with the warp core overloaded (short: ${SYSTEMS_SHORT(barclay.nav().own).join(', ')}), the battery on Bus A still charged from Bus A's share`);
     barclay.close();
     ro.close();
 

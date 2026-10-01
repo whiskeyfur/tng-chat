@@ -1202,27 +1202,45 @@ function flow(k) {
   let fed = 0;
   if (net > 0) for (const n of e.ties.ship) if (fed < net) { const got = take(n, net - fed); cells.feed[n] += got; fed += got; }
   e.fed = fed;
+  // Systems, a bus at a time (Bus A, Bus B, then loads on the EPS alone),
+  // each in priority order. Batteries charge from a bus they're tied to right
+  // after that bus is served, from what's left that reaches it: a brownout on
+  // another bus doesn't take their share. Batteries supply only when nothing
+  // else will (see take), so they drain into a bus that's short.
   const delivered = {};
   let tractorOk = true;
-  for (const sys of SYSTEM_PRIORITY) {
-    if (sys === 'tractor') { if (e.towing) tractorOk = load('system:tractor', TRACTOR.draw) >= TRACTOR.draw; continue; }
-    delivered[sys] = load(`system:${sys}`, demand[sys]);
+  const bt = e.ties.battery;
+  const usedOf = (name) => { const src = srcs.find((x) => x.name === name); return src.ties.length ? cap[name] - src.left : 0; };
+  let charging = 0;
+  const chargeFrom = (X) => {
+    if (!bt.includes(X) || usedOf('battery') > 0) return;
+    const room = Math.min(GRID.batteryCharge, GRID.batteryCap - e.battery.charge);
+    for (const x of srcs) {
+      if (x.name === 'battery' || charging >= room) continue;
+      if (!(x.ties.includes(X) || (X !== 'EPS' && e.taps[X] && x.ties.includes('EPS')))) continue;
+      const t = Math.min(x.left, room - charging);
+      x.left -= t; charging += t;
+      if (buses[X]) { buses[X].need += t; buses[X].have += t; }
+      cells.battery[x.ties.includes(X) ? X : 'EPS'] -= t; // shown as a draw on the battery row
+    }
+  };
+  for (const X of NODES) {
+    for (const sys of SYSTEM_PRIORITY) {
+      if ((e.ties[`system:${sys}`] || [])[0] !== X) continue;
+      if (sys === 'tractor') { if (e.towing) tractorOk = load('system:tractor', TRACTOR.draw) >= TRACTOR.draw; continue; }
+      delivered[sys] = load(`system:${sys}`, demand[sys]);
+    }
+    chargeFrom(X);
   }
+  if (e.towing && !(e.ties['system:tractor'] || []).length) tractorOk = false;
+  for (const sys of SYSTEMS) if (!(sys in delivered)) delivered[sys] = 0; // not tied in: no power
   for (const X of BUSES) {
     const sys = SYSTEMS.filter((x) => e.ties[`system:${x}`]?.includes(X));
     const want = sys.reduce((n, x) => n + demand[x], 0);
     Object.assign(buses[X], { consolesOk: Object.keys(CONSOLE_BUS).every((st) => !e.ties[`console:${st}`]?.includes(X) || consoleOk[st]), fraction: want ? Math.min(1, sys.reduce((n, x) => n + delivered[x], 0) / want) : 1 });
   }
-  // Batteries recharge from what's left of sources that reach them.
-  const bt = e.ties.battery;
-  const reaches = (s) => s.ties.some((n) => bt.includes(n)) || (s.ties.includes('EPS') && bt.some((n) => BUSES.includes(n) && e.taps[n]));
-  const usedOf = (name) => { const src = srcs.find((x) => x.name === name); return src.ties.length ? cap[name] - src.left : 0; };
   const used = usedOf('battery');
-  let charging = 0;
-  if (bt.length && used <= 0 && e.battery.charge < GRID.batteryCap) {
-    charging = Math.min(GRID.batteryCharge, GRID.batteryCap - e.battery.charge, srcs.filter((x) => x.name !== 'battery' && reaches(x)).reduce((n, x) => n + x.left, 0));
-  }
-  const drawn = SOURCES.reduce((n, name, i) => n + ((srcs[i].ties.length ? cap[name] : 0) - srcs[i].left), 0) + charging;
+  const drawn = SOURCES.reduce((n, name, i) => n + ((srcs[i].ties.length ? cap[name] : 0) - srcs[i].left), 0); // charging included
   // The grid table's footer: per bus (and the EPS), power used and available.
   const reach = (x, node) => x.ties.includes(node) || (node !== 'EPS' && e.taps[node] && x.ties.includes('EPS'));
   const totals = Object.fromEntries(NODES.map((n) => [n, {
