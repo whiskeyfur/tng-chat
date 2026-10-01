@@ -105,17 +105,16 @@ const audioBytes = (page) => page.evaluate(async () => {
   });
   let ok = false;
   try {
-    // No ship's computers yet: no ships at all, not even for ops.
+    // No ship's computers yet: no ships at all, not even for ops; only the
+    // starbases, which run themselves.
     const early = await (await browser.newContext()).newPage();
     await early.goto(URL);
-    await early.waitForSelector('#ship option:has-text("No ships")', { state: 'attached' });
+    await early.waitForSelector('#ship option[value="Starbase 47"]:has-text("automated")', { state: 'attached' });
+    assert.deepEqual(await early.$$eval('#ship option:not([disabled])', (os) => os.map((o) => o.value)), ['Deep Space 4', 'Starbase 12', 'Starbase 47', 'Starbase 74']);
     // The station picker comes from the relay and includes every station.
     await early.waitForSelector('#station option[value="Transporter"]', { state: 'attached' });
     assert.equal(await early.locator('#station option:not([disabled])').count(), 12); // 11 + Operations
-    assert.equal(await early.isDisabled('#register-form button'), true);
-    await early.selectOption('#station', 'Operations');
-    assert.equal(await early.isDisabled('#register-form button'), true, 'ops could take a ship with no computer');
-    step("without a ship's computer there is no ship, not even for ops");
+    step("without a ship's computer there is no ship, not even for ops: only the four automated starbases");
 
     // Ship's computers bring the ships into existence.
     let coreA = startComputer('a', 'Enterprise');
@@ -500,7 +499,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.click('#link-form button');
     // The data network map: a pending request is a dashed line, then solid.
     await kops.waitForSelector('#net-map line[stroke-dasharray="10 8"]', { state: 'attached' });
-    assert.equal(await kops.locator('#net-map .net-node').count(), 3); // Enterprise, K'Vatch and the Defiant (kept alive by its computer)
+    assert.equal(await kops.locator('#net-map .net-node').count(), 7); // Enterprise, K'Vatch, the Defiant (kept alive by its computer) and the four starbases
     await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await op.waitForFunction(() => window.__operator.network.includes("K'Vatch"));
     await op.waitForFunction(() => window.__operator.graph.links.some((l) => l.includes('Enterprise') && l.includes("K'Vatch")));
@@ -714,6 +713,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // the data link up.
     await screen(op, 'link');
     await screen(kops, 'link');
+    await op.selectOption('#link-ship', "K'Vatch");
     await op.click('#link-form button');
     await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await bob.waitForSelector('#users li:has-text("kor")', { state: 'attached' });
@@ -727,7 +727,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await alice.fill('.v-chat-text', 'still with you');
     await alice.press('.v-chat-text', 'Enter');
     await martok.waitForSelector('.v-chatlog div:has-text("alice: still with you")');
-    assert.equal(await op.isDisabled('#hail-form button'), true, 'Enterprise ops can still hail with no ship in range');
+    assert.equal(await op.locator('#hail-ship option[value="K\'Vatch"]').count(), 0, 'Enterprise ops can still hail the K\'Vatch with no ops aboard');
     await op.waitForTimeout(300);
     assert.deepEqual(await op.evaluate(() => window.__operator.network), ["K'Vatch"], "the K'Vatch's computer didn't keep the link");
     assert.equal(await bob.evaluate(() => window.__comms.users.some((u) => u.name === 'kor')), true);
@@ -1035,12 +1035,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     helm({ dest: { x: 310, y: 500 }, warp: 5 });
     await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); return n?.own.warp === 0 && n.own.x < 320; }, 30000);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
-    obrien.send({ type: 'power', power: { engines: 0, shields: 0, sensors: 20, transporter: 0, weapons: 0, lifeSupport: 60 } });
+    obrien.send({ type: 'power', power: { engines: 0, shields: 0, sensors: 20, transporter: 0, weapons: 0, lifeSupport: 60, replicators: 0, recreation: 0 } });
+    await nog.waitForSelector('[data-readout="Replicators"]:has-text("Offline")', { state: 'attached' });
     await waitFor(() => obrien.nav()?.own.signature < 0.3);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'detached' });
     await carol.waitForSelector('#weapons-lock-state:has-text("No weapons lock")');
-    step(`the Defiant powered down to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 200 units away, and the weapons lock was lost`);
-    obrien.send({ type: 'power', power: { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100 } });
+    step(`the Defiant powered down (replicators and holodecks too: its Crew consoles show them offline) to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 200 units away, and the weapons lock was lost`);
+    obrien.send({ type: 'power', power: { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 } });
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     step('powered up again, the Defiant showed up on sensors');
     kira.close();
@@ -1137,6 +1138,33 @@ const audioBytes = (page) => page.evaluate(async () => {
     await bob.waitForSelector(`.bcast--alert:has-text("Rebuilt and docked at ${reborn.base}")`, { state: 'attached' });
     step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt docked at ${reborn.base}`);
     laforge.close();
+
+    // Automated starbases: a hail with nobody aboard gets the automated reply;
+    // a data link is accepted by itself after a few seconds.
+    await screen(op, 'hail');
+    await op.waitForSelector(`#hail-ship option[value="${reborn.base}"]`, { state: 'attached' });
+    await op.selectOption('#hail-ship', reborn.base);
+    await op.selectOption('#hail-crew', id('alice'));
+    await op.click('#hail-form button');
+    await op.waitForSelector('#ops-log li:has-text("(automated): nobody aboard")', { state: 'attached' });
+    await screen(op, 'link');
+    await op.selectOption('#link-ship', reborn.base);
+    await op.click('#link-form button');
+    await op.waitForFunction((b) => window.__operator.network.includes(b), reborn.base, { timeout: 10000 });
+    await op.waitForSelector('#ops-log li:has-text("(automated) accepted")', { state: 'attached' });
+    step(`${reborn.base} (automated) answered a hail with nobody aboard, and accepted a data link by itself`);
+
+    // Someone reports aboard the starbase: hails are put through to them.
+    const bashir = await crewWs('bashir', reborn.base, 'Captain');
+    await screen(op, 'hail');
+    await op.selectOption('#hail-ship', reborn.base);
+    await op.selectOption('#hail-crew', id('alice'));
+    await op.click('#hail-form button');
+    await waitFor(() => bashir.msgs.some((m) => m.type === 'connect' && m.peers.some((p) => p.name === 'alice')));
+    await alice.waitForFunction(() => window.__voice.state !== 'idle', null, { timeout: 10000 });
+    bashir.close();
+    await alice.waitForFunction(() => window.__voice.state === 'idle', null, { timeout: 10000 });
+    step(`with a Captain aboard ${reborn.base}, the automated station put alice's hail straight through to them`);
     for (const page of [worf, riker, picard]) await page.close();
 
     sulu.close();

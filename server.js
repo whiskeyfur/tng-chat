@@ -160,7 +160,7 @@ function broadcastOps(key) {
     .map((u) => ({ ...info(u), state: u.state, peers: u.peers.map(peerInfo) }))
     .sort((a, b) => a.name.localeCompare(b.name));
   // Ships in range: ops on duty, within subspace (comms) range.
-  const otherShips = [...new Set([...operators].map((op) => op.shipKey))]
+  const otherShips = [...new Set([...[...operators].map((op) => op.shipKey), ...BASE_KEYS])]
     .filter((k) => k !== key && commsOk(key, k)).map(shipName).sort();
   const describe = (h) => ({ id: h.id, fromShip: shipName(h.fromShip), toShip: shipName(h.toShip), caller: peerInfo(h.caller) });
   const all = [...hails.values()];
@@ -198,12 +198,13 @@ function networkGraph() {
 // targets. People already aboard when its computer goes offline stay on, so
 // the ship is still listed (computer: false) until they leave.
 function shipList() {
-  const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys()]);
+  const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys(), ...BASE_KEYS]);
   return [...live].map((k) => ({
-    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: cores.has(k), active: true,
+    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, ...(isBase(k) ? { starbase: true } : {}),
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
-const hasComputer = (name) => cores.has(shipKey(name));
+// Starbases run themselves (no ship's computer needed), so they're always there.
+const hasComputer = (name) => present(shipKey(name));
 // Everyone gets the ship list: the sign-in pull-down, transporter targets,
 // and shield status.
 function broadcastShips() {
@@ -318,7 +319,9 @@ function operatorMessage(op, msg) {
       const target = shipKey(clean(msg.ship));
       if (!caller) return fail('pick a crew member to put the hail through for');
       if (target === op.shipKey) return fail('that is this ship');
-      if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
+      const automated = isBase(target) && !opsOf(target).length;
+      if (automated && !crewOf(target).length) return fail(`${shipName(target)} (automated): nobody aboard to take the call. Docking is open, and data links are accepted automatically`);
+      if (!automated && !opsOf(target).length) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
       if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
       if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
       const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now() };
@@ -327,6 +330,7 @@ function operatorMessage(op, msg) {
       opLog(target, `incoming hail from the ${shipName(op.shipKey)}: ${caller.name}, ${caller.station}`);
       broadcastOps(target);
       broadcastOps(op.shipKey);
+      if (automated) setTimeout(() => autoAnswerHail(h.id), BASE_DELAY.hail);
       return ok(`hailing the ${shipName(target)} for ${caller.name}`);
     }
     case 'route': {
@@ -360,7 +364,7 @@ function operatorMessage(op, msg) {
     case 'link-request': {
       const target = shipKey(clean(msg.ship));
       if (target === op.shipKey) return fail('that is this ship');
-      if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
+      if (!opsOf(target).length && !isBase(target)) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
       if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
       if (links.has(linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already open`);
       if ([...linkRequests.values()].some((r) => linkKey(r.fromShip, r.toShip) === linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already being negotiated`);
@@ -368,6 +372,9 @@ function operatorMessage(op, msg) {
       linkRequests.set(req.id, req);
       opLog(target, `the ${shipName(op.shipKey)} requests a data link`);
       broadcastAllOps();
+      // Starbases accept by themselves after a moment: sooner with someone
+      // aboard (but not on ops) to expedite it; their ops can answer first.
+      if (isBase(target)) setTimeout(() => autoAcceptLink(req.id), crewOf(target).length && !opsOf(target).length ? BASE_DELAY.linkCrewed : BASE_DELAY.link);
       return ok(`requesting a data link with the ${shipName(target)}`);
     }
     case 'link-accept':
@@ -676,10 +683,10 @@ function coreSignOff(ws) {
 
 // Ranges at full sensor power; sensor power scales all three (Engineering).
 const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
-const SYSTEMS = ['engines', 'shields', 'sensors', 'transporter', 'weapons', 'lifeSupport'];
+const SYSTEMS = ['engines', 'shields', 'sensors', 'transporter', 'weapons', 'lifeSupport', 'replicators', 'recreation'];
 const REACTOR = 450; // total power to share, in percent of one system at full
 const MIN_SHIELD_POWER = 20;
-const DEFAULT_POWER = { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100 };
+const DEFAULT_POWER = { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
 // actually gets from the power grid (see "the power grid" below): damage caps
 // a system, unarmed weapons draw nothing, and a bus short of power browns out.
@@ -691,7 +698,7 @@ function powerOf(k) {
 // How visible a ship is to other ships' sensors: the more power it uses (all
 // of it: systems, consoles, the warp core's containment), the further off it
 // shows up. 450 units drawn or more: seen at full sensor range; power down to run quiet.
-const signatureOf = (k) => Math.max(0.1, Math.min(1, flow(k).drawn / REACTOR));
+const signatureOf = (k) => (isBase(k) ? 1 : Math.max(0.1, Math.min(1, flow(k).drawn / REACTOR)));
 function rangesOf(k) {
   const f = Math.max(0, Math.min(100, powerOf(k).sensors)) / 100;
   return { comms: COMMS_RANGE * f, sensors: SENSOR_RANGE * f, transporter: TRANSPORTER_RANGE * f };
@@ -710,7 +717,7 @@ const navTargets = new Map();  // ship key -> ship key it's heading for (interce
 
 function distance(a, b) {
   const p = navState.get(a), q = navState.get(b);
-  if (!p || !q || !cores.has(a) || !cores.has(b)) return Infinity;
+  if (!p || !q || !present(a) || !present(b)) return Infinity;
   return Math.hypot(p.x - q.x, p.y - q.y);
 }
 const rangeText = (a, b) => (Number.isFinite(distance(a, b)) ? `${Math.round(distance(a, b))} units away` : 'position unknown');
@@ -744,7 +751,7 @@ function scheduleNav() {
     }
     for (const l of [...links]) {
       const [a, b] = l.split('|');
-      if (!commsOk(a, b) && cores.has(a) && cores.has(b)) {
+      if (!commsOk(a, b) && present(a) && present(b)) {
         links.delete(l);
         for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} lost: out of subspace range`);
         refreshNetworks([a, b]);
@@ -752,7 +759,7 @@ function scheduleNav() {
       }
     }
     // Ops consoles list the ships in hailing range: refresh them when that changes.
-    const keys = [...cores.keys()].sort();
+    const keys = [...cores.keys(), ...BASE_KEYS].sort();
     const sig = keys.flatMap((a, i) => keys.slice(i + 1).filter((b) => commsOk(a, b)).map((b) => `${a}|${b}`)).join(',');
     if (sig !== lastRangeSig) { lastRangeSig = sig; broadcastAllOps(); }
     const byShip = new Map();
@@ -769,7 +776,7 @@ function coreNav(c, key, nav) {
   const clean = { x: nav.x, y: nav.y, heading: Number(nav.heading) || 0, warp: Number(nav.warp) || 0, dest: nav.dest || null };
   if (ALERTS.includes(nav.alert)) clean.alert = nav.alert;
   if (nav.lockout) clean.lockout = true;
-  if (nav.power && typeof nav.power === 'object') clean.power = Object.fromEntries(SYSTEMS.map((s) => [s, Math.max(0, Math.min(100, Number(nav.power[s]) || 0))]));
+  if (nav.power && typeof nav.power === 'object') clean.power = Object.fromEntries(SYSTEMS.map((s) => [s, Math.max(0, Math.min(100, Number(nav.power[s] ?? DEFAULT_POWER[s]) || 0))]));
   // Hull, shields and damage: the relay runs combat, so it only takes the
   // computer's saved copy when it has none of its own.
   if (!combat.get(key)?.loaded) { combat.set(key, { ...freshCombat(nav.combat), loaded: true }); eng.set(key, freshEng(nav.eng)); flowCache.delete(key); }
@@ -832,6 +839,7 @@ function navCommand(ws, msg) {
     if (ws.station !== 'Helm') return note('Only Helm can set course and speed');
     const core = primaryCore.get(key);
     if (!core) return note("No ship's computer is flying the ship");
+    if (isBase(key)) return note(`Helm: ${shipName(key)} is a starbase: it holds station`);
     if (towedBy(key)) return note(`Helm: held in the ${shipName(towedBy(key))}'s tractor beam`);
     const order = { type: 'core-helm', ship: ws.ship };
     if (msg.dest) {
@@ -1006,13 +1014,56 @@ const GRID = { core: 500, coreStartDraw: 60, coreStartSecs: 10, containment: 20,
 const BUSES = ['A', 'B'];
 const NODES = ['A', 'B', 'EPS'];
 const SOURCES = ['solar', 'dock', 'core', 'battery'];
-const SYSTEM_BUS = { lifeSupport: 'A', sensors: 'A', engines: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
+const SYSTEM_BUS = { lifeSupport: 'A', sensors: 'A', replicators: 'A', recreation: 'A', engines: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
 const busOf = (station) => CONSOLE_BUS[station] || 'B';
 // Starbases: dock to restock torpedoes, take dock power, repair faster and
 // refit a warp core. A destroyed ship comes back docked at one of them.
 const STARBASES = [{ name: 'Starbase 47', x: 500, y: 120 }, { name: 'Starbase 12', x: 120, y: 860 }, { name: 'Starbase 74', x: 880, y: 820 }, { name: 'Deep Space 4', x: 860, y: 160 }];
 const DOCK_RANGE = 10;
+// Starbases are on the comm net by themselves: anyone can report aboard,
+// ops included. Automated, they accept data links after a short delay
+// (sooner with crew aboard to expedite it) and put hails through to whoever
+// is aboard; an operator aboard can answer first.
+const BASE_DELAY = { link: 5000, linkCrewed: 2000, hail: 2000 };
+const BASE_KEYS = new Set();
+const isBase = (k) => BASE_KEYS.has(k);
+const present = (k) => cores.has(k) || BASE_KEYS.has(k);
+for (const b of STARBASES) { const k = registerShip(b.name); BASE_KEYS.add(k); navState.set(k, { x: b.x, y: b.y, heading: 0, warp: 0, dest: null }); }
+
+function autoAcceptLink(id) {
+  const req = linkRequests.get(id);
+  if (!req) return; // answered already
+  linkRequests.delete(id);
+  const base = shipName(req.toShip);
+  if (!opsOf(req.fromShip).length || !commsOk(req.fromShip, req.toShip)) { opLog(req.fromShip, `${base} could not open the data link`); broadcastAllOps(); return; }
+  links.add(linkKey(req.fromShip, req.toShip));
+  opLog(req.fromShip, `${base} (automated) accepted: data link open`);
+  opLog(req.toShip, `data link with the ${shipName(req.fromShip)} open (automated)`);
+  refreshNetworks([req.fromShip]);
+  broadcastAllOps();
+  console.log(`data link open: ${shipName(req.fromShip)} - ${base} (automated)`);
+}
+
+// Put a hail through to someone aboard a starbase with no operator: the
+// Captain or Communications if aboard, else whoever is free.
+function autoAnswerHail(id) {
+  const h = hails.get(id);
+  if (!h) return;
+  const caller = users.get(h.caller);
+  const order = ['Captain', 'Communications', 'First Officer'];
+  const aboard = crewOf(h.toShip).filter((u) => u.state === 'idle').sort((a, b) => (order.indexOf(a.station) + 1 || 9) - (order.indexOf(b.station) + 1 || 9));
+  if (opsOf(h.toShip).length) return; // an operator came on duty: theirs to answer
+  hails.delete(id);
+  if (!caller || !aboard.length) {
+    if (caller) send(caller, { type: 'notice', text: `${shipName(h.toShip)} (automated): nobody free to take the call` });
+  } else {
+    forceConnect(caller, aboard[0]);
+    opLog(h.fromShip, `${shipName(h.toShip)} (automated) put ${caller.name} through to ${aboard[0].name}, ${aboard[0].station}`);
+  }
+  broadcastOps(h.fromShip);
+  broadcastOps(h.toShip);
+}
 const SELF_DESTRUCT_SECS = Number(process.env.SELF_DESTRUCT_SECONDS) || 30;
 const BLAST = { range: 30, damage: 30 }; // a ship blowing up hurts ships close by
 // Tractor beam (Tactical): holds a ship whose shields are down and tows it.
@@ -1209,6 +1260,7 @@ function tractorCommand(ws, msg) {
   if (!msg.ship) return e.towing ? releaseTractor(key, `released by ${ws.name}`) : undefined;
   const t = shipKey(clean(msg.ship));
   if (t === key) return note('cannot put a tractor beam on our own ship');
+  if (isBase(t)) return note(`${shipName(t)} is a starbase: it doesn't move`);
   if (!cores.has(t) || !navState.has(t) || !sensorOk(key, t)) return note(`the ${clean(msg.ship)} is not on sensors`);
   if (distance(key, t) > TRACTOR.range) return note(`the ${shipName(t)} is out of tractor range (${Math.round(distance(key, t))} units; get within ${TRACTOR.range})`);
   if (shields.has(t)) return note(`the ${shipName(t)} has its shields up: the tractor beam can't hold it`);
@@ -1311,7 +1363,7 @@ const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 50
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
-const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', lifeSupport: 'life support' };
+const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', lifeSupport: 'life support', replicators: 'replicators', recreation: 'recreation (holodecks)' };
 const combat = new Map(); // ship key -> { hull, shield, damage, torpedoes, repair, lock, armed, phaserCharge, torpedoAt, restockAt, hitAt, hitBy, dirty }
 
 function freshCombat(saved) {
@@ -1438,6 +1490,7 @@ function combatCommand(ws, msg) {
     }
     const t = shipKey(clean(msg.ship));
     if (t === key) return note('cannot target our own ship');
+    if (isBase(t)) return note(`${shipName(t)} is a Federation starbase: weapons won't lock on it`);
     if (!cores.has(t) || !navState.has(t) || !sensorOk(key, t)) return note(`the ${clean(msg.ship)} is not on sensors`);
     if (c.lock === t) return;
     c.lock = t;
@@ -1651,7 +1704,7 @@ function leaveOps(ws) {
 // can keep a link going with nobody aboard, but can't start one). With
 // neither, the ship's links close; calls already going over them carry on.
 function dropLinksIfUnmaintained(key) {
-  if (opsOf(key).length || cores.has(key) || !linkedTo(key).length) return;
+  if (opsOf(key).length || present(key) || !linkedTo(key).length) return;
   const formerNet = [...network(key)];
   for (const k of linkedTo(key)) { links.delete(linkKey(key, k)); opLog(k, `data link with the ${shipName(key)} lost: no operator or ship's computer`); }
   refreshNetworks(formerNet);
@@ -1887,8 +1940,8 @@ wss.on('connection', (ws) => {
       if (!u || u.shipKey !== ws.shipKey) return fail('that person is not aboard');
       if (u.operator) return fail('the ops station cannot be beamed');
       if (powerOf(ws.shipKey).transporter <= 0) return fail('no power to the transporter: ask Engineering');
-      if (toKey !== ws.shipKey && cores.has(toKey) && !transporterOk(ws.shipKey, toKey)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(ws.shipKey, toKey)}; get within ${Math.round(rangesOf(ws.shipKey).transporter)})`);
-      if (!cores.has(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
+      if (toKey !== ws.shipKey && present(toKey) && !transporterOk(ws.shipKey, toKey)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(ws.shipKey, toKey)}; get within ${Math.round(rangesOf(ws.shipKey).transporter)})`);
+      if (!present(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
       if (toKey === ws.shipKey) return fail(`${u.name} is already aboard`);
       for (const k of [ws.shipKey, toKey]) if (shields.has(k)) return fail(`cannot beam through the shields of the ${shipName(k)}`);
       if (lockoutOf(toKey)) return fail(`the ${shipName(toKey)} has a transporter lockout: Security's force field is up`);

@@ -425,10 +425,9 @@
     ] }),
     Crew: (ship) => ({ code: 'CRW 10', color: 'tan', panels: [
       panel('st-ship', `The ${ship}`, 'orange', true, shipSide(ship)),
-      panel('st-status', 'Ship status', 'gold', false,
-        live(readout('Alert status', 'sky'), () => 'Condition green'),
-        live(readout('Shift', 'gold'), () => ['Alpha', 'Beta', 'Gamma'][Math.floor(new Date().getHours() / 8)]),
-        live(readout('Replicators', 'orange'), () => 'Online')),
+      // Real alert status, replicators and recreation (client.js fills it in).
+      panel('st-status', 'Ship status', 'gold', false, h('div', { 'data-services': '' }),
+        live(readout('Shift', 'gold'), () => ['Alpha', 'Beta', 'Gamma'][Math.floor(new Date().getHours() / 8)])),
       panel('st-decks', 'Deck status', 'blue', false, deckGrid(8, 8)),
     ] }),
   };

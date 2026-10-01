@@ -88,7 +88,7 @@ const unitsPerSecond = (warp) => (warp <= 0 ? 0 : warp < 1 ? 0.5 : 2 * warp ** 1
 
 // Power: the reactor's output (450%) split across systems, each 0..100%.
 // Engineering sets it; engines set the top speed.
-const DEFAULT_POWER = { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100 };
+const DEFAULT_POWER = { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 };
 const maxWarp = (power) => (power.engines <= 0 ? 0 : Math.max(0.25, Math.round((power.engines / 100) * 9 * 10) / 10));
 
 for (const store of stores.values()) {

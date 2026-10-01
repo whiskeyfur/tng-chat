@@ -89,7 +89,7 @@ Engineering has three screens for power: **Power distribution** (what each syste
 
 ### Power distribution
 
-A slider per system, 0–100 (default: engines 80, shields 60, sensors 100, transporter 60, weapons 50, life support 100), is that system's **demand**; **Route power** sends it. The panel shows the demand on each bus before it's routed. What a system actually gets depends on the grid (a bus short of power browns out) and on damage, and every station feels it:
+A slider per system, 0–100 (default: engines 80, shields 60, sensors 100, transporter 60, weapons 50, life support 100, replicators 40, recreation 10), is that system's **demand**; **Route power** sends it. The panel shows the demand on each bus before it's routed. What a system actually gets depends on the grid (a bus short of power browns out) and on damage, and every station feels it:
 
 - **Engines** set the top speed: 100 is warp 9, 80 warp 7.2, 0 no movement at all. Helm's faster speeds show "(no power)"; losing engine power slows a ship that's already going faster.
 - **Sensors** scale all three ranges: sensor range (600), subspace range for hails and data links (400) and transporter range (20) at 100; at 50, half of each. Hails and data links need *both* ships' ranges to reach, so the weaker one decides; a link drops if a power cut takes the ships out of range.
@@ -97,6 +97,7 @@ A slider per system, 0–100 (default: engines 80, shields 60, sensors 100, tran
 - **Transporter** at 0 can't beam at all.
 - **Life support** under 50 puts a flashing warning on every console aboard.
 - **Weapons** charge the phaser banks (see Combat). They only draw power while the phasers are armed.
+- **Replicators** (a medium load) and **recreation** (holodecks; a small one): Crew consoles show them online, rationed (replicators under 20) or offline/closed. Cutting them is an easy way to save power or run quiet.
 
 ### Power grid
 
@@ -113,14 +114,16 @@ Two buses, **A** and **B**, carry the ship's power, and the **EPS grid** passes 
 - **Antimatter containment** always draws 20, from any combination of Bus A, Bus B and the EPS (checkboxes; any feed that has the power will do; default Bus A). It can't be left with no feed: only self-destruct switches it off. With no power for 5 seconds, the core **breaches** and the ship is destroyed. Every console aboard counts it down. Containment on the EPS alone dies with the core if nothing else feeds the EPS.
 - **Ejecting the core:** Engineering can eject the warp core and antimatter pods (with a confirmation). No more breach (ejecting during a breach countdown saves the ship), but no more core power either: solar and batteries only (and dock power at a starbase). Docked at a starbase, Engineering can **install a new warp core** (it comes offline: start it up).
 - **What hangs on each bus:**
-  - **Bus A:** life support, sensors, the core's startup and (by default) containment; the Captain, First Officer, Helm, Science, Engineering, Communications and Operations consoles.
+  - **Bus A:** life support, sensors, replicators, recreation, the core's startup and (by default) containment; the Captain, First Officer, Helm, Science, Engineering, Communications and Operations consoles.
   - **Bus B:** engines, shields, weapons, transporter; the Tactical, Security, Medical, Transporter and Crew consoles.
 - **A bus short of power** feeds containment and the core's startup first, then the consoles (2 each), then a tractor beam in use (30 on Bus B), then shares what's left between its systems (a brownout). A console whose bus can't power it goes **dark**: its displays black out and it can't give orders. Comms still work (combadges). Engineering's grid controls have emergency power, so Engineering can always fix the grid.
 - **Stealth:** a ship's **power signature** is everything it draws (systems, consoles, containment, battery charging) out of 450, and other ships' sensors only see it within their sensor range times that signature (never less than 10%). Drawing 450 or more, it shows up at the full 600 units; down to life support and a few consoles, only within about 150. So a ship can run quiet by cutting power (unarmed weapons draw nothing, for one), at the cost of speed, shields and weapons. Engineering's panels and Science's map show the ship's own signature; a scan shows the other ship's. Losing a ship from sensors breaks a weapons lock and Helm's intercept course.
 
 ## Starbases
 
-Four starbases sit in the sector: **Starbase 47** (500, 120), **Starbase 12** (120, 860), **Starbase 74** (880, 820) and **Deep Space 4** (860, 160). They show on the sector map, and Helm can set course for one. Within 10 units, at all stop, Helm can **Dock**. Docked, a ship gets dock power (for Engineering to tie to Bus A), restocks photon torpedoes (one every 5 seconds) and repairs four times faster. Going anywhere undocks it.
+Four starbases sit in the sector: **Starbase 47** (500, 120), **Starbase 12** (120, 860), **Starbase 74** (880, 820) and **Deep Space 4** (860, 160). They're built into the relay: always on the comm net and in the ship list (marked starbase), with no ship's computer needed, so anyone can report aboard one, ops included. They show on the sector map, and Helm can set course for one. They don't move, can't be targeted, and have no library unless a ship's computer runs for them.
+
+Starbases are **automated**: a data link request is accepted by itself after 5 seconds (2 seconds with crew aboard to expedite it), and a hail is put through to whoever is aboard (the Captain or Communications first) after 2 seconds; with nobody aboard, the hailing ops gets an automated reply instead. An operator on duty aboard can answer links and hails first, as on any ship. Within 10 units, at all stop, Helm can **Dock**. Docked, a ship gets dock power (for Engineering to tie to Bus A), restocks photon torpedoes (one every 5 seconds) and repairs four times faster. Going anywhere undocks it.
 
 ## Tractor beam (Tactical)
 
@@ -190,7 +193,7 @@ Starts the server and drives headless Chromium pages with a fake microphone thro
 - **Crew calls:** decline; accept with audio both ways; chat; a 300 KB file arrives byte-for-byte; hang-up; a peer going offline.
 - **Command, security, medical:** the force field refusing a beam-in and Security's beam-in alert; confinement (can call Security, not the First Officer); the First Officer reassigning bob; sickbay leaving Tactical unmanned until discharge; the Captain's orders, red alert (shields up, consoles red) and condition green.
 - **Combat:** Tactical locking on the Defiant (its Tactical warned, the Captain's status shows the lock) and arming phasers; a torpedo draining raised shields with the hull untouched and the tubes reloading; "Taking fire" on the Defiant's consoles; a charged phaser bank hitting with shields down, damaging the hull and a system and capping its power; Engineering directing repairs until it's fixed, and the Defiant's computer saving the damage.
-- **Stealth:** the Defiant powering down drops off the Enterprise's sensors 200 units away (and the weapons lock is lost), then shows up again when it powers up.
+- **Stealth:** the Defiant powering down (replicators and holodecks too, shown offline on its Crew console) drops off the Enterprise's sensors 200 units away (and the weapons lock is lost), then shows up again when it powers up.
 - **Starbases:** Helm flying to Starbase 12 and docking; the torpedo fired earlier restocked.
 - **Power grid:** the warp core shut down with the batteries off leaves Bus B dead (Tactical's console dark and refusing orders, no engines); restarted on dock power, the consoles come back. Ties to several buses at once (the core on A, B and EPS; batteries on A and B), and containment refusing to be left without a feed.
 - **Eject and tow:** Engineering ejecting the core; the Defiant coming alongside and towing the Enterprise by tractor beam at warp 3 (the Enterprise's Helm can't break away); towed back to Starbase 12, released, docked, a new core installed and started.
@@ -207,6 +210,7 @@ Starts the server and drives headless Chromium pages with a fake microphone thro
 - **Stations, transporter, shields:** changing station (Transporter to Helm, Helm to Operations as a second operator who manages a data link with the first, back to Crew); Communications seeing a call in comm traffic without joining; shields up blocking the transporter; shields down and a crew member beamed to the K'Vatch.
 - **Hosting elsewhere:** the library endpoints answer cross-origin preflight requests.
 - **Library delete:** crew and other ships' ops are refused; ops delete from their own ship and the file is gone from both computers and from everyone's library.
+- **Starbases:** with no ship's computers, only the four automated starbases are offered at sign-in; a hail to one with nobody aboard gets the automated reply; a data link to one is accepted by itself; with a Captain aboard, the starbase puts a hail straight through to them.
 - **Ship's computers and the library:** offline with no computer; an upload reaching both Enterprise computers and not the relay, a shipmate seeing it and a K'Vatch crew member downloading it over the data link; access ending when the link closes; a computer that was offline catching up without reviving a deleted file; a computer keeping a ship in the list with nobody aboard.
 - **Without ops:** the call in progress carries on and shipmates can still call each other.
 

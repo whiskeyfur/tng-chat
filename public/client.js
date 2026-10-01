@@ -117,7 +117,7 @@ function renderShips(all) {
   const keep = sel.value || urlParams.get('ship') || savedReg?.ship || '';
   const placeholder = new Option(ships.length ? 'Ship' : "No ships: start a ship's computer", '');
   placeholder.disabled = true;
-  sel.replaceChildren(placeholder, ...ships.map((s) => new Option(s.ops ? s.name : `${s.name} (ops offline)`, s.name)));
+  sel.replaceChildren(placeholder, ...ships.map((s) => new Option(s.starbase ? `${s.name} (starbase${s.ops ? '' : ', automated'})` : s.ops ? s.name : `${s.name} (ops offline)`, s.name)));
   const match = ships.find((s) => s.name.toLowerCase() === keep.toLowerCase());
   sel.value = match?.name || '';
   updateSignInMode();
@@ -158,6 +158,7 @@ function showStation() {
   renderCrewPanels();
   renderShipState();
   renderCombat();
+  renderServices();
   fillReassign();
   renderTraffic();
   showScreen(stationView.sections[0].id);
@@ -201,7 +202,7 @@ const ownShip = () => ships.find((s) => me && s.name.toLowerCase() === me.ship.t
 
 // Shields (footer, displays, Tactical's control) and the transporter controls.
 // Power as Engineering has routed it (from the ship's computer, via 'nav').
-const POWER = [['engines', 'Engines'], ['shields', 'Shields'], ['sensors', 'Sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['lifeSupport', 'Life support']];
+const POWER = [['engines', 'Engines'], ['shields', 'Shields'], ['sensors', 'Sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['lifeSupport', 'Life support'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
 const ownPower = () => lastNav?.own?.power || null;
 
 // Shields (footer, displays, Tactical's control), the transporter controls and
@@ -535,6 +536,29 @@ function renderCombat() {
   }
 }
 
+// Crew services (Crew consoles): replicators and recreation, as powered.
+function renderServices() {
+  const box = document.querySelector('[data-services]');
+  const p = ownPower();
+  if (!box || !p) return;
+  const state = [
+    ['Alert status', lastNav.own.alert && lastNav.own.alert !== 'green' ? `${lastNav.own.alert[0].toUpperCase()}${lastNav.own.alert.slice(1)} alert` : 'Condition green', 'sky'],
+    ['Replicators', p.replicators <= 0 ? 'Offline' : p.replicators < 20 ? `Rationed (${p.replicators}%)` : `Online (${p.replicators}%)`, 'orange'],
+    ['Recreation · holodecks', p.recreation <= 0 ? 'Closed' : `Open (${p.recreation}%)`, 'gold'],
+  ];
+  const sig = JSON.stringify(state);
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  box.replaceChildren(...state.map(([label, value, color]) => {
+    const r = document.createElement('div');
+    r.className = 'lcars-readout';
+    r.dataset.readout = label;
+    r.style.setProperty('--accent', `var(--lcars-${color})`);
+    r.append(Object.assign(document.createElement('span'), { className: 'lcars-readout__label', textContent: label }), Object.assign(document.createElement('span'), { className: 'lcars-readout__value', textContent: value }));
+    return r;
+  }));
+}
+
 // Phaser charge and torpedo reload, between updates.
 function updateWeaponTimers() {
   const wp = document.querySelector('[data-weapons]');
@@ -602,6 +626,8 @@ function renderPower() {
     draft.shields < 20 ? 'Shields: too little power to hold them' : 'Shields: can be raised',
     draft.transporter <= 0 ? 'Transporter: no power' : 'Transporter: ready',
     draft.lifeSupport < 50 ? `Life support: ${draft.lifeSupport}%, crew warned` : 'Life support: nominal',
+    draft.replicators <= 0 ? 'Replicators: offline' : draft.replicators < 20 ? 'Replicators: rationed' : 'Replicators: online',
+    draft.recreation <= 0 ? 'Recreation and holodecks: closed' : 'Recreation and holodecks: open',
     // The more power the ship uses, the further off other ships' sensors see it.
     `Power signature now ${Math.round(lastNav.own.signature * 100)}%: seen from ${Math.round(600 * lastNav.own.signature)} units by full sensors${lastNav.own.signature < 0.6 ? ' (running quiet)' : ''}`,
     ...(Object.values(lastNav.own.combat?.damage || {}).some((d) => d > 0) ? ['Damaged systems get less than routed: see Damage control'] : []),
@@ -710,6 +736,7 @@ async function onMessage(msg) {
       renderPower();
       renderCrewPanels();
       renderCombat();
+      renderServices();
       break;
     case 'course-plotted':
       log(`${msg.by.name} plotted a course to ${msg.label}`);
