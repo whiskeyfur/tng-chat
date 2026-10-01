@@ -416,6 +416,12 @@ function energizeCheck() {
   setTimeout(() => { rs.forEach((r) => { r.value = 0; }); energizing = false; }, 900);
 }
 
+// Engineering's grid table order, remembered per console (this browser).
+const GRID_ORDERS = [['startup', 'Startup'], ['operations', 'Operations'], ['shutdown', 'Shutdown']];
+let gridOrder = 'operations';
+try { const o = localStorage.getItem('stchat-grid-order'); if (GRID_ORDERS.some(([v]) => v === o)) gridOrder = o; } catch {}
+function setGridOrder(v) { gridOrder = v; try { localStorage.setItem('stchat-grid-order', v); } catch {} }
+
 // --- Captain, First Officer, Security, Medical controls --------------------------
 const securityAlerts = []; // beam-ins Security has been told about
 const sentOrders = new Map(); // orders we gave, with acknowledgements
@@ -655,7 +661,7 @@ function renderCombat() {
   // Engineering: the power grid.
   const gp = document.querySelector('[data-grid]');
   // Not while someone's typing an amount or picking a resource there.
-  if (gp && !gp.contains(document.activeElement?.closest?.('input[type=number], select') || null) && changed(gp, grid, own.power)) {
+  if (gp && !gp.contains(document.activeElement?.closest?.('input[type=number], select') || null) && changed(gp, grid, own.power, gridOrder)) {
     const status = gp.querySelector('#grid-status')?.textContent || '';
     const keepRes = gp.querySelector('#transfer-resource')?.value, keepAmt = gp.querySelector('#transfer-amount')?.value;
     // A source's ties: any of Bus A, Bus B and the EPS (checkboxes).
@@ -732,35 +738,96 @@ function renderCombat() {
       ] : []),
       ...driveRows('port'), ...driveRows('starboard'),
       ...tapRows(),
-      ties('battery', `Batteries ${grid.battery.charge}%`, 'battery', { level: 1, note: grid.battery.charging ? 'charging' : grid.battery.supplying ? 'supplying' : '' }),
-      ties('solar', 'Solar', 'solar', { level: 1 }),
+    ];
+    // Power sources from outside (dock power, the ships docked with us, solar) and the batteries.
+    const sourceRows = () => [
       ties('dock', grid.docked ? `Dock power (${grid.docked}, ${grid.dockedPort} dock)` : 'Dock power (not docked)', 'dock', { level: 1 }),
       // Each ship docked with us, by port: power in from it, and out to it (one set of ties for both).
       ...Object.entries(grid.ports).filter(([, v]) => v?.ship).flatMap(([pt, v]) => [
         Object.assign(ties('ship', `${pt[0].toUpperCase()}${pt.slice(1)} dock: from the ${v.ship}`, 'ship', { level: 1 }), { id: `ties-ship-${pt}` }),
         Object.assign(ties('ship', `${pt[0].toUpperCase()}${pt.slice(1)} dock: to the ${v.ship}`, `feed:${pt}`, { level: 1, sign: false }), { id: `ties-ship-feed-${pt}` }),
       ]),
+      ties('solar', 'Solar', 'solar', { level: 1 }),
     ];
+    const batteryRows = () => [ties('battery', `Batteries ${grid.battery.charge}%`, 'battery', { level: 1, note: grid.battery.charging ? 'charging' : grid.battery.supplying ? 'supplying' : '' })];
     const table = () => {
       const SYS = { ...Object.fromEntries(POWER), tractor: 'Tractor beam' };
       const crewAt = (st) => comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st).length;
-      // The bus crosslink heads the table, set apart from the consoles.
-      const xl = crosslinkRow();
-      xl.querySelector('th').className = '';
-      xl.classList.add('grid-crosslink');
-      const rows = [xl];
-      for (const key of Object.keys(grid.tieNodes).filter((x) => x.startsWith('console:'))) {
-        const st = key.slice(8), n = crewAt(st);
-        rows.push(ties(key, `${st} console`, key, { note: n ? (grid.consoleOk[st] ? `${n} aboard` : `${n} aboard · DARK`) : 'unmanned' }));
+      const consoles = Object.keys(grid.tieNodes).filter((x) => x.startsWith('console:')).map((x) => x.slice(8));
+      // A console's rows: the console, its systems, and its subsystems (Engineering: the reactors too).
+      const consoleRows = (st, { reactors = true } = {}) => {
+        const n = crewAt(st), rows = [];
+        rows.push(ties(`console:${st}`, `${st} console`, `console:${st}`, { note: n ? (grid.consoleOk[st] ? `${n} aboard` : `${n} aboard · DARK`) : 'unmanned' }));
         const sysRow = (sys, level) => {
           const want = sys === 'tractor' ? (grid.towing ? 30 : 0) : grid.demand[sys], got = sys === 'tractor' ? want : grid.delivered[sys];
           rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { level, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}${got > 100 ? ' · OVERDRIVE' : ''}` : 'off' }));
           for (const child of grid.systemChildren[sys] || []) sysRow(child, level + 1);
         };
         for (const sys of grid.stationSystems[st] || []) sysRow(sys, 1);
-        if (st === 'Engineering') rows.push(...engineeringRows());
+        if (st === 'Engineering' && reactors) rows.push(...engineeringRows());
         // Any station's own subsystems (Communications' RF, radio and relay; Security's force field emitters).
         rows.push(...Object.entries(grid.subsystems).filter(([, v]) => v.parent === st).map(([x]) => subRow(x, 1)));
+        return rows;
+      };
+      const header = (text, extra = []) => { const tr = el('tr', { className: 'grid-section' }, el('th', { scope: 'rowgroup', colSpan: COLS.length + 1 }, el('span', { textContent: text }), ...extra)); return tr; };
+      const divide = (rows) => { rows[rows.length - 1]?.classList.add('grid-crosslink'); return rows; };
+      const xl = () => { const r = crosslinkRow(); r.querySelector('th').className = ''; return r; };
+      const rows = [];
+      if (gridOrder === 'operations') {
+        // Management layout: power sources, the crosslink, batteries, then the consoles.
+        rows.push(header('Power sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl()]), header('Batteries'), ...divide(batteryRows()));
+        for (const st of consoles) rows.push(...consoleRows(st));
+      } else {
+        // Startup / Shutdown: a checklist, worked top to bottom.
+        const busOn = ['A', 'B', 'C'].some((X) => grid.totals[X]?.available > 0);
+        const epsOn = grid.totals.EPS?.available > 0;
+        const running = grid.core === 'online' || grid.core === 'starting' || Object.values(grid.drives).some((d) => d.state !== 'off');
+        const cells = (k) => Object.values(grid.cells[k] || {}).reduce((a, b) => a + Math.abs(b), 0);
+        const drives = Object.values(grid.drives);
+        const others = consoles.filter((st) => st !== 'Engineering');
+        const engNoReactors = () => consoleRows('Engineering', { reactors: false });
+        const containment = engineeringRows().filter((r) => r.id === 'ties-containment');
+        const coreRows = () => engineeringRows().filter((r) => /^ties-(core|sub-constriction|sub-corePump|sub-injector)/.test(r.id));
+        const driveRowsAll = () => [...driveRows('port'), ...driveRows('starboard')];
+        const steps = [
+          { title: 'Dock power, Solar', rows: sourceRows, state: () => (cells('dock') + cells('solar') + cells('ship') > 0 ? 'Online' : 'Cold'),
+            off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
+          { title: 'Batteries', rows: batteryRows, state: () => (grid.ties.battery.length ? 'Online' : 'Cold'),
+            off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
+          { title: 'Bus crosslink', rows: () => [xl()], state: () => (grid.ties.crosslink.length >= 2 ? 'Online' : 'Cold'),
+            off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
+          { title: 'Engineering console', rows: engNoReactors, state: () => (grid.ties['console:Engineering'].length ? (grid.consoleOk.Engineering ? 'Online' : 'Startup') : 'Cold'),
+            on: () => (busOn ? '' : 'the Engineering console needs Bus A, B or C energized'), off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
+          { title: 'Antimatter containment', rows: () => containment, state: () => (!grid.antimatter ? 'Cold' : grid.ties.containment.length && grid.containmentOk ? 'Online' : 'Startup'),
+            on: () => (grid.core === 'ejected' ? 'no warp core aboard' : busOn ? '' : 'containment needs Bus A, B or C energized'), off: () => (grid.antimatter ? 'containment can\'t be cut with antimatter aboard: offload it at a starbase' : '') },
+          { title: 'Impulse drives', rows: driveRowsAll, state: () => (drives.every((d) => d.state === 'running') ? 'Online' : drives.some((d) => d.state !== 'off') ? 'Startup' : 'Cold'),
+            on: () => (!grid.deuterium ? 'the impulse drives need deuterium aboard' : busOn ? '' : 'the deuterium pumps need Bus A, B or C energized') },
+          { title: 'EPS taps', rows: tapRows, state: () => (Object.values(grid.taps).some((v) => v > 0) ? 'Online' : 'Cold'),
+            on: () => (epsOn ? '' : 'the EPS taps need the EPS energized (impulse drives or warp core)') },
+          { title: 'Warp core', rows: coreRows, state: () => ({ online: 'Online', starting: 'Startup', ejected: 'Ejected' })[grid.core] || 'Cold',
+            on: () => (grid.core === 'ejected' ? 'no warp core: install one at a starbase' : !grid.antimatter ? 'the warp core needs antimatter aboard' : busOn ? '' : 'the constriction needs Bus A, B or C energized') },
+          { title: 'Consoles and systems', rows: () => others.flatMap((st) => consoleRows(st)), state: () => { const manned = others.filter((st) => crewAt(st)); const tied = others.filter((st) => grid.ties[`console:${st}`].length); return manned.length && manned.every((st) => grid.consoleOk[st]) ? 'Online' : tied.length ? 'Startup' : 'Cold'; },
+            on: () => (busOn ? '' : 'the consoles need Bus A, B or C energized') },
+        ];
+        const list = gridOrder === 'shutdown' ? [...steps].reverse() : steps;
+        const tripped = new Set((grid.tripped || []).map((k) => `ties-${k.replace(':', '-')}`));
+        list.forEach((step, i) => {
+          const body = step.rows();
+          const state = body.some((r) => tripped.has(r.id)) ? 'Tripped' : step.state();
+          const why = (gridOrder === 'shutdown' ? step.off : step.on)?.() || '';
+          const chip = el('span', { className: 'grid-chip', textContent: state });
+          chip.dataset.state = state.toLowerCase();
+          const head = header(`${i + 1}. ${step.title}`, [chip, ...(why ? [el('small', { className: 'grid-note grid-locked-why', textContent: `Locked: ${why}` })] : [])]);
+          head.dataset.step = step.title;
+          rows.push(head);
+          for (const r of body) {
+            if (!why) continue;
+            // Locked: greyed, and a tap is refused (logged) instead of acted on.
+            r.classList.add('grid-locked');
+            r.addEventListener('click', (ev) => { if (!ev.target.closest('input, button')) return; ev.preventDefault(); ev.stopPropagation(); const st = gp.querySelector('#grid-status'); if (st) st.textContent = `Unable to comply. ${why[0].toUpperCase()}${why.slice(1)}.`; }, true);
+          }
+          rows.push(...divide(body));
+        });
       }
       return el('table', { className: 'grid-table', id: 'grid-table' },
         el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), ...COLS.map((n) => el('th', { scope: 'col', textContent: NODE_NAMES[n] })))),
@@ -772,6 +839,25 @@ function renderCombat() {
             td.toggleAttribute('data-over', t.tied > t.max || t.condition < 100);
             return td;
           }))));
+    };
+    // Three orders for the table: Startup and Shutdown checklists, and Operations (management).
+    const orderTaps = () => el('div', { className: 'ops-form grid-orders', role: 'group', ariaLabel: 'grid order' }, ...GRID_ORDERS.map(([v, text]) => {
+      const b = button(text, `grid-order-${v}`, () => { setGridOrder(v); renderCombat(); });
+      b.setAttribute('aria-pressed', String(gridOrder === v));
+      return b;
+    }));
+    // Startup done: ready for departure. Shutdown done: back to a cold ship.
+    const banner = () => {
+      const manned = Object.keys(grid.consoleOk).filter((st) => comms.users.some((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st));
+      const ready = grid.core === 'online' && Object.values(grid.drives).every((d) => d.state === 'running') && (!grid.antimatter || grid.containmentOk)
+        && Object.values(grid.taps).some((v) => v > 0) && manned.every((st) => grid.consoleOk[st]);
+      const COLD_KEEP = ['impulsePort', 'impulseStarboard', 'thrustersPort', 'thrustersStarboard'];
+      const cold = !['online', 'starting'].includes(grid.core) && Object.values(grid.drives).every((d) => d.state === 'off')
+        && Object.values(grid.taps).every((v) => !v) && Object.entries(grid.ties).every(([k, v]) => COLD_KEEP.includes(k) || !v.length);
+      const text = gridOrder === 'startup' && ready ? 'Ready for departure' : gridOrder === 'shutdown' && cold ? 'Cold ship' : '';
+      const b = el('p', { className: 'st-state grid-banner', id: 'grid-banner', textContent: text, hidden: !text });
+      b.toggleAttribute('data-up', !!text);
+      return b;
     };
     // Power offered to a ship docked with us (they may offer some back: the difference flows).
     const feedControl = () => {
@@ -816,6 +902,8 @@ function renderCombat() {
           grid.core === 'ejected' ? el('span')
             : grid.core === 'offline' ? button('Start warp core', 'core-start', () => send({ type: 'grid', core: 'start' })) : button('Shut down warp core', 'core-stop', () => send({ type: 'grid', core: 'stop' }), 'lcars-button--alert'),
           ...(grid.core !== 'ejected' ? [button('Eject warp core', 'core-eject', () => { if (confirm('Eject the warp core and antimatter pods? The ship is left with solar and batteries until a new core is installed at a starbase.')) send({ type: 'grid', eject: true }); }, 'lcars-button--alert')] : []))),
+      orderTaps(),
+      banner(),
       table(),
       feedControl(),
       supplies(),

@@ -1202,8 +1202,30 @@ const audioBytes = (page) => page.evaluate(async () => {
     const geordi = await openAs(browser, 'geordi', 'geordi', 'Enterprise', 'Engineering');
     await screen(geordi, 'st-grid');
     for (const row of ['sub-forcefields', 'sub-rf', 'sub-radio', 'sub-subspace', 'sub-constriction', 'sub-portPump', 'thrustersPort', 'core']) await geordi.waitForSelector(`#ties-${row}`, { state: 'attached' });
-    await geordi.close();
     step("the grid table lists every subsystem under its console (Security's force field emitters, Communications' RF, radio and relay, the reactors')");
+    // Three orders: Operations (sources, crosslink, batteries, then consoles), and the Startup and Shutdown checklists.
+    assert.deepEqual(await geordi.evaluate(() => window.__nav.last.own.grid.tieNodes['system:tractor']), ['EPS'], 'the tractor beam ties to the EPS only');
+    await geordi.click('#grid-order-operations');
+    const sections = await geordi.$$eval('#grid-table tbody tr', (rs) => rs.map((r) => (r.classList.contains('grid-section') ? `[${r.textContent.trim()}]` : r.id)).slice(0, 8));
+    assert.deepEqual(sections.slice(0, 2), ['[Power sources]', 'ties-dock'], sections.join(' '));
+    assert.ok(sections.indexOf('[Bus crosslink]') < sections.indexOf('ties-crosslink') && sections.indexOf('ties-crosslink') < sections.indexOf('[Batteries]') && sections.indexOf('[Batteries]') < sections.indexOf('ties-battery'), sections.join(' '));
+    assert.equal(sections[sections.indexOf('ties-battery') + 1], 'ties-console-Captain');
+    const STEPS = ['Dock power, Solar', 'Batteries', 'Bus crosslink', 'Engineering console', 'Antimatter containment', 'Impulse drives', 'EPS taps', 'Warp core', 'Consoles and systems'];
+    await geordi.click('#grid-order-startup');
+    assert.deepEqual(await geordi.$$eval('#grid-table tr[data-step]', (rs) => rs.map((r) => r.dataset.step)), STEPS);
+    assert.equal(await geordi.textContent('#grid-table tr[data-step="Warp core"] .grid-chip'), 'Online');
+    await geordi.click('#grid-order-shutdown');
+    assert.deepEqual(await geordi.$$eval('#grid-table tr[data-step]', (rs) => rs.map((r) => r.dataset.step)), [...STEPS].reverse());
+    // The core is running: the batteries can't come off yet, and a tap there is refused.
+    await geordi.waitForSelector('#grid-table tr[data-step="Batteries"] .grid-locked-why:has-text("shut down the warp core")');
+    const battTied = await geordi.isChecked('#ties-battery input[data-node="A"]');
+    await geordi.click('#ties-battery input[data-node="A"]');
+    await geordi.waitForSelector('#grid-status:has-text("Unable to comply. Shut down the warp core")');
+    assert.equal(await geordi.isChecked('#ties-battery input[data-node="A"]'), battTied, 'the refused tap changed nothing');
+    assert.equal(await geordi.evaluate(() => localStorage.getItem('stchat-grid-order')), 'shutdown');
+    await geordi.click('#grid-order-operations');
+    await geordi.close();
+    step('the grid table: Operations order (power sources, crosslink, batteries, consoles), the Startup checklist and Shutdown in reverse, a locked step refusing a tap; the tractor beam on the EPS');
 
     // Engineering ejects the warp core: no antimatter, no core power.
     laforge.send({ type: 'grid', eject: true });

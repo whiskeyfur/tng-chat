@@ -178,6 +178,15 @@
     .grid-table .grid-note { display: block; color: var(--lcars-tan); font-size: 12px; }
     .grid-table .grid-na { color: #444; }
     .grid-table .grid-section th { color: var(--lcars-orange); padding-top: 14px; }
+    .grid-table .grid-section th span { margin-right: 10px; }
+    .grid-chip { display: inline-block; padding: 0 10px; border-radius: 10px; font-size: 12px; color: #000; background: var(--lcars-tan); vertical-align: middle; }
+    .grid-chip[data-state="online"] { background: #66cc66; }
+    .grid-chip[data-state="startup"] { background: var(--lcars-gold); }
+    .grid-chip[data-state="tripped"], .grid-chip[data-state="ejected"] { background: var(--lcars-red); }
+    .grid-table tr.grid-locked { opacity: 0.45; }
+    .grid-table .grid-locked-why { color: var(--lcars-red); }
+    .grid-orders .lcars-button[aria-pressed="true"] { background: var(--lcars-orange); }
+    .grid-banner { margin: 0; font-size: 22px; color: #66cc66; text-transform: uppercase; }
     .grid-flow { color: var(--lcars-sky); min-width: 3ch; font-variant-numeric: tabular-nums; }
     .grid-supplies { display: flex; flex-direction: column; gap: 6px; }
     .grid-supplies .st-state { margin: 0; font-size: 20px; color: var(--lcars-violet); text-transform: uppercase; }

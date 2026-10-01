@@ -1301,8 +1301,8 @@ const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A
 const STATION_SYSTEMS = { Helm: ['engines'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors'], Engineering: ['lifeSupport'], Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
 const LOAD_NODES = {
   lifeSupport: AB, sensors: AB, replicators: AB, recreation: AB, // low power
-  transporter: AB, tractor: AB,
-  engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], // high power: EPS only
+  transporter: AB,
+  engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], tractor: ['EPS'], // high power: EPS only
 };
 const SYSTEM_PRIORITY = ['lifeSupport', 'sensors', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
 // Systems shown under another system in the grid table (Helm > Engines > Plasma injectors).
@@ -1322,7 +1322,7 @@ const SUBSYSTEMS = {
 const DEFAULT_LOAD_TIES = {
   ...Object.fromEntries(Object.entries(CONSOLE_BUS).map(([st, b]) => [`console:${st}`, [b]])),
   ...Object.fromEntries(Object.entries(SYSTEM_BUS).map(([sys, b]) => [`system:${sys}`, LOAD_NODES[sys].includes(b) ? [b] : ['EPS']])),
-  'system:tractor': ['B'],
+  'system:tractor': ['EPS'],
   ...Object.fromEntries(Object.entries(SUBSYSTEMS).map(([k, v]) => [`sub:${k}`, v.ties])),
 };
 const loadNodes = (key) => (key.startsWith('console:') || key.startsWith('sub:') ? AB : LOAD_NODES[key.slice(7)] || []);
@@ -1656,6 +1656,7 @@ function tripBreakers(k) {
     const pick = f.trippable.filter((t) => poolOf(over).includes(t.node));
     const t = pick[Math.floor(Math.random() * pick.length)];
     e.ties[t.key] = e.ties[t.key].filter((n) => n !== over);
+    (e.tripped ||= {})[t.key] = true; // shown as Tripped until Engineering re-ties it
     e.dirty = true;
     const name = t.key.startsWith('console:') ? `${t.key.slice(8)} console` : t.key.startsWith('sub:') ? SUBSYSTEMS[t.key.slice(4)].name : SYSTEM_NAMES[t.key.slice(7)] || t.key;
     const p = poolOf(over);
@@ -1696,7 +1697,7 @@ function gridView(k) {
     cells: Object.fromEntries(Object.entries(f.cells).map(([n, c]) => [n, r(c)])), totals: f.totals,
     coreUsed: Math.round(f.coreUsed), impulseUsed: Math.round(f.impulseUsed), coreSubsOk: f.coreSubsOk, subOk: f.subOk,
     start: e.start, startSecs: GRID.coreStartSecs, coreOutput: GRID.core,
-    taps: e.taps, ties: e.ties, containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
+    taps: e.taps, ties: e.ties, tripped: Object.keys(e.tripped || {}), containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
     breach: e.breach ? GRID.breachSecs - e.breach : null,
     battery: { charge: Math.round((e.battery.charge / GRID.batteryCap) * 100), charging: Math.round(f.charging), supplying: Math.round(f.batteryUsed) },
     docked: e.docked, near: near?.name || null,
@@ -1769,6 +1770,7 @@ function gridCommand(ws, msg) {
     if (list.length > 1 && !isMulti(k)) return note(`${NAME[k] || k.split(':')[1]} ties to one: Bus A, B or C (the crosslink joins buses)`);
     if (k === 'containment' && !list.length && e.antimatter > 0) return note('antimatter containment can\'t be switched off with antimatter aboard (only self-destruct does that): leave it at least one feed');
     e.ties[k] = list;
+    if (e.tripped) delete e.tripped[k];
     said.push(`${NAME[k] || (k.startsWith('console:') ? `${k.slice(8)} console` : k.startsWith('sub:') ? SUBSYSTEMS[k.slice(4)].name : SYSTEM_NAMES[k.slice(7)] || k.slice(7))} ${k === 'containment' ? 'fed from' : 'tied to'} ${feeds(list)}`);
   }
   if ('feed' in msg) {
@@ -1965,7 +1967,7 @@ function tractorCommand(ws, msg) {
   if (e.towing && e.towing !== t) releaseTractor(key, 'switching target');
   e.towing = t;
   flowCache.delete(key);
-  if (!flow(key).tractorOk) { e.towing = null; flowCache.delete(key); return note(`not enough power on Bus B for the tractor beam (needs ${TRACTOR.draw})`); }
+  if (!flow(key).tractorOk) { e.towing = null; flowCache.delete(key); return note(`not enough power on the EPS for the tractor beam (needs ${TRACTOR.draw})`); }
   if (engOf(t).docked) { opLog(t, `undocked from ${engOf(t).docked} by a tractor beam`); engOf(t).docked = null; engOf(t).dirty = true; flowCache.delete(t); }
   navTargets.delete(t);
   const core = primaryCore.get(t);
@@ -2011,7 +2013,7 @@ function tow() {
   for (const [k, e] of eng) {
     const t = e.towing;
     if (!t) continue;
-    const why = !cores.has(k) || !cores.has(t) ? 'lost contact' : shields.has(t) ? `the ${shipName(t)} raised shields` : !flow(k).tractorOk ? 'not enough power on Bus B' : consoleDarkFor(k, 'Tactical') ? 'no power to Tactical' : null;
+    const why = !cores.has(k) || !cores.has(t) ? 'lost contact' : shields.has(t) ? `the ${shipName(t)} raised shields` : !flow(k).tractorOk ? 'not enough power on the EPS' : consoleDarkFor(k, 'Tactical') ? 'no power to Tactical' : null;
     if (why) { releaseTractor(k, why); continue; }
     const n = navState.get(k), m = navState.get(t);
     if (!n || !m) continue;
