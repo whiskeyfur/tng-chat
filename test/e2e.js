@@ -1404,6 +1404,19 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.close();
     ro.close();
 
+    // Text messages without a call: alice writes to bob and carol together.
+    await closeComms(bob);
+    await openComms(alice);
+    await alice.click(`.comms-msg-pick[data-user="${id('bob')}"]`);
+    await alice.click(`.comms-msg-pick[data-user="${id('carol')}"]`);
+    await alice.fill('#msg-text', 'Meet in Ten Forward');
+    await alice.click('#msg-send');
+    for (const page of [bob, carol]) await page.waitForFunction(() => window.__comms.messages.some((m) => m.text === 'Meet in Ten Forward' && m.from === 'alice' && m.to.length === 2));
+    await bob.waitForSelector('#comms-button:has-text("1 message")', { state: 'attached' });
+    assert.equal(await alice.evaluate(() => window.__voice.state), 'idle', 'no call needed for messages');
+    await closeComms(alice);
+    step('alice texted bob and carol together without a call; bob\'s Comms button showed the unread message');
+
     // Closing the tab mid-call ends the call for the other side.
     await callFrom(carol, 'bob');
     await bob.waitForSelector('.v-incoming:not([hidden])');

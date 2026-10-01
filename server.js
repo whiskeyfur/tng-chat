@@ -2586,6 +2586,24 @@ wss.on('connection', (ws) => {
     if (msg.type === 'dock' && ws.id) return consoleDark(ws) ? darkNote(ws) : dockCommand(ws, msg);
     if (msg.type === 'self-destruct' && ws.id) return consoleDark(ws) ? darkNote(ws) : selfDestructCommand(ws, msg);
 
+    // Text messages, no call needed: to one person or several, anyone the
+    // sender could call (aboard, or on the data network). Local RF carries
+    // them aboard, radio between ships.
+    if (msg.type === 'text' && ws.id) {
+      const text = clean(msg.text).slice(0, 500);
+      const to = [...new Set(Array.isArray(msg.to) ? msg.to : [])].map((id) => typeof id === 'string' && users.get(id)).filter((u) => u && u !== ws);
+      if (!text || !to.length) return;
+      const reach = to.filter((u) => sameNetwork(ws.shipKey, u.shipKey));
+      const down = (u) => (u.shipKey === ws.shipKey ? !commsUp(ws.shipKey, 'rf') : !commsUp(ws.shipKey, 'radio') || !commsUp(u.shipKey, 'radio'));
+      const sent = reach.filter((u) => !down(u));
+      const failed = to.filter((u) => !sent.includes(u));
+      if (failed.length) send(ws, { type: 'notice', text: `Communications: no message to ${failed.map((u) => u.name).join(', ')} (${failed.some((u) => !reach.includes(u)) ? 'not on our comm net' : 'no power to local RF or radio'})` });
+      if (!sent.length) return;
+      const m = { type: 'text', from: info(ws), to: sent.map(info), text, at: Date.now() };
+      for (const u of [ws, ...sent]) send(u, m);
+      return;
+    }
+
     // Call waiting, "join": bring the person calling us into the call we're in.
     // Everyone in it is told, and the caller connects to each of them.
     if (msg.type === 'merge' && ws.id) {

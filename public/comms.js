@@ -26,6 +26,13 @@
       <div id="comms-extras"></div>
       <h3 class="ops-subhead">Directory</h3>
       <ul class="comms-dir" id="users"></ul>
+      <h3 class="ops-subhead">Messages</h3>
+      <ol class="comms-msgs" id="messages" aria-live="polite"></ol>
+      <form class="ops-form comms-compose" id="msg-form">
+        <span id="msg-to">Tap Msg by names to pick who to write to</span>
+        <input class="ops-input" id="msg-text" placeholder="Message" autocomplete="off" aria-label="message">
+        <button class="lcars-button lcars-button--pill" id="msg-send">Send</button>
+      </form>
       <h3 class="ops-subhead">Subspace radio</h3>
       <div class="radio" id="radio"></div>
     </div>`;
@@ -42,6 +49,10 @@
 
     let users = [];
     let prev = 'idle';
+    // Text messages, no call needed: to one person or a group, by tapping Msg in the directory.
+    const recipients = new Set();
+    const messages = [];
+    let unread = 0;
     const me = () => opts.me();
 
     const voice = createVoice($('call'), {
@@ -67,6 +78,8 @@
 
     function open() {
       if (!dialog.open) dialog.showModal();
+      unread = 0;
+      renderButton();
     }
     function close() {
       if (dialog.open) dialog.close();
@@ -79,7 +92,7 @@
       const label = voice.waiting ? 'Comms · call waiting'
         : { idle: 'Comms', calling: 'Comms · calling', ringing: 'Comms · incoming', 'in-call': 'Comms · in call' }[voice.state];
       opts.button.dataset.state = voice.waiting ? 'ringing' : voice.state;
-      opts.button.querySelector('span').textContent = label;
+      opts.button.querySelector('span').textContent = unread ? `${label} · ${unread} message${unread > 1 ? 's' : ''}` : label;
     }
 
     // Your ship first, then the other ships on the data network.
@@ -118,11 +131,51 @@
           btn.textContent = u.station === 'Operations' ? 'Call ops' : 'Call';
           btn.disabled = voice.state !== 'idle';
           btn.onclick = () => voice.placeCall(u);
-          li.append(name, btn);
+          const msgBtn = document.createElement('button');
+          msgBtn.type = 'button';
+          msgBtn.className = 'lcars-button lcars-button--pill comms-msg-pick';
+          msgBtn.textContent = 'Msg';
+          msgBtn.dataset.user = u.id;
+          msgBtn.setAttribute('aria-pressed', String(recipients.has(u.id)));
+          msgBtn.onclick = () => { if (recipients.has(u.id)) recipients.delete(u.id); else recipients.add(u.id); renderDirectory(); renderCompose(); };
+          li.append(name, btn, msgBtn);
           ul.append(li);
         }
       }
     }
+
+    function renderCompose() {
+      for (const id of [...recipients]) if (!users.some((u) => u.id === id)) recipients.delete(id); // gone
+      const names = [...recipients].map((id) => users.find((u) => u.id === id)?.name).filter(Boolean);
+      $('msg-to').textContent = names.length ? `To ${names.join(', ')}` : 'Tap Msg by names to pick who to write to';
+      $('msg-send').disabled = !names.length;
+    }
+    function renderMessages() {
+      const ol = $('messages');
+      ol.replaceChildren(...(messages.length ? messages.slice(-50).map((m) => {
+        const li = document.createElement('li');
+        const mine = m.from.id === me()?.id;
+        const others = m.to.filter((t) => t.id !== me()?.id).map((t) => t.name);
+        li.className = mine ? 'comms-msg--mine' : '';
+        const head = document.createElement('small');
+        head.textContent = `${new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${mine ? `to ${m.to.map((t) => t.name).join(', ')}` : `${m.from.name}${others.length ? ` to you, ${others.join(', ')}` : ''}`}`;
+        const reply = document.createElement('button');
+        reply.type = 'button';
+        reply.className = 'lcars-button lcars-button--pill comms-reply';
+        reply.textContent = 'Reply';
+        reply.onclick = () => { recipients.clear(); for (const p of [m.from, ...m.to]) if (p.id !== me()?.id) recipients.add(p.id); renderDirectory(); renderCompose(); $('msg-text').focus(); };
+        li.append(head, document.createTextNode(m.text), ...(mine ? [] : [reply]));
+        return li;
+      }) : [Object.assign(document.createElement('li'), { className: 'empty', textContent: 'No messages' })]));
+      ol.scrollTop = ol.scrollHeight;
+    }
+    $('msg-form').onsubmit = (e) => {
+      e.preventDefault();
+      const text = $('msg-text').value.trim();
+      if (!text || !recipients.size) return;
+      opts.send({ type: 'text', to: [...recipients], text });
+      $('msg-text').value = '';
+    };
 
     function setOps(online) {
       $('ops-status').textContent = online ? '' : 'Ops offline: no new off-ship communications. Calls in progress continue.';
@@ -136,6 +189,13 @@
           setOps(msg.ops);
           $('comms-net').textContent = msg.network?.length > 1 ? `Data network: ${msg.network.join(' · ')}` : '';
           renderDirectory();
+          renderCompose();
+          return true;
+        case 'text':
+          messages.push(msg);
+          if (msg.from.id !== me()?.id) { opts.log(`message from ${msg.from.name}: ${msg.text}`); if (!dialog.open) unread++; }
+          renderMessages();
+          renderButton();
           return true;
         case 'notice':
           opts.log(msg.text);
@@ -147,6 +207,8 @@
     }
 
     renderButton();
+    renderMessages();
+    renderCompose();
     return {
       handle,
       open,
@@ -155,6 +217,7 @@
       radio,
       setOps,
       get users() { return users; },
+      get messages() { return messages.map((m) => ({ from: m.from.name, to: m.to.map((t) => t.name), text: m.text })); },
       get isOpen() { return dialog.open; },
       // Signed out: drop the call and the directory.
       reset(reason) {

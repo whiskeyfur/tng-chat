@@ -135,6 +135,16 @@
     @media (max-width: 700px) { .st-list.dc-list li.dc-row { grid-template-columns: 1fr 1fr; } }
     /* The header bar segment left of the name matches the top-left elbow */
     .lcars-header .lcars-bar__seg--a { background: var(--elbow, var(--lcars-orange)); }
+    /* Text messages in the Comms modal */
+    .comms-msgs { list-style: none; margin: 0; padding: 0; max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+    .comms-msgs li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; color: var(--lcars-sky); }
+    .comms-msgs li small { color: var(--lcars-tan); width: 100%; }
+    .comms-msgs li.comms-msg--mine { color: var(--lcars-gold); }
+    .comms-msgs .empty { color: var(--lcars-tan); }
+    .comms-compose #msg-to { color: var(--lcars-gold); min-width: 0; }
+    .comms-compose #msg-text { flex: 1 1 220px; min-width: 0; }
+    .comms-msg-pick[aria-pressed='true'] { outline: 3px solid #fff; outline-offset: 2px; }
+    .comms-reply { min-height: 26px; font-size: 12px; }
     /* A console without power */
     .lcars-content { position: relative; }
     #console-dark { position: absolute; inset: 0; z-index: 5; background: rgba(0, 0, 0, 0.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-transform: uppercase; }
