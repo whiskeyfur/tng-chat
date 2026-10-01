@@ -1044,7 +1044,24 @@ const SOURCES = ['ship', 'solar', 'dock', 'impulse', 'core', 'battery']; // in t
 const SHIP_FEED_MAX = 500; // what Engineering can offer a ship docked with us
 const SYSTEM_BUS = { lifeSupport: 'A', sensors: 'A', replicators: 'A', recreation: 'A', engines: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
-const busOf = (station) => CONSOLE_BUS[station] || 'B';
+// Loads are tied too: each station's console to Bus A or Bus B, and the
+// systems it controls by power class: low-power systems to Bus A or B,
+// medium ones to A, B or the EPS, high-power ones to the EPS only. A load
+// tied to several draws from them in turn. Brownouts: containment first,
+// then consoles, then systems in SYSTEM_PRIORITY order (comforts go first).
+const STATION_SYSTEMS = { Helm: ['engines'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors'], Engineering: ['lifeSupport'], Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
+const LOAD_NODES = {
+  lifeSupport: ['A', 'B'], sensors: ['A', 'B'], replicators: ['A', 'B'], recreation: ['A', 'B'], // low power
+  transporter: NODES, tractor: NODES, // medium
+  engines: ['EPS'], shields: ['EPS'], weapons: ['EPS'], // high power
+};
+const SYSTEM_PRIORITY = ['lifeSupport', 'sensors', 'shields', 'engines', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
+const DEFAULT_LOAD_TIES = {
+  ...Object.fromEntries(Object.entries(CONSOLE_BUS).map(([st, b]) => [`console:${st}`, [b]])),
+  ...Object.fromEntries(Object.entries(SYSTEM_BUS).map(([sys, b]) => [`system:${sys}`, LOAD_NODES[sys].includes(b) ? [b] : ['EPS']])),
+  'system:tractor': ['B'],
+};
+const loadNodes = (key) => (key.startsWith('console:') ? BUSES : LOAD_NODES[key.slice(7)] || []);
 // Starbases: dock to restock torpedoes, take dock power, repair faster and
 // refit a warp core. A destroyed ship comes back docked at one of them.
 const STARBASES = [{ name: 'Starbase 47', x: 500, y: 120 }, { name: 'Starbase 12', x: 120, y: 860 }, { name: 'Starbase 74', x: 880, y: 820 }, { name: 'Deep Space 4', x: 860, y: 160 }];
@@ -1112,6 +1129,7 @@ function freshEng(saved, { cold = false } = {}) {
   const amount = (v, cap) => (Number.isFinite(v) ? Math.max(0, Math.min(cap, v)) : v === false ? 0 : cap);
   const antimatter = amount(s.antimatter, FUEL.antimatter), deuterium = amount(s.deuterium, FUEL.deuterium);
   if (!ties.containment.length && antimatter > 0) ties.containment = DEFAULT_TIES.containment; // never no feed with antimatter aboard
+  for (const [k, d] of Object.entries(DEFAULT_LOAD_TIES)) ties[k] = Array.isArray(s.ties?.[k]) ? s.ties[k].filter((n) => loadNodes(k).includes(n)) : d;
   const core = s.core === 'ejected' || s.antimatter === false ? 'ejected' : s.core === 'offline' || !antimatter || !deuterium ? 'offline' : 'online';
   return {
     core, antimatter, deuterium, start: 0, // a startup in progress starts over
@@ -1168,17 +1186,32 @@ function flow(k) {
   if (e.antimatter > 0) for (const n of e.ties.containment) if (contained < GRID.containment) { const got = take(n, GRID.containment - contained); cells.containment[n] += got; contained += got; }
   const containmentOk = e.antimatter <= 0 || contained >= GRID.containment;
   const startOk = e.core !== 'starting' || take('A', GRID.coreStartDraw) >= GRID.coreStartDraw;
+  // A load draws from its ties in turn; its cell row records where from.
+  const load = (key, amt) => {
+    const row = cells[key] || (cells[key] = { A: 0, B: 0, EPS: 0 });
+    let got = 0;
+    for (const n of e.ties[key] || []) if (got < amt) { const t = take(n, amt - got); row[n] += t; got += t; }
+    return got;
+  };
   const crew = crewOf(k);
-  const consolesOk = {};
-  for (const X of BUSES) { const n = crew.filter((u) => busOf(u.station) === X).length * GRID.console; consolesOk[X] = take(X, n) >= n; }
-  const tractorOk = !e.towing || take('B', TRACTOR.draw) >= TRACTOR.draw;
+  const consoleOk = {};
+  for (const st of Object.keys(CONSOLE_BUS)) {
+    const n = crew.filter((u) => u.station === st).length * GRID.console;
+    consoleOk[st] = load(`console:${st}`, n) >= n;
+  }
   let fed = 0;
   if (net > 0) for (const n of e.ties.ship) if (fed < net) { const got = take(n, net - fed); cells.feed[n] += got; fed += got; }
   e.fed = fed;
+  const delivered = {};
+  let tractorOk = true;
+  for (const sys of SYSTEM_PRIORITY) {
+    if (sys === 'tractor') { if (e.towing) tractorOk = load('system:tractor', TRACTOR.draw) >= TRACTOR.draw; continue; }
+    delivered[sys] = load(`system:${sys}`, demand[sys]);
+  }
   for (const X of BUSES) {
-    const systems = SYSTEMS.filter((s) => SYSTEM_BUS[s] === X).reduce((n, s) => n + demand[s], 0);
-    const got = take(X, systems);
-    Object.assign(buses[X], { consolesOk: consolesOk[X], fraction: systems ? Math.min(1, got / systems) : 1 });
+    const sys = SYSTEMS.filter((x) => e.ties[`system:${x}`]?.includes(X));
+    const want = sys.reduce((n, x) => n + demand[x], 0);
+    Object.assign(buses[X], { consolesOk: Object.keys(CONSOLE_BUS).every((st) => !e.ties[`console:${st}`]?.includes(X) || consoleOk[st]), fraction: want ? Math.min(1, sys.reduce((n, x) => n + delivered[x], 0) / want) : 1 });
   }
   // Batteries recharge from what's left of sources that reach them.
   const bt = e.ties.battery;
@@ -1190,21 +1223,20 @@ function flow(k) {
     charging = Math.min(GRID.batteryCharge, GRID.batteryCap - e.battery.charge, srcs.filter((x) => x.name !== 'battery' && reaches(x)).reduce((n, x) => n + x.left, 0));
   }
   const drawn = SOURCES.reduce((n, name, i) => n + ((srcs[i].ties.length ? cap[name] : 0) - srcs[i].left), 0) + charging;
-  const delivered = Object.fromEntries(SYSTEMS.map((s) => [s, demand[s] * buses[SYSTEM_BUS[s]].fraction]));
   // The grid table's footer: per bus (and the EPS), power used and available.
   const reach = (x, node) => x.ties.includes(node) || (node !== 'EPS' && e.taps[node] && x.ties.includes('EPS'));
   const totals = Object.fromEntries(NODES.map((n) => [n, {
     used: Math.round(n === 'EPS' ? viaEps : buses[n].have),
     available: Math.round((n === 'EPS' ? viaEps : buses[n].have) + srcs.filter((x) => reach(x, n)).reduce((m, x) => m + x.left, 0)),
   }]));
-  const f = { cells, totals, buses, demand, delivered, containmentOk, startOk, tractorOk, batteryUsed: Math.max(0, used), coreUsed: usedOf('core'), impulseUsed: usedOf('impulse'), charging, drawn, viaEps };
+  const f = { cells, totals, buses, consoleOk, demand, delivered, containmentOk, startOk, tractorOk, batteryUsed: Math.max(0, used), coreUsed: usedOf('core'), impulseUsed: usedOf('impulse'), charging, drawn, viaEps };
   flowCache.set(k, { at: Date.now(), f });
   return f;
 }
 const gridChanged = (k) => { flowCache.delete(k); scheduleNav(); };
 // A console with no power on its bus is dark (ops and Engineering's grid controls aside).
-const consoleDark = (ws) => !flow(ws.shipKey).buses[busOf(ws.station)].consolesOk;
-const darkNote = (ws) => send(ws, { type: 'notice', text: `${ws.station}: console offline, no power on Bus ${busOf(ws.station)}` });
+const consoleDark = (ws) => flow(ws.shipKey).consoleOk[ws.station] === false;
+const darkNote = (ws) => send(ws, { type: 'notice', text: `${ws.station}: console offline, no power on its bus` });
 
 // Another ship close enough to dock with (both stopped).
 function nearShip(k) {
@@ -1233,7 +1265,8 @@ function gridView(k) {
     towing: e.towing ? shipName(e.towing) : null, towedBy: tower ? shipName(tower) : null,
     selfDestruct: e.selfDestruct ? { seconds: Math.max(0, Math.ceil((e.selfDestruct.at - Date.now()) / 1000)), by: e.selfDestruct.by } : null,
     buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: Math.round(b.need), have: Math.round(b.have), src: Object.fromEntries(Object.entries(b.src).map(([n, v]) => [n, Math.round(v)])), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
-    systemBus: SYSTEM_BUS, consoleBus: CONSOLE_BUS, drawn: Math.round(f.drawn),
+    consoleOk: f.consoleOk, stationSystems: STATION_SYSTEMS, loadNodes: Object.fromEntries(Object.keys(DEFAULT_LOAD_TIES).map((key) => [key, loadNodes(key)])),
+    delivered: Object.fromEntries(Object.entries(f.delivered).map(([x, v]) => [x, Math.round(v)])), demand: f.demand, drawn: Math.round(f.drawn),
   };
 }
 
@@ -1274,11 +1307,14 @@ function gridCommand(ws, msg) {
   }
   if (msg.tap && BUSES.includes(msg.tap.bus)) { e.taps[msg.tap.bus] = !!msg.tap.on; said.push(`EPS tap to Bus ${msg.tap.bus} ${msg.tap.on ? 'open' : 'closed'}`); }
   for (const [k, v] of Object.entries(msg.ties && typeof msg.ties === 'object' ? msg.ties : {})) {
-    if (!(k in DEFAULT_TIES) || !Array.isArray(v)) continue;
+    if (!(k in DEFAULT_TIES || k in DEFAULT_LOAD_TIES) || !Array.isArray(v)) continue;
+    const allowed = k in DEFAULT_LOAD_TIES ? loadNodes(k) : NODES;
+    const bad = v.filter((n) => !allowed.includes(n));
+    if (bad.length) return note(`${k.split(':')[1]} can only be tied to ${feeds(allowed)}`);
     const list = NODES.filter((n) => v.includes(n));
     if (k === 'containment' && !list.length && e.antimatter > 0) return note('antimatter containment can\'t be switched off with antimatter aboard (only self-destruct does that): leave it at least one feed');
     e.ties[k] = list;
-    said.push(`${NAME[k]} ${k === 'containment' ? 'fed from' : 'tied to'} ${feeds(list)}`);
+    said.push(`${NAME[k] || (k.startsWith('console:') ? `${k.slice(8)} console` : SYSTEM_NAMES[k.slice(7)] || k.slice(7))} ${k === 'containment' ? 'fed from' : 'tied to'} ${feeds(list)}`);
   }
   if ('feed' in msg) {
     e.feed = Math.max(0, Math.min(SHIP_FEED_MAX, Math.round(Number(msg.feed) || 0)));
@@ -1434,7 +1470,7 @@ function tow() {
     if (core) send(core, { type: 'core-set', ship: shipName(t), set: { moveTo: { x, y, heading: n.heading } } });
   }
 }
-const consoleDarkFor = (k, station) => !flow(k).buses[busOf(station)].consolesOk;
+const consoleDarkFor = (k, station) => flow(k).consoleOk[station] === false;
 
 
 // A ship is destroyed: it takes ships close by with it (some), and comes back
@@ -1486,7 +1522,7 @@ const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 50
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
-const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', lifeSupport: 'life support', replicators: 'replicators', recreation: 'recreation (holodecks)' };
+const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', lifeSupport: 'life support', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam' };
 const combat = new Map(); // ship key -> { hull, shield, damage, torpedoes, repair, lock, armed, phaserCharge, torpedoAt, restockAt, hitAt, hitBy, dirty }
 
 function freshCombat(saved) {
@@ -2083,7 +2119,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'beam' && ws.id) {
       const fail = (text) => send(ws, { type: 'notice', text: `Transporter: ${text}` });
       if (ws.station !== 'Transporter') return fail('only the transporter room can beam people');
-      if (consoleDark(ws)) return fail(`console offline, no power on Bus ${busOf(ws.station)}`);
+      if (consoleDark(ws)) return fail('console offline, no power on its bus');
       const u = typeof msg.who === 'string' && users.get(msg.who);
       const toKey = shipKey(clean(msg.ship));
       if (!u || u.shipKey !== ws.shipKey) return fail('that person is not aboard');

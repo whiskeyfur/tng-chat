@@ -85,11 +85,11 @@ When several computers run one ship, the relay picks one to fly it; the others k
 
 ## Power (Engineering)
 
-Engineering has three screens for power: **Power distribution** (what each system asks for), **Power grid** (where the power comes from) and **Damage control**.
+Engineering has three screens for power: **Power distribution** (what each system asks for, on light bars), **Power grid** (where the power comes from) and **Damage control**.
 
 ### Power distribution
 
-A slider per system, 0–100 (default: engines 80, shields 60, sensors 100, transporter 60, weapons 50, life support 100, replicators 40, recreation 10), is that system's **demand**; **Route power** sends it. The panel shows the demand on each bus before it's routed. What a system actually gets depends on the grid (a bus short of power browns out) and on damage, and every station feels it:
+A light bar per system (ten buttons: press one to set the level in tenths, press the top lit one again for 0), 0–100 (default: engines 80, shields 60, sensors 100, transporter 60, weapons 50, life support 100, replicators 40, recreation 10), is that system's **demand**; **Route power** sends it. The panel shows the demand on each bus before it's routed. What a system actually gets depends on the grid (a bus short of power browns out) and on damage, and every station feels it:
 
 - **Engines** set the top speed: 100 is warp 9, 80 warp 7.2, 0 no movement at all. Helm's faster speeds show "(no power)"; losing engine power slows a ship that's already going faster.
 - **Sensors** scale all three ranges: sensor range (600), subspace range for hails and data links (400) and transporter range (20) at 100; at 50, half of each. Hails and data links need *both* ships' ranges to reach, so the weaker one decides; a link drops if a power cut takes the ships out of range.
@@ -101,7 +101,7 @@ A slider per system, 0–100 (default: engines 80, shields 60, sensors 100, tran
 
 ### Power grid
 
-Two buses, **A** and **B**, carry the ship's power, and the **EPS grid** passes power on to them through taps that Engineering opens or closes. The Power grid screen is a table: a row per source (plus containment, and power to and from a docked ship), a column each for Bus A, Bus B and the EPS (the header), each cell a tie checkbox with the power flowing through it, and a footer row with each column's power used / available. Ties can be any combination (none: off); a source tied to several shares its output between them as needed. Sources are drawn on in this order: a docked ship's power, solar, dock power, impulse, the warp core, and batteries last.
+Two buses, **A** and **B**, carry the ship's power, and the **EPS grid** passes power on to them through taps that Engineering opens or closes. The Power grid screen is a table: a row per source (plus containment, and power to and from a docked ship), then each station's console with the systems it controls indented under it; a column each for Bus A, Bus B and the EPS (the header), each cell a tie checkbox with the power flowing through it, and a footer row with each column's power used / available. Ties can be any combination (none: off); a source tied to several shares its output between them as needed. Sources are drawn on in this order: a docked ship's power, solar, dock power, impulse, the warp core, and batteries last.
 
 | Source | Gives (default tie) |
 | --- | --- |
@@ -117,10 +117,12 @@ Two buses, **A** and **B**, carry the ship's power, and the **EPS grid** passes 
 - **Ejecting the core:** Engineering can eject the warp core and antimatter pods (with a confirmation). No more breach (ejecting during a breach countdown saves the ship), but no more core power either: solar and batteries only (and dock power at a starbase).
 - **Replacing the core:** docked at a starbase, with the core shut down, Engineering can **replace the warp core and antimatter pods** (or install them after an ejection). The pods come full if a containment feed is set, empty if not. The new core comes offline: start it up.
 - **Power between docked ships:** each ship's Engineering offers the other some power (0 to start, up to 500). Whoever offers more sends the difference, drawn from the "To the …" row's ties; the other ship takes it in through the same ties ("From the …"). A starbase gives every ship docked with it its full dock power.
-- **What hangs on each bus:**
-  - **Bus A:** life support, sensors, replicators, recreation, the core's startup and (by default) containment; the Captain, First Officer, Helm, Science, Engineering, Communications and Operations consoles.
-  - **Bus B:** engines, shields, weapons, transporter; the Tactical, Security, Medical, Transporter and Crew consoles.
-- **A bus short of power** feeds containment and the core's startup first, then the consoles (2 each), then a tractor beam in use (30 on Bus B), then power sent to a docked ship, then shares what's left between its systems (a brownout). A console whose bus can't power it goes **dark**: its station displays black out and it can't give orders. Comms still work (combadges), and so do the Station screen (move to a console that has power), Console log and Library. Engineering's grid controls have emergency power, so Engineering can always fix the grid.
+- **Loads are tied too:** each console to Bus A or Bus B (default A: Captain, First Officer, Helm, Science, Engineering, Communications, Operations; B: Tactical, Security, Medical, Transporter, Crew). The systems each station controls sit under its console, tied by how much they draw:
+  - low power, Bus A or B: life support (Engineering), sensors (Science), replicators and recreation (Crew); default Bus A
+  - medium, Bus A, B or EPS: transporter (Transporter), tractor beam (Tactical); default Bus B
+  - high power, EPS only: engines (Helm), shields and weapons (Tactical)
+  The core's startup always draws on Bus A. A load tied to several draws from them in turn.
+- **Short of power,** containment and the core's startup are fed first, then the consoles (2 each), then power sent to a docked ship, then systems in order: life support, sensors, shields, engines, weapons, tractor beam (30 while towing), transporter, replicators, recreation, so comforts go first in a brownout. A console whose bus can't power it goes **dark**: its station displays black out and it can't give orders. Comms still work (combadges), and so do the Station screen (move to a console that has power), Console log and Library. Engineering's grid controls have emergency power, so Engineering can always fix the grid.
 - **Stealth:** a ship's **power signature** is everything it draws (systems, consoles, containment, battery charging) out of 450, and other ships' sensors only see it within their sensor range times that signature (never less than 10%). Drawing 450 or more, it shows up at the full 600 units; down to life support and a few consoles, only within about 150. So a ship can run quiet by cutting power (unarmed weapons draw nothing, for one), at the cost of speed, shields and weapons. Engineering's panels and Science's map show the ship's own signature; a scan shows the other ship's. Losing a ship from sensors breaks a weapons lock and Helm's intercept course.
 
 ## Supplies and cold starts
@@ -128,7 +130,7 @@ Two buses, **A** and **B**, carry the ship's power, and the **EPS grid** passes 
 - **Antimatter** (tank 1000) and **deuterium** (tank 2000). The warp core burns both for the power it gives (half a unit of each a second at its full 500); the impulse reactor burns deuterium (0.2 a second at its full 150). Engineering's Power grid screen shows what's aboard.
 - **Refuel and offload** at a starbase: docked, Engineering picks antimatter or deuterium and an amount and presses Refuel or Offload (50 units a second; starbases have all they need).
 - **Ship to ship:** Helm can dock with another ship within 10 units, both at all stop, its shields down. Docked together, each ship's Engineering can send its own supplies to the other. Moving apart undocks them.
-- **Cold starts:** a new ship (unless its computer says `--warm`) and a destroyed one when it's rebuilt start docked at a random starbase, cold: reactor offline, nothing tied in, EPS taps closed, no antimatter or deuterium, batteries charged but off. Every console is dark except Engineering's grid controls. Engineering ties in dock power (enough for everything), sets a containment feed, refuels and starts the core.
+- **Cold starts:** a new ship (unless its computer says `--warm`) and a destroyed one when it's rebuilt start docked at a random starbase, cold: reactor offline, no power source tied in (consoles and systems keep their wiring), EPS taps closed, no antimatter or deuterium, batteries charged but off. Every console is dark except Engineering's grid controls. Engineering ties in dock power (to Bus A, Bus B and the EPS: enough for everything), sets a containment feed, refuels and starts the core.
 
 ## Starbases
 

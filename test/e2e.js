@@ -873,16 +873,20 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Engineering routes power, and every station feels it.
     const scotty = await openAs(browser, 'scotty', 'scotty', 'Enterprise', 'Engineering');
     await screen(scotty, 'st-power');
-    await scotty.waitForSelector('[data-system="sensors"]');
+    await scotty.waitForSelector('[data-system="sensors"] button');
     const route = async (levels) => {
       for (const [k, v] of Object.entries(levels)) {
-        await scotty.$eval(`[data-system="${k}"]`, (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+        // Light bar: press the segment for the level; 0 is the top lit segment pressed again.
+        const now = Number((await scotty.textContent(`[data-system="${k}"] + .pw-value`)).replace('%', ''));
+        if (v === 0) { if (now) await scotty.click(`[data-system="${k}"] button[data-level="${Math.ceil(now / 10)}"]`); }
+        else if (now !== v) await scotty.click(`[data-system="${k}"] button[data-level="${v / 10}"]`);
       }
       await scotty.click('#power-apply');
     };
     // The sliders set demand, shown per bus before it's routed.
-    await scotty.$eval('[data-system="engines"]', (el) => { el.value = 100; el.dispatchEvent(new Event('input', { bubbles: true })); });
-    assert.match(await scotty.textContent('.pw-total'), /Bus B 220 .*not routed yet/);
+    await scotty.click('[data-system="engines"] button[data-level="10"]');
+    assert.equal(await scotty.locator('[data-system="engines"] button[data-lit]').count(), 10);
+    assert.match(await scotty.textContent('.pw-total'), /EPS 160 .*not routed yet/);
     await scotty.click('#power-reset');
     // Sensors at 20%: every range drops to a fifth, so the transporter (4 units) can't reach.
     await route({ sensors: 20 });
@@ -1067,7 +1071,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await carol.waitForSelector('#console-dark:not([hidden])');
     await waitFor(() => laforge.nav()?.maxWarp === 0);
     await carol.$eval('#fire-torpedo', (b) => { b.disabled = false; b.click(); });
-    await waitFor(async () => /console offline, no power on Bus B/.test(await carol.textContent('#log')));
+    await waitFor(async () => /console offline, no power on its bus/.test(await carol.textContent('#log')));
     laforge.send({ type: 'grid', core: 'start' });
     await waitFor(() => laforge.nav()?.own.grid.core === 'starting');
     await carol.waitForSelector('#console-dark', { state: 'hidden', timeout: 20000 });
@@ -1231,11 +1235,18 @@ const audioBytes = (page) => page.evaluate(async () => {
     const cold = barclay.nav().own.grid;
     assert.equal(cold.core, 'offline');
     assert.equal(cold.antimatter + cold.deuterium, 0);
-    assert.ok(Object.values(cold.ties).every((t) => !t.length), 'a new ship should start with nothing tied in');
+    assert.ok(['solar', 'dock', 'ship', 'impulse', 'core', 'battery', 'containment'].every((k) => !cold.ties[k].length), 'a new ship should start with no power source tied in');
     ro.send({ type: 'lock', ship: 'Enterprise' });
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /console offline/.test(m.text)));
-    barclay.send({ type: 'grid', ties: { dock: ['A', 'B'] } });
-    await waitFor(() => barclay.nav()?.own.grid.buses.B.consolesOk && barclay.nav().own.grid.buses.B.fraction === 100);
+    barclay.send({ type: 'grid', ties: { dock: ['A', 'B', 'EPS'] } });
+    await waitFor(() => barclay.nav()?.own.grid.consoleOk.Tactical && barclay.nav().own.power.engines === 80);
+    // Loads have their own ties: consoles on Bus A or B only; engines (high power) on the EPS only.
+    barclay.send({ type: 'grid', ties: { 'console:Tactical': ['EPS'] } });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /Tactical can only be tied to Bus A \+ Bus B/.test(m.text)));
+    barclay.send({ type: 'grid', ties: { 'system:engines': ['A'] } });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /engines can only be tied to EPS/.test(m.text)));
+    barclay.send({ type: 'grid', ties: { 'console:Tactical': ['A'], 'system:sensors': ['B'] } });
+    await waitFor(() => { const g = barclay.nav()?.own.grid; return g?.ties['console:Tactical'].join() === 'A' && g.ties['system:sensors'].join() === 'B' && g.cells['console:Tactical'].A === 2 && g.cells['system:sensors'].B === 100; });
     barclay.send({ type: 'grid', core: 'start' });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /needs antimatter and deuterium/.test(m.text)));
     barclay.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 200 } });
@@ -1247,7 +1258,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => barclay.nav()?.own.grid.deuterium >= 400 && !barclay.nav().own.grid.transfer, 20000);
     barclay.send({ type: 'grid', core: 'start' });
     await waitFor(() => barclay.nav()?.own.grid.core === 'online', 20000);
-    step(`a new ship, the Excelsior, started cold at ${cold.docked} (consoles dark, no fuel); on dock power Engineering set a containment feed, took on antimatter and deuterium, and started the core`);
+    step(`a new ship, the Excelsior, started cold at ${cold.docked} (consoles dark, no fuel); on dock power Engineering moved Tactical's console to Bus A and sensors to Bus B (consoles only take A or B, engines only the EPS), set a containment feed, took on antimatter and deuterium, and started the core`);
 
     // Impulse power: the impulse reactor feeding Bus B holds the ship to slow impulse.
     barclay.send({ type: 'grid', ties: { dock: ['A'], core: [], impulse: ['B'] } });

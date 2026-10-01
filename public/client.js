@@ -391,13 +391,14 @@ function renderCombat() {
   bc.setAlert('selfdestruct', grid.selfDestruct ? `Self-destruct in ${grid.selfDestruct.seconds} s · ordered by ${grid.selfDestruct.by}` : null);
 
   // This console goes dark when its bus has no power (comms still work).
-  const bus = grid.consoleBus[me.station] || 'B';
-  const dark = !grid.buses[bus].consolesOk;
+  const tied = grid.ties[`console:${me.station}`] || [];
+  const bus = tied.length ? tied.map((n) => `Bus ${n}`).join(' or ') : 'its bus (not tied in)';
+  const dark = grid.consoleOk[me.station] === false;
   // Engineering's power grid runs on emergency power, so it's never covered.
   const emergency = dark && me.station === 'Engineering';
-  bc.setAlert('emergency', emergency ? `Console on emergency power (no power on Bus ${bus}): Power grid controls only` : null, { level: 'yellow' });
+  bc.setAlert('emergency', emergency ? `Console on emergency power (no power on ${bus}): Power grid controls only` : null, { level: 'yellow' });
   consoleDark = dark && !emergency;
-  if (dark) $('console-dark').querySelector('p').textContent = `Console offline · no power on Bus ${bus}`;
+  if (dark) $('console-dark').querySelector('p').textContent = `Console offline · no power on ${bus}`;
   updateCover();
   document.body.toggleAttribute('data-console-dark', dark);
   if (!stationView) return;
@@ -457,9 +458,12 @@ function renderCombat() {
     // to a docked ship), a column per bus and the EPS, each cell a tie
     // checkbox with the power flowing through it; the footer is used/available.
     const NODE_NAMES = { A: 'Bus A', B: 'Bus B', EPS: 'EPS' };
-    const ties = (key, label, cellKey = key) => {
-      const tr = el('tr', { id: `ties-${key}` }, el('th', { scope: 'row', textContent: label }));
+    const ties = (key, label, cellKey = key, { indent = false, allowed = ['A', 'B', 'EPS'], note = '' } = {}) => {
+      const th = el('th', { scope: 'row' }, el('span', { textContent: label }), ...(note ? [el('small', { className: 'grid-note', textContent: note })] : []));
+      if (indent) th.className = 'grid-indent';
+      const tr = el('tr', { id: `ties-${key.replace(':', '-')}` }, th);
       for (const n of ['A', 'B', 'EPS']) {
+        if (!allowed.includes(n)) { tr.append(el('td', { className: 'grid-na', textContent: '·', title: `can't be tied to ${NODE_NAMES[n]}` })); continue; }
         const box = el('input', { type: 'checkbox', checked: grid.ties[key].includes(n), ariaLabel: `${label}: ${NODE_NAMES[n]}` });
         box.dataset.node = n;
         box.onchange = () => send({ type: 'grid', ties: { [key]: ['A', 'B', 'EPS'].filter((m) => (m === n ? box.checked : grid.ties[key].includes(m))) } });
@@ -480,6 +484,18 @@ function renderCombat() {
       ];
       // Both "docked ship" rows share one set of ties.
       if (grid.dockedShip) rows[rows.length - 1].id = 'ties-ship-feed';
+      // Loads: each station's console (Bus A or B), with the systems it controls under it.
+      const SYS = { ...Object.fromEntries(POWER), tractor: 'Tractor beam' };
+      const crewAt = (st) => comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st).length;
+      rows.push(el('tr', { className: 'grid-section' }, el('th', { scope: 'rowgroup', colSpan: 4, textContent: 'Stations and the systems they control' })));
+      for (const key of Object.keys(grid.loadNodes).filter((x) => x.startsWith('console:'))) {
+        const st = key.slice(8), n = crewAt(st);
+        rows.push(ties(key, `${st} console`, key, { allowed: grid.loadNodes[key], note: n ? (grid.consoleOk[st] ? `${n} aboard` : `${n} aboard · DARK`) : 'unmanned' }));
+        for (const sys of grid.stationSystems[st] || []) {
+          const want = sys === 'tractor' ? (grid.towing ? 30 : 0) : grid.demand[sys], got = sys === 'tractor' ? want : grid.delivered[sys];
+          rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { indent: true, allowed: grid.loadNodes[`system:${sys}`], note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}` : 'off' }));
+        }
+      }
       return el('table', { className: 'grid-table', id: 'grid-table' },
         el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), ...['A', 'B', 'EPS'].map((n) => el('th', { scope: 'col', textContent: NODE_NAMES[n] })))),
         el('tbody', {}, ...rows),
@@ -489,11 +505,12 @@ function renderCombat() {
     // Power offered to a ship docked with us (they may offer some back: the difference flows).
     const feedControl = () => {
       if (!grid.dockedShip) return el('span');
-      const amt = el('input', { className: 'ops-input', id: 'feed-amount', type: 'number', min: 0, max: grid.feedMax, step: 10, value: grid.feed, ariaLabel: 'power to offer' });
-      amt.style.width = '6em';
+      const bar = lightBar(`Power offered to the ${grid.dockedShip}`, grid.feedMax, (v) => send({ type: 'grid', feed: v }));
+      bar.id = 'feed-bar';
+      bar.set(grid.feed);
       const net = grid.feed - grid.partnerFeed;
       return el('div', { className: 'ops-form' },
-        el('span', { textContent: `Offer the ${grid.dockedShip}` }), amt, button('Set', 'feed-set', () => send({ type: 'grid', feed: Number(amt.value) })),
+        el('span', { textContent: `Offer the ${grid.dockedShip}: ${grid.feed}` }), bar,
         el('span', { className: 'ops-hint', id: 'feed-state', textContent: `They offer ${grid.partnerFeed}. ${net > 0 ? `We send ${grid.fed} of ${net}` : net < 0 ? `We receive ${grid.shipIn} of ${-net}` : 'Nothing flows'}${grid.ties.ship.length ? '' : ' (tie the docked-ship rows to a bus or the EPS)'}` }));
     };
     // Antimatter and deuterium aboard, and moving them: refuel or offload at a
@@ -513,20 +530,6 @@ function renderCombat() {
           : el('p', { className: 'ops-hint', textContent: 'Dock at a starbase to refuel or offload, or with another ship to send it supplies.' }));
     };
     const coreText = grid.core === 'online' ? `Online · ${grid.coreOutput} to ${feeds(grid.ties.core)}` : grid.core === 'starting' ? `Starting · ${grid.start} of ${grid.startSecs} s on Bus A power` : grid.core === 'ejected' ? 'Ejected · solar and batteries only' : 'Offline';
-    const busRow = (X) => {
-      const b = grid.buses[X];
-      const srcs = Object.entries(b.src).filter(([, v]) => v > 0).map(([n, v]) => `${n === 'core' ? 'warp core' : n} ${v}`).join(' + ') || 'nothing';
-      const sys = Object.entries(grid.systemBus).filter(([, v]) => v === X).map(([k]) => NAMES[k]);
-      const consoles = Object.entries(grid.consoleBus).filter(([, v]) => v === X).map(([k]) => k);
-      const li = el('li', { className: 'grid-bus' },
-        el('b', { textContent: `Bus ${X}` }),
-        el('span', { className: 'grid-load', textContent: `${b.have} of ${b.need} needed · from ${srcs}` }),
-        el('span', { className: 'grid-state', textContent: !b.consolesOk ? 'DEAD: consoles dark' : b.fraction < 100 ? `Brownout: systems get ${b.fraction}%` : 'Nominal' }),
-        el('small', { textContent: `Systems: ${sys.join(', ')}${grid.antimatter && grid.ties.containment.includes(X) ? ', antimatter containment' : ''}${X === 'A' ? ', warp core startup' : ''}${X === 'B' && grid.towing ? ', tractor beam' : ''} · Consoles: ${consoles.join(', ')}` }));
-      li.dataset.bus = X;
-      li.toggleAttribute('data-short', b.fraction < 100 || !b.consolesOk);
-      return li;
-    };
     gp.replaceChildren(
       el('div', { className: 'st-control' },
         el('p', { className: 'st-state', id: 'core-state', textContent: `Warp core (M/ARC): ${coreText}` }),
@@ -540,7 +543,7 @@ function renderCombat() {
       feedControl(),
       supplies(),
       el('p', { className: 'st-state grid-containment', id: 'containment-state', textContent: grid.core === 'ejected' ? 'Warp core ejected: no antimatter aboard' : !grid.antimatter ? 'No antimatter aboard: containment not needed' : grid.breach != null ? `CONTAINMENT FAILING: breach in ${grid.breach} s` : `Containment holding, fed from ${feeds(grid.ties.containment)}` }),
-      el('ul', { className: 'st-list grid-buses' }, busRow('A'), busRow('B')),
+
       el('p', { className: 'ops-notice', id: 'grid-status', textContent: status }),
       el('p', { className: 'ops-hint', textContent: `The core burns antimatter and deuterium for the power it gives (the impulse reactor burns deuterium, and while it gives power the ship is held to slow impulse). Tie each source to any of Bus A, Bus B and the EPS; the EPS reaches a bus through its open tap. The core starts on Bus A power (${grid.startSecs} s). Antimatter containment must always have power from one of its feeds, or the core breaches in seconds (ejecting the core ends that). Power goes to containment first, then consoles, then is shared among systems. EPS carrying ${grid.eps}; total drawn ${grid.drawn} (that's what other ships' sensors see).` }));
     gp.querySelector('#containment-state').toggleAttribute('data-up', grid.breach != null);
@@ -642,6 +645,34 @@ function updateWeaponTimers() {
 }
 setInterval(updateWeaponTimers, 250);
 
+// A light bar: ten LCARS buttons for a level from 0 to max. Pressing button
+// N sets N tenths of max (buttons up to N light up); pressing the top lit
+// button again turns it off (0).
+function lightBar(label, max, onset) {
+  const bar = document.createElement('div');
+  bar.className = 'light-bar';
+  bar.setAttribute('role', 'group');
+  bar.setAttribute('aria-label', label);
+  let value = 0;
+  const step = max / 10;
+  for (let n = 1; n <= 10; n++) {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'light-bar__seg', title: `${n * step}` });
+    b.dataset.level = n;
+    b.setAttribute('aria-label', `${label}: ${n * step}`);
+    b.onclick = () => onset(Math.round(value) === n * step ? 0 : n * step);
+    bar.append(b);
+  }
+  bar.set = (v) => {
+    value = v;
+    for (const b of bar.children) {
+      const lit = Number(b.dataset.level) * step <= v + 1e-9;
+      b.toggleAttribute('data-lit', lit);
+      b.setAttribute('aria-pressed', String(lit));
+    }
+  };
+  return bar;
+}
+
 // Engineering: route the reactor's output. Sliders per system (0-100%), the
 // total against the reactor, and what the settings mean for the ship.
 let powerDraft = null; // Engineering's unsent changes
@@ -657,10 +688,12 @@ function renderPower() {
   if (!root.firstChild) {
     root.append(
       ...POWER.map(([k, label]) => {
-        const row = document.createElement('label');
+        const row = document.createElement('div');
         row.className = 'pw-row';
-        row.innerHTML = `<span class="pw-label">${label}</span><input type="range" min="0" max="100" step="5" class="pw-slider" data-system="${k}" aria-label="${label} power"><b class="pw-value"></b>`;
-        row.querySelector('input').oninput = (e) => { powerDraft = { ...(powerDraft || ownAllocation()), [k]: Number(e.target.value) }; renderPower(); };
+        row.append(Object.assign(document.createElement('span'), { className: 'pw-label', textContent: label }),
+          lightBar(`${label} power`, 100, (v) => { powerDraft = { ...(powerDraft || ownAllocation()), [k]: v }; renderPower(); }),
+          Object.assign(document.createElement('b'), { className: 'pw-value' }));
+        row.querySelector('.light-bar').dataset.system = k;
         return row;
       }),
       Object.assign(document.createElement('p'), { className: 'pw-total' }),
@@ -673,17 +706,18 @@ function renderPower() {
     root.querySelector('.pw-actions').append(apply, reset);
   }
   for (const [k] of POWER) {
-    const input = root.querySelector(`[data-system="${k}"]`);
-    if (document.activeElement !== input) input.value = draft[k];
-    input.parentElement.querySelector('.pw-value').textContent = `${draft[k]}%`;
+    const bar = root.querySelector(`[data-system="${k}"]`);
+    bar.set(draft[k]);
+    bar.parentElement.querySelector('.pw-value').textContent = `${draft[k]}%`;
   }
-  // The sliders set each system's demand; the grid (Power grid screen) decides what it gets.
+  // The light bars set each system's demand; the grid (Power grid screen) decides what it gets.
   const grid = lastNav.own.grid;
-  const busDemand = (X) => POWER.filter(([k]) => grid?.systemBus[k] === X).reduce((n, [k]) => n + (k === 'weapons' && !lastNav.own.combat?.phaser.armed ? 0 : draft[k]), 0);
-  const short = grid ? ['A', 'B'].filter((X) => grid.buses[X].fraction < 100 || !grid.buses[X].consolesOk) : [];
+  // Each system's demand shown on the first bus (or the EPS) it's tied to.
+  const busDemand = (X) => POWER.filter(([k]) => grid?.ties[`system:${k}`]?.[0] === X).reduce((n, [k]) => n + (k === 'weapons' && !lastNav.own.combat?.phaser.armed ? 0 : draft[k]), 0);
+  const short = grid ? POWER.filter(([k]) => grid.delivered[k] < grid.demand[k]).map(([, label]) => label.toLowerCase()) : [];
   const over = false;
   root.querySelector('.pw-total').textContent = grid
-    ? `Systems demand: Bus A ${busDemand('A')} · Bus B ${busDemand('B')} (weapons draw only when armed)${short.length ? ` · brownout on Bus ${short.join(' and ')}` : ''}${powerDraft ? ' · not routed yet' : ''}`
+    ? `Systems demand: Bus A ${busDemand('A')} · Bus B ${busDemand('B')} · EPS ${busDemand('EPS')} (weapons draw only when armed)${short.length ? ` · short of power: ${short.join(', ')}` : ''}${powerDraft ? ' · not routed yet' : ''}`
     : `Demand ${total}%${powerDraft ? ' · not routed yet' : ''}`;
   root.querySelector('.pw-total').toggleAttribute('data-over', short.length > 0);
   root.querySelector('.pw-effects').replaceChildren(...[
