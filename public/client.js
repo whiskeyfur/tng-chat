@@ -10,6 +10,7 @@ let ws, me = null;  // me: { id, name, ship, station } once registered
 let token = null;   // proves who we are to the library's HTTP endpoints
 let stationView = null;
 let ships = [];     // [{ name, ops, shields }]
+let stations = STATION_NAMES; // what the relay accepts (from its hello); all we know until then
 
 const $ = (id) => document.getElementById(id);
 function log(text, level) {
@@ -114,7 +115,7 @@ function showStation() {
   stationView.setCrew(comms.users);
   renderShipState();
   $('assignment').textContent = `${me.name}: ${me.station}, the ${me.ship}`;
-  $('new-station').replaceChildren(...STATION_NAMES.filter((n) => n !== me.station).map((n) => new Option(n, n)));
+  $('new-station').replaceChildren(...stations.filter((n) => n !== me.station).map((n) => new Option(n, n)));
   showScreen(stationView.sections[0].id);
 }
 
@@ -197,6 +198,19 @@ async function onMessage(msg) {
       $('register-error').textContent = msg.reason;
       $('register-form').querySelector('button').disabled = false;
       break;
+    case 'hello': {
+      // Offer only the stations this relay accepts. If it lacks some this page
+      // knows, the relay is older than the pages and needs a restart.
+      stations = STATION_NAMES.filter((n) => msg.stations.includes(n));
+      const missing = STATION_NAMES.filter((n) => !msg.stations.includes(n));
+      fillStations();
+      if (missing.length) {
+        const note = `This comm relay is out of date (no ${missing.join(', ')} station). Restart it to update.`;
+        $('register-error').textContent = note;
+        log(note, 'warn');
+      }
+      break;
+    }
     case 'ships':
       ships = msg.ships;
       renderShips(msg.ships);
@@ -220,12 +234,20 @@ setInterval(tick, 1000);
 
 // Station picker, then pre-fill the last registration on this browser
 // (the ship once the list arrives).
-$('station').append(...STATION_NAMES.map((n) => new Option(n, n)));
 let savedReg = null;
-try {
-  savedReg = JSON.parse(localStorage.getItem('voice-reg') || 'null');
-  if (savedReg) { $('name').value = savedReg.name; $('station').value = savedReg.station; }
-} catch {}
+try { savedReg = JSON.parse(localStorage.getItem('voice-reg') || 'null'); } catch {}
+if (savedReg) $('name').value = savedReg.name;
+
+function fillStations() {
+  const sel = $('station');
+  const keep = sel.value || savedReg?.station || '';
+  const placeholder = new Option('Station', '');
+  placeholder.disabled = true;
+  sel.replaceChildren(placeholder, ...stations.map((n) => new Option(n, n)));
+  sel.value = stations.includes(keep) ? keep : '';
+  if (me) $('new-station').replaceChildren(...stations.filter((n) => n !== me.station).map((n) => new Option(n, n)));
+}
+fillStations();
 
 $('register-form').onsubmit = (e) => {
   e.preventDefault();

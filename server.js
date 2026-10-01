@@ -689,6 +689,9 @@ wss.on('connection', (ws) => {
     if (ws.id) signOut(ws);
   });
 
+  // The relay's own station list, so pages only offer stations it accepts
+  // (and can tell when the relay is older than the pages).
+  send(ws, { type: 'hello', stations: STATIONS, version: require('./package.json').version });
   send(ws, { type: 'ships', ships: shipList() });
 });
 

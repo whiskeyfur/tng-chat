@@ -75,6 +75,9 @@ const audioBytes = (page) => page.evaluate(async () => {
     const early = await (await browser.newContext()).newPage();
     await early.goto(URL);
     await early.waitForSelector('#ship option:has-text("no ships with ops on duty")', { state: 'attached' });
+    // The station picker comes from the relay and includes every station.
+    await early.waitForSelector('#station option[value="Transporter"]', { state: 'attached' });
+    assert.equal(await early.locator('#station option:not([disabled])').count(), 11);
     assert.equal(await early.isDisabled('#register-form button'), true);
     await early.close();
     step('without ops on duty there is no ship to report aboard');
@@ -515,6 +518,19 @@ const audioBytes = (page) => page.evaluate(async () => {
     await wes.waitForSelector('#users li:has-text("kor")', { state: 'attached' });
     assert.equal(await wes.evaluate(() => window.__voice.me.station), 'Crew');
     step('shields down: the transporter beamed wes to the K\'Vatch, keeping his station');
+
+    // Signed in as Transporter (above); now move from Transporter to Helm.
+    assert.equal(await chief.evaluate(() => window.__voice.me.station), 'Transporter');
+    await closeComms(chief);
+    await screen(chief, 'reassign');
+    assert.ok((await chief.$$eval('#new-station option', (o) => o.map((x) => x.value))).includes('Helm'));
+    await chief.selectOption('#new-station', 'Helm');
+    await chief.click('#reassign-form button');
+    await chief.waitForFunction(() => window.__voice.me.station === 'Helm');
+    assert.equal(await chief.locator('#st-view canvas').count(), 1, 'helm console after changing station');
+    assert.equal(await chief.locator('[data-transporter]').count(), 0);
+    await op.waitForFunction(() => window.__operator.roster.find((u) => u.name === 'chief')?.station === 'Helm');
+    step('signed in as Transporter, then changed station to Helm');
     for (const page of [chief, wes]) await page.close();
 
     // Pages hosted elsewhere (GitHub Pages) can use this server as their relay.
