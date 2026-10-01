@@ -1115,14 +1115,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     sulu.send(JSON.stringify({ type: 'dock' }));
     await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.docked)) === 'Starbase 12');
     laforge.send({ type: 'grid', refit: true });
-    await waitFor(() => laforge.nav()?.own.grid.core === 'offline' && laforge.nav().own.grid.antimatter === 0);
-    laforge.send({ type: 'grid', core: 'start' });
-    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /needs antimatter and deuterium/.test(m.text)));
-    laforge.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 300 } });
-    await waitFor(() => laforge.nav()?.own.grid.antimatter >= 300 && !laforge.nav().own.grid.transfer, 15000);
+    await waitFor(() => laforge.nav()?.own.grid.core === 'offline' && laforge.nav().own.grid.antimatter === 1000);
     laforge.send({ type: 'grid', core: 'start' });
     await waitFor(() => laforge.nav()?.own.grid.core === 'online', 20000);
-    step('towed back to Starbase 12 and released, the Enterprise docked, installed a new warp core, took on antimatter from the starbase and started it');
+    step('towed back to Starbase 12 and released, the Enterprise docked, had a new warp core and full antimatter pods installed, and started it');
 
     // Supplies: the Enterprise offloads deuterium to the starbase; the Defiant
     // docks with the Enterprise and sends it some of its own.
@@ -1137,10 +1133,14 @@ const audioBytes = (page) => page.evaluate(async () => {
     const before = laforge.nav().own.grid.deuterium;
     rom.send({ type: 'grid', transfer: { resource: 'deuterium', dir: 'out', amount: 100 } });
     await waitFor(() => laforge.nav()?.own.grid.deuterium >= before + 90, 15000);
+    // Power across the dock: the Defiant offers 100 from its EPS, the Enterprise 30; 70 flows to the Enterprise's Bus A.
+    rom.send({ type: 'grid', ties: { ship: ['EPS'] }, feed: 100 });
+    laforge.send({ type: 'grid', ties: { ship: ['A'] }, feed: 30 });
+    await waitFor(() => laforge.nav()?.own.grid.shipIn === 70 && laforge.nav().own.grid.cells.ship.A === 70 && rom.nav()?.own.grid.fed === 70);
     ezri.send({ type: 'dock', undock: true });
     await waitFor(() => !laforge.nav()?.own.grid.dockedShip);
     rom.close();
-    step('the Enterprise offloaded deuterium at Starbase 12; the Defiant docked with it and sent it 100 deuterium, then undocked');
+    step('the Enterprise offloaded deuterium at Starbase 12; the Defiant docked with it, sent it 100 deuterium, and (offering 100 power to its 30) fed it the difference, 70; then undocked');
     ezri.close();
     tuvok.close();
 
@@ -1163,6 +1163,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last.own); return n.grid.docked === reborn.base && n.combat.hull === 100 && n.grid.core === 'offline' && n.grid.antimatter === 0 && n.grid.containmentOk; });
     await bob.waitForSelector(`.bcast--alert:has-text("Rebuilt and docked at ${reborn.base}")`, { state: 'attached' });
     await op.waitForSelector('#console-dark:not([hidden])', { state: 'attached' }); // rebuilt cold: dark
+    await screen(op, 'reassign'); // but the Station screen still works, to move to a console with power
+    await op.waitForSelector('#console-dark', { state: 'hidden' });
+    await screen(op, 'status');
+    await op.waitForSelector('#console-dark:not([hidden])', { state: 'attached' });
     laforge.send({ type: 'grid', ties: { dock: ['A', 'B'] } });
     await op.waitForSelector('#console-dark', { state: 'hidden' });
     step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt cold (consoles dark, no fuel) docked at ${reborn.base}; tied to dock power, it came back`);
@@ -1194,6 +1198,21 @@ const audioBytes = (page) => page.evaluate(async () => {
     bashir.close();
     await alice.waitForFunction(() => window.__voice.state === 'idle', null, { timeout: 10000 });
     step(`with a Captain aboard ${reborn.base}, the automated station put alice's hail straight through to them`);
+
+    // A starbase can't dock with itself, and a ship's computer run for one
+    // only holds its library: the station stays put and isn't harmed.
+    const odo = await crewWs('odo', 'Starbase 74', 'Helm');
+    await waitFor(() => odo.nav()?.own);
+    assert.equal(odo.nav().own.grid.near, null);
+    odo.send({ type: 'dock' });
+    await waitFor(() => odo.msgs.some((m) => m.type === 'notice' && /is a starbase: ships dock with it/.test(m.text)));
+    const sbCore = startComputer('sb', 'Starbase 74');
+    await new Promise((r) => setTimeout(r, 3000));
+    assert.deepEqual([odo.nav().own.x, odo.nav().own.y], [880, 820]);
+    assert.ok(!odo.msgs.some((m) => m.type === 'destroyed'), 'the starbase was destroyed');
+    await stopComputer(sbCore);
+    odo.close();
+    step("Starbase 74 offered no docking with itself, and a ship's computer run for it left the station in place and unharmed");
     for (const page of [worf, riker, picard]) await page.close();
 
     sulu.close();
@@ -1217,6 +1236,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /console offline/.test(m.text)));
     barclay.send({ type: 'grid', ties: { dock: ['A', 'B'] } });
     await waitFor(() => barclay.nav()?.own.grid.buses.B.consolesOk && barclay.nav().own.grid.buses.B.fraction === 100);
+    barclay.send({ type: 'grid', core: 'start' });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /needs antimatter and deuterium/.test(m.text)));
     barclay.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 200 } });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /set a containment feed/.test(m.text)));
     barclay.send({ type: 'grid', ties: { containment: ['A'] } });

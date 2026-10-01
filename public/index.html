@@ -142,6 +142,12 @@
     /* Engineering power grid */
     [data-grid] { display: flex; flex-direction: column; gap: 12px; }
     .grid-sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 8px 24px; }
+    .grid-table { border-collapse: collapse; width: 100%; text-transform: uppercase; }
+    .grid-table th, .grid-table td { padding: 4px 10px; border-bottom: 2px dotted #333; text-align: left; font-weight: 400; }
+    .grid-table thead th { color: var(--lcars-orange); font-size: 18px; }
+    .grid-table tbody th { color: var(--lcars-gold); }
+    .grid-table tfoot th, .grid-table tfoot td { color: var(--lcars-sky); border-bottom: 0; border-top: 3px solid var(--lcars-orange); font-variant-numeric: tabular-nums; }
+    .grid-flow { color: var(--lcars-sky); min-width: 3ch; font-variant-numeric: tabular-nums; }
     .grid-supplies { display: flex; flex-direction: column; gap: 6px; }
     .grid-supplies .st-state { margin: 0; font-size: 20px; color: var(--lcars-violet); text-transform: uppercase; }
     .grid-ties { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; text-transform: uppercase; }
