@@ -168,6 +168,16 @@
     .pw { display: flex; flex-direction: column; gap: 8px; text-transform: uppercase; }
     .pw-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 60px; align-items: center; gap: 12px; }
     .pw-label { color: var(--lcars-gold); font-size: 18px; }
+    /* Transporter: taps and TOS energize sliders */
+    [data-transporter] { display: flex; flex-direction: column; gap: 10px; }
+    .tr-pick { display: flex; gap: 10px; align-items: flex-start; }
+    .tr-label { color: var(--lcars-gold); text-transform: uppercase; min-width: 70px; padding-top: 6px; }
+    .tr-taps { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tr-tap { min-height: 32px; font-size: 13px; }
+    .tr-tap[aria-pressed='true'] { outline: 3px solid #fff; outline-offset: 2px; }
+    .tr-energize { display: flex; align-items: center; gap: 18px; }
+    .tr-sliders { display: flex; gap: 22px; height: 150px; padding: 6px 14px; border-radius: 12px; background: #1a1a1a; }
+    .tr-slider { writing-mode: vertical-lr; direction: rtl; height: 100%; width: 34px; accent-color: var(--lcars-gold); }
     /* Light bars: ten segments, lit up to the level */
     .light-bar { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; min-width: 200px; }
     .light-bar__seg { height: 26px; border: 0; padding: 0; cursor: pointer; background: color-mix(in srgb, var(--lcars-gold) 18%, #000); }

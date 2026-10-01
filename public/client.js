@@ -247,24 +247,61 @@ function renderShipState() {
   }
 
   const tr = document.querySelector('[data-transporter]');
-  if (tr) {
-    const keep = { who: tr.querySelector('#beam-who')?.value, ship: tr.querySelector('#beam-ship')?.value };
-    const who = el('select', { className: 'ops-select', id: 'beam-who', ariaLabel: 'who to beam' }, ...crew.map((u) => new Option(u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`, u.id)));
-    const dest = el('select', { className: 'ops-select', id: 'beam-ship', ariaLabel: 'destination ship' }, ...targets.map((s) => new Option(s.shields ? `${s.name} (shields up)` : s.name, s.name)));
-    if (keep.who && crew.some((u) => u.id === keep.who)) who.value = keep.who;
-    if (keep.ship && targets.some((s) => s.name === keep.ship)) dest.value = keep.ship;
-    const noPower = p && p.transporter <= 0;
-    const blocked = noPower ? 'No power to the transporter: ask Engineering' : up ? `Shields are up aboard the ${me.ship}` : '';
-    const energize = el('button', {
-      type: 'button', className: 'lcars-button lcars-button--pill', id: 'beam-go', textContent: 'Energize',
-      disabled: !crew.length || !targets.length || noPower,
-      onclick: () => { stationView.energize(); send({ type: 'beam', who: who.value, ship: dest.value }); },
-    });
-    const form = el('div', { className: 'ops-form' }, el('span', { textContent: 'Beam' }), who, el('span', { textContent: 'to the' }), dest, energize);
-    const status = el('p', { className: 'ops-notice', id: 'beam-status', textContent: blocked || tr.querySelector('#beam-status')?.textContent || '' });
-    const reach = el('p', { className: 'ops-hint', id: 'beam-range', textContent: range != null ? `Transporter range ${Math.round(range)} units (sensor power ${p?.sensors ?? 100}%)` : '' });
-    tr.replaceChildren(form, status, reach);
+  if (tr) renderTransporter(tr, { crew, targets, up, p, range });
+}
+
+// The transporter room: tap who to beam, which ship (this one too: site to
+// site) and which station they arrive at, then push all three energize
+// sliders to the top, as on the old Constitution-class consoles.
+const beamSel = { who: null, ship: null, station: null };
+function renderTransporter(tr, { crew, targets, up, p, range }) {
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  if (!tr.querySelector('.tr-sliders')) {
+    const sliders = el('div', { className: 'tr-sliders', id: 'beam-sliders' }, ...[1, 2, 3].map((n) => {
+      const r = el('input', { type: 'range', min: 0, max: 100, value: 0, className: 'tr-slider', id: `beam-slider-${n}`, ariaLabel: `energize ${n}` });
+      r.oninput = energizeCheck;
+      return r;
+    }));
+    tr.replaceChildren(
+      el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Beam' }), el('div', { className: 'tr-taps', id: 'beam-who' })),
+      el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'To' }), el('div', { className: 'tr-taps', id: 'beam-ship' })),
+      el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Station' }), el('div', { className: 'tr-taps', id: 'beam-station' })),
+      el('div', { className: 'tr-energize' }, sliders, el('span', { className: 'tr-label', textContent: 'Energize: all three up' })),
+      el('p', { className: 'ops-notice', id: 'beam-status' }),
+      el('p', { className: 'ops-hint', id: 'beam-range' }));
   }
+  const ships = [{ name: me.ship, here: true }, ...targets];
+  if (!crew.some((u) => u.id === beamSel.who)) beamSel.who = crew[0]?.id || null;
+  if (!ships.some((x) => x.name === beamSel.ship)) beamSel.ship = targets[0]?.name || me.ship;
+  const stations = ['Same station', ...STATION_NAMES.filter((n) => n !== 'Operations')];
+  if (!stations.includes(beamSel.station)) beamSel.station = 'Same station';
+  const taps = (box, items, sel, set) => box.replaceChildren(...items.map(([value, text]) => {
+    const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: text });
+    b.dataset.value = value;
+    b.setAttribute('aria-pressed', String(value === sel));
+    b.onclick = () => { set(value); renderTransporter(tr, { crew, targets, up, p, range }); };
+    return b;
+  }));
+  taps(tr.querySelector('#beam-who'), crew.map((u) => [u.id, u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`]), beamSel.who, (v) => { beamSel.who = v; });
+  taps(tr.querySelector('#beam-ship'), ships.map((x) => [x.name, x.here ? `The ${x.name} (site to site)` : `The ${x.name}${x.shields ? ' (shields up)' : ''}`]), beamSel.ship, (v) => { beamSel.ship = v; });
+  taps(tr.querySelector('#beam-station'), stations.map((n) => [n, n]), beamSel.station, (v) => { beamSel.station = v; });
+  const noPower = p && p.transporter <= 0;
+  const blocked = noPower ? 'No power to the transporter: ask Engineering' : up && beamSel.ship !== me.ship ? `Shields are up aboard the ${me.ship}` : '';
+  for (const r of tr.querySelectorAll('.tr-slider')) r.disabled = !crew.length || noPower;
+  if (blocked) tr.querySelector('#beam-status').textContent = blocked;
+  tr.querySelector('#beam-range').textContent = range != null ? `Transporter range ${Math.round(range)} units (sensor power ${p?.sensors ?? 100}%)` : '';
+}
+
+// All three sliders at the top: energize once, then they fall back (and
+// can't fire again until they have).
+let energizing = false;
+function energizeCheck() {
+  const rs = [...document.querySelectorAll('.tr-slider')];
+  if (energizing || !rs.length || rs.some((r) => Number(r.value) < 95) || !beamSel.who) return;
+  energizing = true;
+  stationView?.energize();
+  send({ type: 'beam', who: beamSel.who, ship: beamSel.ship, ...(beamSel.station !== 'Same station' ? { station: beamSel.station } : {}) });
+  setTimeout(() => { rs.forEach((r) => { r.value = 0; }); energizing = false; }, 900);
 }
 
 // --- Captain, First Officer, Security, Medical controls --------------------------

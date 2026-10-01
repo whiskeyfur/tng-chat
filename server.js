@@ -457,8 +457,21 @@ function signOut(ws) {
 
 // Beam a crew member to another ship: their call ends, they leave this ship's
 // comm net and report aboard the other one, keeping their name and station.
-function beam(u, toKey) {
+function beam(u, toKey, station) {
   const from = u.ship;
+  // Site to site: within the ship, to another station's console.
+  // Beaming drops you out of any call you're in (the others stay connected).
+  if (toKey === u.shipKey) {
+    const was = u.station;
+    if (u.state !== 'idle') send(u, { type: 'force-hangup', reason: `beamed to ${station}` });
+    u.station = station;
+    send(u, { type: 'registered', ...info(u), token: u.token });
+    send(u, { type: 'notice', text: `Transporter: beamed from ${was} to ${station}` });
+    broadcastCrew(toKey);
+    opLog(toKey, `${u.name} beamed from ${was} to ${station}`);
+    return;
+  }
+  if (station) u.station = station;
   send(u, { type: 'force-hangup', reason: `beamed to the ${shipName(toKey)}` });
   signOut(u);
   Object.assign(u, { id: userId(u.name, shipName(toKey)), shipKey: toKey, ship: shipName(toKey), state: 'idle', peers: [], cid: null });
@@ -2146,16 +2159,26 @@ wss.on('connection', (ws) => {
       const toKey = shipKey(clean(msg.ship));
       if (!u || u.shipKey !== ws.shipKey) return fail('that person is not aboard');
       if (u.operator) return fail('the ops station cannot be beamed');
+      const station = msg.station == null ? null : STATIONS.includes(msg.station) && msg.station !== 'Operations' ? msg.station : undefined;
+      if (station === undefined) return fail('no such station to beam to');
+      if (toKey === ws.shipKey) {
+        // Site to site, within the ship: inside our own shields and lockout.
+        if (!station || station === u.station) return fail(`${u.name} is already at ${u.station}: pick another station`);
+        if (powerOf(ws.shipKey).transporter <= 0) return fail('no power to the transporter: ask Engineering');
+        if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to ${station}` });
+        beam(u, toKey, station);
+        if (u !== ws) send(ws, { type: 'notice', text: `Transporter: ${u.name} beamed to ${station}` });
+        return;
+      }
       if (powerOf(ws.shipKey).transporter <= 0) return fail('no power to the transporter: ask Engineering');
       if (toKey !== ws.shipKey && present(toKey) && !transporterOk(ws.shipKey, toKey)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(ws.shipKey, toKey)}; get within ${Math.round(rangesOf(ws.shipKey).transporter)})`);
       if (!present(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
-      if (toKey === ws.shipKey) return fail(`${u.name} is already aboard`);
       for (const k of [ws.shipKey, toKey]) if (shields.has(k)) return fail(`cannot beam through the shields of the ${shipName(k)}`);
       if (lockoutOf(toKey)) return fail(`the ${shipName(toKey)} has a transporter lockout: Security's force field is up`);
       if (users.has(userId(u.name, shipName(toKey)))) return fail(`someone called ${u.name} is already aboard the ${shipName(toKey)}`);
       if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to the ${shipName(toKey)}` });
-      beam(u, toKey);
-      if (u !== ws) send(ws, { type: 'notice', text: `Transporter: ${u.name} beamed to the ${shipName(toKey)}` });
+      beam(u, toKey, station);
+      if (u !== ws) send(ws, { type: 'notice', text: `Transporter: ${u.name} beamed to the ${shipName(toKey)}${station ? `'s ${station}` : ''}` });
       return;
     }
 

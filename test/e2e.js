@@ -34,6 +34,8 @@ startComputer.cold = (folder, ship) => startComputer(folder, ship, { cold: true 
 const stopComputer = (proc) => new Promise((r) => { proc.once('exit', r); proc.kill(); });
 const stored = (folder, ship, name) => { try { return fs.readFileSync(path.join(DATA_DIR, folder, ship, name), 'utf8'); } catch { return null; } };
 const SYSTEMS_SHORT = (own) => Object.keys(own.grid.demand).filter((k) => own.grid.delivered[k] < own.grid.demand[k]);
+// The transporter's TOS energize sliders: all three to the top.
+const energize = async (page) => { await page.waitForFunction(() => [...document.querySelectorAll('.tr-slider')].every((r) => Number(r.value) === 0)); for (const n of [1, 2, 3]) await page.$eval(`#beam-slider-${n}`, (r) => { r.value = 100; r.dispatchEvent(new Event('input', { bubbles: true })); }); };
 const waitFor = async (fn, ms = 10000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return; await new Promise((r) => setTimeout(r, 100)); } throw new Error('timed out waiting'); };
 const server = require('../server');
 const URL = `http://localhost:${process.env.PORT}/`;
@@ -629,30 +631,41 @@ const audioBytes = (page) => page.evaluate(async () => {
     const chief = await openAs(browser, 'chief', 'chief', 'Enterprise', 'Transporter');
     const wes = await openAs(browser, 'wes', 'wes', 'Enterprise', 'Crew');
     await wes.waitForFunction(() => window.__voice.myName === 'wes');
-    await chief.waitForSelector('#beam-who option[value="wes@enterprise"]', { state: 'attached' });
+    await chief.waitForSelector('#beam-who button[data-value="wes@enterprise"]', { state: 'attached' });
     await screen(carol, 'st-shieldctl');
     await carol.click('[data-shield-control] button');
     await chief.waitForFunction(() => document.body.hasAttribute('data-shields-up'));
     await op.waitForSelector('#shield-state:has-text("Up")', { state: 'attached' });
     await screen(chief, 'st-transporter');
-    await chief.selectOption('#beam-who', id('wes'));
-    await chief.selectOption('#beam-ship', "K'Vatch");
-    await chief.click('#beam-go');
+    await chief.click(`#beam-who button[data-value="${id('wes')}"]`);
+    await chief.click('#beam-ship button[data-value="K\'Vatch"]');
+    await energize(chief);
     await chief.waitForSelector('#beam-status:has-text("cannot beam through the shields of the Enterprise")');
     assert.equal(await wes.evaluate(() => window.__voice.me.ship), 'Enterprise');
     step('shields up: the transporter cannot beam anyone off the ship');
 
     await carol.click('[data-shield-control] button');
     await chief.waitForFunction(() => !document.body.hasAttribute('data-shields-up'));
-    await chief.selectOption('#beam-who', id('wes'));
-    await chief.selectOption('#beam-ship', "K'Vatch");
-    await chief.click('#beam-go');
+    await chief.click(`#beam-who button[data-value="${id('wes')}"]`);
+    await chief.click('#beam-ship button[data-value="K\'Vatch"]');
+    await energize(chief);
     await wes.waitForFunction(() => window.__voice.me?.ship === "K'Vatch");
     await kops.waitForFunction(() => window.__operator.roster.some((u) => u.name === 'wes'));
     await op.waitForFunction(() => !window.__operator.roster.some((u) => u.name === 'wes'));
     await wes.waitForSelector('#users li:has-text("kor")', { state: 'attached' });
     assert.equal(await wes.evaluate(() => window.__voice.me.station), 'Crew');
     step('shields down: the transporter beamed wes to the K\'Vatch, keeping his station');
+
+    // Site to site, to a station: an ensign beamed to the Enterprise's Engineering console.
+    const ensign = await (async () => { const sock = new (require('ws'))(`ws://localhost:${process.env.PORT}`); const msgs = []; sock.on('message', (m) => msgs.push(JSON.parse(m))); await new Promise((r) => sock.on('open', r)); sock.send(JSON.stringify({ type: 'register', name: 'ensign', ship: 'Enterprise', station: 'Crew' })); return { sock, msgs }; })();
+    await chief.waitForSelector(`#beam-who button[data-value="${id('ensign')}"]`, { state: 'attached' });
+    await chief.click(`#beam-who button[data-value="${id('ensign')}"]`);
+    await chief.click('#beam-ship button[data-value="Enterprise"]');
+    await chief.click('#beam-station button[data-value="Engineering"]');
+    await energize(chief);
+    await waitFor(() => ensign.msgs.some((m) => m.type === 'registered' && m.station === 'Engineering' && m.ship === 'Enterprise'));
+    ensign.sock.close();
+    step("site to site: the transporter (taps, then three energize sliders) beamed an ensign to the Enterprise's Engineering console");
 
     // Signed in as Transporter (above); now move from Transporter to Helm.
     assert.equal(await chief.evaluate(() => window.__voice.me.station), 'Transporter');
@@ -698,7 +711,7 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // Communications sees the calls going on without joining them.
     const uhura = await openAs(browser, 'uhura', 'uhura', 'Enterprise', 'Communications');
-    await uhura.waitForSelector('[data-traffic] li:has-text("alice"):has-text("martok")', { state: 'attached' });
+    await uhura.waitForSelector('[data-traffic] li:has-text("alice"):has-text("martok")', { state: 'attached'  });
     assert.match(await uhura.textContent('[data-traffic]'), /Open/);
     assert.deepEqual(await alice.evaluate(() => window.__voice.peerNames()), ['martok'], 'Communications joined the call');
     assert.equal(await uhura.evaluate(() => window.__voice.state), 'idle');
