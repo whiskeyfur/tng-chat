@@ -216,7 +216,8 @@ function renderTraffic() {
   for (const c of traffic) {
     const li = document.createElement('li');
     const [word, cls] = STATE[c.state] || [c.state, ''];
-    const who = c.members.map((m) => comms.voice.label(m)).join('  ⟷  ');
+    // A radio call between ships we only overhear: ship to ship, no detail.
+    const who = c.ships ? `${c.ships.join('  ⟷  ')} (radio)${c.members.length ? `: ${c.members.map((m) => comms.voice.label(m)).join(', ')}` : ''}` : c.members.map((m) => comms.voice.label(m)).join('  ⟷  ');
     li.append(
       Object.assign(document.createElement('span'), { className: `traffic-state${cls}`, textContent: word }),
       Object.assign(document.createElement('span'), { className: 'traffic-who',

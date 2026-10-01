@@ -241,8 +241,11 @@
             li.append(
               el('span', { className: 'ops-hail__text', textContent: `The ${h.fromShip} is hailing: ${label(h.caller)}` }),
               el('span', { textContent: 'route to' }), pick,
-              el('button', { className: 'lcars-button lcars-button--pill', textContent: 'Route', disabled: !roster.length,
-                onclick: () => send({ type: 'route', hail: h.id, to: pick.value }) }),
+              // Radio (other ships in range can see the call is on), or a data link (private) when there's a link path.
+              el('button', { className: 'lcars-button lcars-button--pill', textContent: 'Route by radio', disabled: !roster.length,
+                onclick: () => send({ type: 'route', hail: h.id, to: pick.value, via: 'radio' }) }),
+              ...(network.includes(h.fromShip) ? [el('button', { className: 'lcars-button lcars-button--pill', textContent: 'Route by data link', disabled: !roster.length,
+                onclick: () => send({ type: 'route', hail: h.id, to: pick.value, via: 'link' }) })] : []),
               el('button', { className: 'lcars-button lcars-button--pill lcars-button--alert', textContent: 'Decline',
                 onclick: () => send({ type: 'decline-hail', hail: h.id }) }));
           } else {

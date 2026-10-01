@@ -231,8 +231,15 @@ function opLog(key, text) {
 
 // Force-connect two users (any ships), ending whatever calls they were in.
 // The answering side is told first so it is ready before the offer arrives.
-function forceConnect(a, b) {
+// How each call between ships is carried: over a data link (private) or by
+// radio (other ships' Communications in range can see it's on). Calls within
+// one ship are local (local RF).
+const carriers = new Map(); // cid -> 'link' | 'radio'
+const carrierFor = (a, b, want) => (a.shipKey === b.shipKey ? 'local' : want === 'radio' || !sameNetwork(a.shipKey, b.shipKey) ? 'radio' : 'link');
+
+function forceConnect(a, b, carrier) {
   const cid = newId('op-');
+  carriers.set(cid, carrierFor(a, b, carrier));
   send(b, { type: 'connect', peers: [info(a)], role: 'callee', cid });
   send(a, { type: 'connect', peers: [info(b)], role: 'caller', cid });
 }
@@ -346,11 +353,14 @@ function operatorMessage(op, msg) {
       if (!callee) return fail('pick a crew member to route the hail to');
       hails.delete(h.id);
       if (!caller) { broadcastOps(op.shipKey); return fail('the hailing party is no longer on the line'); }
-      forceConnect(caller, callee);
-      opLog(h.fromShip, `the ${shipName(op.shipKey)} answered: ${caller.name} is connected to ${callee.name}, ${callee.station}`);
+      // Radio, or a data link when there's a link path between the ships.
+      const via = msg.via === 'link' && sameNetwork(caller.shipKey, callee.shipKey) ? 'link' : 'radio';
+      if (via === 'link' && (!commsUp(caller.shipKey, 'subspace') || !commsUp(callee.shipKey, 'subspace'))) return fail('a subspace relay is down: route it by radio');
+      forceConnect(caller, callee, via);
+      opLog(h.fromShip, `the ${shipName(op.shipKey)} answered: ${caller.name} is connected to ${callee.name}, ${callee.station} (${via === 'link' ? 'data link' : 'radio'})`);
       broadcastOps(h.fromShip);
       broadcastOps(op.shipKey);
-      return ok(`routed the hail from the ${shipName(h.fromShip)} (${caller.name}) to ${callee.name}`);
+      return ok(`routed the hail from the ${shipName(h.fromShip)} (${caller.name}) to ${callee.name} by ${via === 'link' ? 'data link' : 'radio'}`);
     }
     case 'all-hands': {
       // Open an all-hands broadcast for someone aboard (yourself included).
@@ -810,6 +820,7 @@ function scheduleNav() {
   navTimer = setTimeout(() => {
     navTimer = null;
     tow();
+    relinkCalls();
     // Contacts seen now become known contacts; autopilots follow them, and dock on arrival.
     const now = Date.now();
     for (const k of cores.keys()) {
@@ -1843,6 +1854,22 @@ function releaseTractor(k, why) {
   scheduleNav();
 }
 
+// A call carried by a data link that no longer joins its ships drops to
+// radio if they're in range and both radios work; otherwise it ends.
+function relinkCalls() {
+  const byCid = new Map();
+  for (const u of users.values()) if (u.cid && u.state !== 'idle') { if (!byCid.has(u.cid)) byCid.set(u.cid, []); byCid.get(u.cid).push(u); }
+  for (const [cid, members] of byCid) {
+    if (carriers.get(cid) !== 'link') continue;
+    const ships = [...new Set(members.map((u) => u.shipKey))];
+    if (ships.length < 2 || ships.every((a) => ships.every((b) => sameNetwork(a, b)))) continue;
+    const radio = ships.every((a) => commsUp(a, 'radio') && ships.every((b) => commsOk(a, b)));
+    if (radio) { carriers.set(cid, 'radio'); for (const u of members) send(u, { type: 'notice', text: 'Data link lost: the call carries on by radio' }); }
+    else { carriers.delete(cid); for (const u of members) send(u, { type: 'force-hangup', reason: 'data link lost, out of radio range' }); }
+    scheduleTraffic();
+  }
+}
+
 // Towed ships follow just behind the ship towing them.
 function tow() {
   for (const [k, e] of eng) {
@@ -2429,25 +2456,37 @@ function dropLinksIfUnmaintained(key) {
 
 // Every call in progress (or ringing) that involves someone on this ship's data
 // network: who is in it and since when. Metadata only; nobody listens in.
+// What this ship's Communications can see: its own local calls in full;
+// radio calls (and hails, which are radio) between vessels as ship-to-ship
+// only, when one end is within our radio range and our radio has power;
+// nothing internal to another ship, and nothing carried over a data link.
 function trafficFor(key) {
   const net = network(key);
+  const radioUp = commsUp(key, 'radio');
+  const heard = (ships) => radioUp && ships.some((s) => s === key || commsOk(key, s));
   const involved = [...users.values()].filter((u) => u.state !== 'idle' && u.cid);
   const calls = new Map();
   for (const u of involved) {
     const others = u.peers.map((id) => users.get(id)).filter(Boolean);
-    if (![u, ...others].some((m) => net.has(m.shipKey))) continue;
-    const c = calls.get(u.cid) || { state: u.state === 'in-call' ? 'in-call' : 'ringing', since: u.callSince || Date.now(), members: new Map() };
-    for (const m of [u, ...others]) c.members.set(m.id, info(m));
+    const c = calls.get(u.cid) || { cid: u.cid, state: u.state === 'in-call' ? 'in-call' : 'ringing', since: u.callSince || Date.now(), members: new Map(), ships: new Set() };
+    for (const m of [u, ...others]) { c.members.set(m.id, m); c.ships.add(m.shipKey); }
     if (u.state === 'in-call') c.state = 'in-call';
     c.since = Math.min(c.since, u.callSince || Date.now());
     calls.set(u.cid, c);
   }
-  const out = [...calls.values()].map((c) => ({ state: c.state, since: c.since, members: [...c.members.values()] }));
-  // Hails waiting for the other ship's ops to answer.
+  const out = [];
+  for (const c of calls.values()) {
+    const ships = [...c.ships];
+    if (ships.length === 1) { if (ships[0] === key) out.push({ state: c.state, since: c.since, members: [...c.members.values()].map(info) }); continue; }
+    if ((carriers.get(c.cid) || 'link') !== 'radio' || !heard(ships)) continue;
+    out.push({ state: c.state, since: c.since, via: 'radio', ships: ships.map(shipName), members: [...c.members.values()].filter((m) => m.shipKey === key).map(info) });
+  }
+  // Hails (by radio) waiting for the other ship's ops to answer.
   for (const h of hails.values()) {
-    if (!net.has(h.fromShip) && !net.has(h.toShip)) continue;
     const caller = users.get(h.caller);
-    if (caller) out.push({ state: 'hailing', since: h.since, members: [info(caller)], to: shipName(h.toShip) });
+    if (!caller) continue;
+    if (h.fromShip === key) out.push({ state: 'hailing', since: h.since, members: [info(caller)], to: shipName(h.toShip) });
+    else if (heard([h.fromShip, h.toShip])) out.push({ state: 'hailing', since: h.since, via: 'radio', ships: [shipName(h.fromShip), shipName(h.toShip)], members: [], to: shipName(h.toShip) });
   }
   // All-hands broadcasts heard on this network.
   for (const b of broadcasts.values()) {
@@ -2727,8 +2766,9 @@ wss.on('connection', (ws) => {
       if (!target || (msg.type === 'call' && !sameNetwork(ws.shipKey, target.shipKey))) return send(ws, { type: 'unavailable', id: msg.to });
       // Communications' subsystems: local RF for calls aboard, radio between ships.
       if (msg.type === 'call') {
+        // Calls aboard go by local RF; calls to another ship on the data network by the link (subspace relays).
         const same = ws.shipKey === target.shipKey;
-        const down = same ? (!commsUp(ws.shipKey, 'rf') && 'local RF') : !commsUp(ws.shipKey, 'radio') ? 'our radio' : !commsUp(target.shipKey, 'radio') ? `the ${shipName(target.shipKey)}'s radio` : null;
+        const down = same ? (!commsUp(ws.shipKey, 'rf') && 'local RF') : !commsUp(ws.shipKey, 'subspace') ? 'our subspace relay' : !commsUp(target.shipKey, 'subspace') ? `the ${shipName(target.shipKey)}'s subspace relay` : null;
         if (down) {
           send(ws, { type: 'notice', text: `Communications: ${down} has no power, the call can't go through` });
           return send(ws, { type: 'unavailable', id: msg.to });
@@ -2739,6 +2779,7 @@ wss.on('connection', (ws) => {
         send(ws, { type: 'notice', text: 'You are confined to quarters: you can only call Security, Medical or ops' });
         return send(ws, { type: 'unavailable', id: msg.to });
       }
+      if (msg.type === 'call' && typeof msg.cid === 'string' && ws.shipKey !== target.shipKey && !carriers.has(msg.cid)) carriers.set(msg.cid, 'link');
       send(target, { ...msg, to: undefined, from: ws.id, fromInfo: info(ws) });
     }
   });

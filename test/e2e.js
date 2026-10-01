@@ -712,12 +712,14 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // Communications sees the calls going on without joining them.
     const uhura = await openAs(browser, 'uhura', 'uhura', 'Enterprise', 'Communications');
-    await uhura.waitForSelector('[data-traffic] li:has-text("alice"):has-text("martok")', { state: 'attached'  });
+    // The routed hail is a radio call: ship to ship, our own crew named, theirs not.
+    await uhura.waitForSelector('[data-traffic] li:has-text("Enterprise"):has-text("K\'Vatch"):has-text("radio"):has-text("alice")', { state: 'attached' });
+    assert.doesNotMatch(await uhura.textContent('[data-traffic]'), /martok/, "another ship's crew aren't named");
     assert.match(await uhura.textContent('[data-traffic]'), /Open/);
     assert.deepEqual(await alice.evaluate(() => window.__voice.peerNames()), ['martok'], 'Communications joined the call');
     assert.equal(await uhura.evaluate(() => window.__voice.state), 'idle');
     await uhura.close();
-    step('Communications sees alice and martok\'s call in comm traffic without joining it');
+    step("Communications sees alice's radio call with the K'Vatch in comm traffic (ship to ship, martok not named) without joining it");
     for (const page of [chief, wes]) await page.close();
 
     // Pages hosted elsewhere (GitHub Pages) can use this server as their relay.
@@ -1454,11 +1456,18 @@ const audioBytes = (page) => page.evaluate(async () => {
     await closeComms(alice);
     step('alice texted bob and carol together without a call; bob\'s Comms button showed the unread message');
 
-    // Closing the tab mid-call ends the call for the other side.
+    // Closing the tab mid-call ends the call for the other side. Meanwhile
+    // another ship's Communications can't see this call inside the Enterprise.
+    const odan = await crewWs('odan', 'Defiant', 'Communications');
     await callFrom(carol, 'bob');
     await bob.waitForSelector('.v-incoming:not([hidden])');
     await bob.click('.v-accept');
     await carol.waitForFunction(() => window.__voice.connectedTo(1), null, { timeout: 20000 });
+    await new Promise((r) => setTimeout(r, 600));
+    const seen = [...odan.msgs].reverse().find((m) => m.type === 'traffic');
+    assert.ok(!seen || !JSON.stringify(seen.calls).includes('carol'), "the Defiant's Communications saw a call inside the Enterprise");
+    odan.close();
+    step("another ship's Communications could not see a call inside the Enterprise");
     await carol.close();
     await bob.waitForFunction(() => window.__voice.state === 'idle', null, { timeout: 5000 });
     step('peer going offline ends the call');
