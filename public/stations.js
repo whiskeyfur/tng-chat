@@ -3,7 +3,7 @@
 // ship with the warp core, Helm a navigation starfield, and so on. The data is
 // simulated (a gentle random walk), except the duty roster and department
 // readiness (who is actually aboard, at which station) and the shields, which
-// follow the ship's real shield state. The
+// follow the ship's real shield state and strength. The
 // Transporter and Tactical stations have live controls that client.js fills
 // in (elements marked data-transporter and data-shield-control), and
 // Communications has live comm traffic (data-traffic).
@@ -307,11 +307,8 @@
     Captain: (ship) => ({ code: 'CMD 01', color: 'gold', panels: [
       // Alert status and orders (client.js fills it in).
       panel('st-command', 'Command', 'red', true, h('div', { 'data-command': '' })),
-      panel('st-status', 'Ship status', 'gold', true, h('div', { class: 'ops-readouts' },
-        live(readout('Alert status', 'sky'), () => 'Condition green'),
-        live(readout('Shields', 'sky', '%'), drift(100, 92, 100, 1.5), Math.round),
-        live(readout('Hull integrity', 'gold', '%'), drift(99, 96, 100, 0.4), (v) => v.toFixed(1)),
-        live(readout('Velocity', 'orange'), drift(6, 5.5, 6.5, 0.1), (v) => `Warp ${v.toFixed(1)}`))),
+      // Real hull, shields, speed and damage (client.js fills it in).
+      panel('st-status', 'Ship status', 'gold', true, h('div', { 'data-ship-status': '' })),
       panel('st-tactical', 'Tactical plot', 'red', false, sweep(240, 'red', 4, 'Tactical plot')),
       panel('st-dept', 'Department readiness', 'blue', false, h('ul', { class: 'st-depts', 'data-depts': '' })),
       panel('st-roster', 'Senior staff on duty', 'lilac', true, h('ul', { class: 'st-roster', 'data-roster': '' })),
@@ -343,15 +340,15 @@
       ] };
     },
     Tactical: () => {
-      const arcs = [0.98, 0.97, 0.99, 0.96];
-      every(900, () => arcs.forEach((v, i) => { arcs[i] = clamp(v + rand(-0.03, 0.03), 0.8, 1); }));
+      // The arcs follow the real shield strength, with a little shimmer.
+      const arcs = [0, 0, 0, 0].map(() => rand(-0.02, 0.02));
+      every(900, () => arcs.forEach((v, i) => { arcs[i] = clamp(v + rand(-0.01, 0.01), -0.03, 0.03); }));
+      const arc = (i) => clamp(shieldLevel + arcs[i], 0, 1);
       return { code: 'TAC 04', color: 'red', panels: [
-        panel('st-shields', 'Shield grid', 'sky', false, shields((i) => arcs[i]),
-          h('div', { class: 'ops-readouts' }, ...['Fore', 'Starboard', 'Aft', 'Port'].map((n, i) => live(readout(n, 'sky', '%'), () => arcs[i] * 100, Math.round)))),
-        panel('st-weapons', 'Weapons', 'red', false,
-          ...['Phaser bank 1', 'Phaser bank 2', 'Phaser bank 3'].map((n) => live(gauge(n, 'red'), drift(1, 0.9, 1, 0.02))),
-          live(readout('Photon torpedoes', 'gold'), () => 250),
-          live(readout('Weapons status', 'orange'), () => 'Standby')),
+        // Target lock, phasers and torpedoes (client.js fills it in).
+        panel('st-weapons', 'Weapons', 'red', true, h('div', { 'data-weapons': '' })),
+        panel('st-shields', 'Shield grid', 'sky', false, shields(arc),
+          h('div', { class: 'ops-readouts' }, ...['Fore', 'Starboard', 'Aft', 'Port'].map((n, i) => live(readout(n, 'sky', '%'), () => arc(i) * 100, Math.round)))),
         panel('st-shieldctl', 'Shield control', 'red', true, h('div', { 'data-shield-control': '' })),
         panel('st-plot', 'Targeting scan', 'orange', true, sweep(240, 'orange', 6, 'Targeting scan')),
       ] };
@@ -376,6 +373,8 @@
           live(readout('Containment field', 'sky', '%'), drift(100, 99, 100, 0.2), (v) => v.toFixed(1))),
         // Real power routing (client.js fills it in): every station feels it.
         panel('st-power', 'Power distribution', 'gold', true, h('div', { class: 'pw', 'data-power': '' })),
+        // Damage and where the repair crews go (client.js fills it in).
+        panel('st-damage', 'Damage control', 'red', true, h('div', { 'data-damage': '' })),
       ] };
     },
     Medical: () => ({ code: 'MED 07', color: 'blue', panels: [
@@ -435,6 +434,8 @@
   window.STATION_NAMES = Object.keys(STATIONS);
   // The ship's real speed (warp factor; impulse 0.25), for the forward view.
   let navSpeed = 0;
+  // Shield strength (0..1) for the shield grid.
+  let shieldLevel = 1;
   // The duty stations counted for department readiness.
   const DEPARTMENTS = ['Operations', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter'];
 
@@ -445,7 +446,10 @@
     const sections = def.panels.map((p) => ({ id: p.id, title: p.querySelector('.lcars-panel__title span').textContent, color: p.style.getPropertyValue('--accent') }));
     return {
       code: def.code,
-      setNav(own) { navSpeed = own ? (own.warp >= 1 ? own.warp : own.warp > 0 ? 0.6 : 0.05) : 0; },
+      setNav(own) {
+        navSpeed = own ? (own.warp >= 1 ? own.warp : own.warp > 0 ? 0.6 : 0.05) : 0;
+        if (own?.combat) shieldLevel = own.combat.shield / 100;
+      },
       // Shield displays follow the ship's real shield state.
       setShields(up) {
         for (const el of container.querySelectorAll('[data-shields]')) el.toggleAttribute('data-down', !up);

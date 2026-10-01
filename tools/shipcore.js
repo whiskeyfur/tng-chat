@@ -203,11 +203,12 @@ function onMessage(raw, isBinary) {
       break;
     }
     case 'core-set': {
-      // Ship settings the relay has checked: alert status, transporter lockout.
+      // Ship settings the relay has checked: alert status, transporter lockout,
+      // and the hull, shields and damage (the relay runs combat).
       const store = storeFor(msg.ship);
       if (!store || !store.primary || !msg.set) return;
-      for (const k of ['alert', 'lockout']) if (k in msg.set) store.nav[k] = msg.set[k];
-      log(`${store.ship}: ${Object.entries(msg.set).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+      for (const k of ['alert', 'lockout', 'combat']) if (k in msg.set) store.nav[k] = msg.set[k];
+      if (!('combat' in msg.set) || Object.keys(msg.set).length > 1) log(`${store.ship}: ${Object.entries(msg.set).filter(([k]) => k !== 'combat').map(([k, v]) => `${k} ${v}`).join(', ')}`);
       store.saveNav();
       sendNav(store);
       break;

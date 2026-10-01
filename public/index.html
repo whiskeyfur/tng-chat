@@ -122,6 +122,17 @@
     [data-command], [data-security], [data-medical], [data-reassign] { display: flex; flex-direction: column; gap: 12px; }
     .st-patients li { align-items: center; }
     .st-patients .lcars-button { min-height: 32px; font-size: 13px; margin-left: 10px; }
+    /* Tactical weapons, damage control */
+    [data-weapons], [data-damage] { display: flex; flex-direction: column; gap: 12px; }
+    [data-weapons] .st-state { margin: 0; font-size: 22px; text-transform: uppercase; color: var(--lcars-sky); }
+    [data-weapons] .st-state[data-up] { color: var(--lcars-red); }
+    .wp-fire .lcars-button { min-width: 180px; }
+    .dc-list { grid-template-columns: 1fr; }
+    .dc-list li.dc-row { display: grid; grid-template-columns: 160px 170px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+    .dc-list .dc-note { color: var(--lcars-tan); font-size: 14px; }
+    .dc-list .lcars-button { min-height: 30px; font-size: 13px; }
+    .dc-active { outline: 3px solid #fff; outline-offset: 2px; }
+    @media (max-width: 700px) { .dc-list li.dc-row { grid-template-columns: 1fr 1fr; } }
     /* Engineering power routing */
     .pw { display: flex; flex-direction: column; gap: 8px; text-transform: uppercase; }
     .pw-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 60px; align-items: center; gap: 12px; }

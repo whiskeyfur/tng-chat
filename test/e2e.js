@@ -977,6 +977,74 @@ const audioBytes = (page) => page.evaluate(async () => {
     await carol.click('[data-shield-control] button:has-text("Lower shields")');
     await carol.waitForSelector('[data-shield-control] .st-state:has-text("Shields down")', { state: 'attached' });
     step("the Captain's orders reached every console; red alert raised shields and turned consoles red, then condition green");
+
+    // Tactical combat: carol (Enterprise) locks on the Defiant, whose Tactical is warned.
+    const crewWs = async (name, ship, station) => {
+      const sock = new WebSocket(`ws://localhost:${process.env.PORT}`);
+      const msgs = [];
+      sock.on('message', (m) => { try { msgs.push(JSON.parse(m)); } catch {} });
+      await new Promise((r) => sock.on('open', r));
+      sock.send(JSON.stringify({ type: 'register', name, ship, station }));
+      await waitFor(() => msgs.some((m) => m.type === 'registered'));
+      return { msgs, send: (m) => sock.send(JSON.stringify(m)), close: () => sock.close(), nav: () => [...msgs].reverse().find((m) => m.type === 'nav') };
+    };
+    const kira = await crewWs('kira', 'Defiant', 'Tactical');
+    const obrien = await crewWs('obrien', 'Defiant', 'Engineering');
+    await screen(carol, 'st-weapons');
+    await carol.waitForSelector('#weapons-target option[value="Defiant"]', { state: 'attached' });
+    await carol.selectOption('#weapons-target', 'Defiant');
+    await carol.click('#weapons-lock');
+    await carol.waitForSelector('#weapons-lock-state:has-text("Locked on the Defiant")');
+    await waitFor(() => kira.msgs.some((m) => m.type === 'notice' && /the Enterprise has locked weapons on us/.test(m.text)));
+    await waitFor(() => kira.nav()?.own.combat.lockedBy.includes('Enterprise'));
+    await picard.waitForSelector('[data-readout="Weapons"]:has-text("Locked: the Defiant")', { state: 'attached' });
+    step("Tactical locked weapons on the Defiant: the Defiant's Tactical was warned, and the Captain's status shows the lock");
+
+    // The Defiant raises shields: a torpedo drains them, the hull holds.
+    kira.send({ type: 'shields', up: true });
+    await carol.waitForSelector('#weapons-lock-state:has-text("shields up")');
+    await carol.click('#fire-torpedo');
+    await waitFor(() => kira.nav()?.own.combat.shield < 80 && kira.nav().own.combat.hull === 100);
+    assert.equal(await carol.isDisabled('#fire-torpedo'), true, 'torpedo tubes should be reloading');
+    await carol.waitForSelector('#wp-torpedoes:has-text("9 of 10")');
+    await nog.waitForSelector('.bcast--alert:has-text("Taking fire from the Enterprise")', { state: 'attached' });
+    step('a torpedo drained the Defiant\'s shields (hull untouched); the tubes reloaded, and every Defiant console showed "Taking fire"');
+
+    // Shields down: phasers hit the hull and damage a system, which caps its power.
+    kira.send({ type: 'shields', up: false });
+    await waitFor(async () => !(await carol.textContent('#weapons-lock-state')).includes('shields up'));
+    await carol.waitForSelector('#fire-phaser:not([disabled])');
+    await carol.click('#fire-phaser');
+    await waitFor(() => kira.nav()?.own.combat.hull < 100);
+    const hit = kira.nav().own;
+    const damaged = Object.entries(hit.combat.damage).find(([, d]) => d > 0);
+    assert.ok(damaged, 'a system should be damaged');
+    assert.ok(hit.power[damaged[0]] <= 100 - damaged[1] + 1, 'damage should cap the system\'s power');
+    await waitFor(() => obrien.msgs.some((m) => m.type === 'notice' && /^Engineering: .* damaged/.test(m.text)));
+    step(`with shields down a phaser hit the hull (${hit.combat.hull}%) and damaged the ${damaged[0]}, capping its power`);
+
+    // Engineering directs repairs; the ship's computer keeps the damage.
+    obrien.send({ type: 'repair', system: damaged[0] });
+    await waitFor(() => obrien.nav()?.own.combat.repair === damaged[0] || obrien.msgs.some((m) => m.type === 'notice' && /repaired/.test(m.text)));
+    await waitFor(() => { try { return JSON.parse(stored('d', 'Defiant', '.nav.json')).combat?.hull < 100; } catch { return false; } }, 15000);
+    await waitFor(() => obrien.nav()?.own.combat.damage[damaged[0]] === 0, 30000);
+    step(`Engineering sent repair crews to the ${damaged[0]} and fixed it; the Defiant's computer saved the hull damage`);
+
+    // Stealth: the Enterprise stands off 200 units; the Defiant powers down
+    // and drops off the Enterprise's sensors (and weapons lock), then powers up again.
+    helm({ dest: { x: 310, y: 500 }, warp: 5 });
+    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); return n?.own.warp === 0 && n.own.x < 320; }, 30000);
+    await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
+    obrien.send({ type: 'power', power: { engines: 0, shields: 0, sensors: 20, transporter: 0, weapons: 0, lifeSupport: 60 } });
+    await waitFor(() => Math.round(obrien.nav()?.own.signature * 100) === 18);
+    await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'detached' });
+    await carol.waitForSelector('#weapons-lock-state:has-text("No weapons lock")');
+    step('the Defiant powered down to an 18% signature: off the Enterprise\'s sensors 200 units away, and the weapons lock was lost');
+    obrien.send({ type: 'power', power: { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100 } });
+    await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
+    step('powered up again, the Defiant showed up on sensors');
+    kira.close();
+    obrien.close();
     for (const page of [worf, riker, picard]) await page.close();
 
     sulu.close();

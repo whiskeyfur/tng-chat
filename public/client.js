@@ -157,6 +157,7 @@ function showStation() {
   renderPower();
   renderCrewPanels();
   renderShipState();
+  renderCombat();
   fillReassign();
   renderTraffic();
   showScreen(stationView.sections[0].id);
@@ -220,7 +221,8 @@ function renderShipState() {
   const crew = comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station !== 'Operations');
   const targets = ships.filter((s) => s.computer && s.name.toLowerCase() !== me.ship.toLowerCase());
   const range = lastNav?.ranges?.transporter;
-  const sig = JSON.stringify([up, p?.shields, p?.transporter, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields])]);
+  const strength = lastNav?.own?.combat?.shield;
+  const sig = JSON.stringify([up, p?.shields, p?.transporter, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields]), strength]);
   if (sig === shipStateSig) return;
   shipStateSig = sig;
   stationView.setShields(up);
@@ -229,7 +231,7 @@ function renderShipState() {
 
   const shieldCtl = document.querySelector('[data-shield-control]');
   if (shieldCtl) {
-    const weak = p && p.shields < 20;
+    const weak = (p && p.shields < 20) || strength < 10;
     const btn = el('button', {
       type: 'button',
       className: `lcars-button lcars-button--pill${up ? '' : ' lcars-button--alert'}`,
@@ -237,9 +239,9 @@ function renderShipState() {
       disabled: !up && weak,
       onclick: () => send({ type: 'shields', up: !up }),
     });
-    const state = el('p', { className: 'st-state', textContent: up ? 'Shields up · transporters blocked' : weak ? 'Shields down · not enough power' : 'Shields down' });
+    const state = el('p', { className: 'st-state', textContent: up ? 'Shields up · transporters blocked' : strength < 10 ? 'Shields down · generators recharging' : weak ? 'Shields down · not enough power' : 'Shields down' });
     state.toggleAttribute('data-up', up);
-    const power = el('p', { className: 'ops-hint', textContent: p ? `Shield power ${p.shields}% (20% needed to hold them)` : '' });
+    const power = el('p', { className: 'ops-hint', id: 'shield-strength', textContent: p ? `Shield strength ${strength ?? 100}% · shield power ${p.shields}% (20% needed to hold them; more power, less drain per hit)` : '' });
     shieldCtl.replaceChildren(el('div', { className: 'st-control' }, state, btn, power));
   }
 
@@ -356,12 +358,132 @@ function renderCrewPanels() {
   }
 }
 
+// --- combat: Tactical's weapons, Engineering's damage control, the Captain's status ---
+// Ready times count down here between 'nav' messages.
+let combatAt = 0;
+function renderCombat() {
+  if (!me) return;
+  const own = lastNav?.own, c = own?.combat;
+  if (!c) return;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const button = (text, id, onclick, extra = '') => el('button', { type: 'button', className: `lcars-button lcars-button--pill ${extra}`, id, textContent: text, onclick });
+  const changed = (node, ...state) => { const sig = JSON.stringify(state); if (node.dataset.sig === sig) return false; node.dataset.sig = sig; return true; };
+  const NAMES = Object.fromEntries(POWER);
+  combatAt = Date.now();
+
+  // Warnings on every console aboard; a weapons lock on us for Tactical and the Captain.
+  bc.setAlert('fire', c.underFire ? `Taking fire from the ${c.underFire} · shields ${lastNav.own && ownShip()?.shields ? `${c.shield}%` : 'down'} · hull ${c.hull}%` : null);
+  bc.setAlert('disabled', c.disabled ? `Hull breached: the ${me.ship} is disabled until repaired (hull ${c.hull}%, 10% needed)` : null);
+  bc.setAlert('locked', c.lockedBy.length && ['Tactical', 'Captain'].includes(me.station) ? `Weapons lock: the ${c.lockedBy.join(', the ')} ${c.lockedBy.length > 1 ? 'have' : 'has'} locked on us` : null, { level: 'yellow' });
+  if (!stationView) return;
+
+  // Tactical: target, lock, fire.
+  const wp = document.querySelector('[data-weapons]');
+  if (wp) {
+    if (!wp.firstChild) {
+      const sel = el('select', { className: 'ops-select', id: 'weapons-target', ariaLabel: 'target' });
+      wp.append(
+        el('div', { className: 'ops-form' }, el('span', { textContent: 'Target' }), sel,
+          button('Lock weapons', 'weapons-lock', () => sel.value && send({ type: 'lock', ship: sel.value }), 'lcars-button--alert'),
+          button('Release', 'weapons-release', () => send({ type: 'lock', ship: null }))),
+        el('p', { className: 'st-state', id: 'weapons-lock-state' }),
+        el('div', { className: 'ops-form wp-fire' },
+          button('Fire phasers', 'fire-phaser', () => send({ type: 'fire', weapon: 'phaser' }), 'lcars-button--alert'),
+          button('Fire torpedo', 'fire-torpedo', () => send({ type: 'fire', weapon: 'torpedo' }), 'lcars-button--alert')),
+        el('div', { className: 'ops-readouts' },
+          el('div', { className: 'lcars-readout', id: 'wp-phasers' }), el('div', { className: 'lcars-readout', id: 'wp-torpedoes' })),
+        el('p', { className: 'ops-notice', id: 'weapons-status' }),
+        el('p', { className: 'ops-hint', textContent: `Phasers reach ${c.phaser.range} units, hit harder with more weapons power, and recharge in ${c.phaser.recharge / 1000} s. Torpedoes reach ${c.torpedo.range} units and reload in ${c.torpedo.reload / 1000} s; ${c.carried} carried, restocked one a minute. Shields soak hits until they fail; then the hull and systems take damage.` }));
+    }
+    const sel = wp.querySelector('#weapons-target');
+    const contacts = lastNav.ships.filter((s) => s.name !== own.name);
+    if (changed(sel, contacts.map((s) => s.name), c.lock?.name)) {
+      const keep = sel.value || c.lock?.name;
+      sel.replaceChildren(...contacts.map((s) => new Option(s.name, s.name)));
+      if (!contacts.length) sel.append(new Option('No contacts on sensors', ''));
+      if (keep && contacts.some((s) => s.name === keep)) sel.value = keep;
+    }
+    for (const s of contacts) [...sel.options].find((o) => o.value === s.name).textContent = `The ${s.name} (${Math.round(s.distance)} units${s.shields ? ', shields up' : ''})`;
+    const lockState = wp.querySelector('#weapons-lock-state');
+    lockState.textContent = c.disabled ? 'Ship disabled: weapons offline'
+      : c.lock ? `Locked on the ${c.lock.name} · ${c.lock.distance} units · shields ${c.lock.shields ? `up, ${c.lock.shield}%` : 'down'} · hull ${c.lock.hull}%${c.lock.disabled ? ' · disabled' : ''}` : 'No weapons lock';
+    lockState.toggleAttribute('data-up', !!c.lock);
+    wp.querySelector('#weapons-release').disabled = !c.lock;
+    updateWeaponTimers();
+  }
+
+  // Engineering: damage and repair crews.
+  const dc = document.querySelector('[data-damage]');
+  if (dc && changed(dc, c.hull, c.damage, c.repair, c.disabled, own.power, own.allocated)) {
+    const status = dc.querySelector('#damage-status')?.textContent || '';
+    const row = (key, label, value, note) => el('li', { className: 'dc-row' },
+      el('span', { className: 'dc-label', textContent: label }),
+      el('span', { className: 'dc-value', textContent: value }),
+      el('span', { className: 'dc-note', textContent: note }),
+      c.repair === key ? button('Directing repairs', '', () => send({ type: 'repair', system: null }), 'dc-active')
+        : button('Direct repairs', '', () => send({ type: 'repair', system: key }), (key === 'hull' ? c.hull < 100 : c.damage[key] > 0) ? 'lcars-button--alert' : ''));
+    dc.replaceChildren(
+      el('ul', { className: 'st-list dc-list' },
+        row('hull', 'Hull', `${c.hull}%`, c.disabled ? 'Breached: ship disabled' : c.hull < 100 ? 'Damaged' : 'Intact'),
+        ...POWER.map(([k, label]) => row(k, label, c.damage[k] ? `${c.damage[k]}% damaged` : 'Operational',
+          own.power[k] < own.allocated[k] ? `gets ${own.power[k]}% of ${own.allocated[k]}% routed` : `${own.power[k]}%`))),
+      el('p', { className: 'ops-notice', id: 'damage-status', textContent: status }),
+      el('p', { className: 'ops-hint', textContent: 'Damage caps what a system can draw. Repair crews fix everything slowly; directed to one system (or the hull) they fix it six to ten times faster.' }));
+    for (const li of dc.querySelectorAll('.dc-row')) li.dataset.system = li.querySelector('.dc-label').textContent;
+  }
+
+  // Captain: the ship's real status.
+  const ss = document.querySelector('[data-ship-status]');
+  if (ss) {
+    const up = !!ownShip()?.shields;
+    const damaged = POWER.filter(([k]) => c.damage[k] > 0).map(([k]) => NAMES[k].toLowerCase());
+    const speed = own.warp <= 0 ? 'All stop' : own.warp < 1 ? 'Impulse' : `Warp ${+own.warp.toFixed(1)}`;
+    const items = [
+      ['Alert status', own.alert && own.alert !== 'green' ? `${own.alert[0].toUpperCase()}${own.alert.slice(1)} alert` : 'Condition green', 'sky'],
+      ['Shields', `${up ? 'Up' : 'Down'} · ${c.shield}%`, 'sky'],
+      ['Hull integrity', `${c.hull}%${c.disabled ? ' · disabled' : ''}`, 'gold'],
+      ['Velocity', speed, 'orange'],
+      ['Weapons', c.lock ? `Locked: the ${c.lock.name}` : 'Standby', 'red'],
+      ['Damage', damaged.length ? damaged.join(', ') : 'None', 'peach'],
+    ];
+    if (changed(ss, items)) {
+      ss.replaceChildren(el('div', { className: 'ops-readouts' }, ...items.map(([label, value, color]) => {
+        const r = el('div', { className: 'lcars-readout' }, el('span', { className: 'lcars-readout__label', textContent: label }), el('span', { className: 'lcars-readout__value', textContent: value }));
+        r.style.setProperty('--accent', `var(--lcars-${color})`);
+        r.dataset.readout = label;
+        return r;
+      })));
+    }
+  }
+}
+
+// Phaser charge and torpedo reload, counted down between updates.
+function updateWeaponTimers() {
+  const wp = document.querySelector('[data-weapons]');
+  const c = lastNav?.own?.combat;
+  if (!wp?.firstChild || !c) return;
+  const since = Date.now() - combatAt;
+  const left = (w) => Math.max(0, w.ready - since);
+  const noPower = (ownPower()?.weapons ?? 0) <= 0;
+  const ph = left(c.phaser), tp = left(c.torpedo);
+  const set = (id, label, value) => wp.querySelector(id).replaceChildren(
+    Object.assign(document.createElement('span'), { className: 'lcars-readout__label', textContent: label }),
+    Object.assign(document.createElement('span'), { className: 'lcars-readout__value', textContent: value }));
+  set('#wp-phasers', 'Phasers', c.disabled || noPower ? 'Offline' : ph ? `Charging ${Math.round((1 - ph / c.phaser.recharge) * 100)}%` : `Ready · ${ownPower().weapons}% power`);
+  set('#wp-torpedoes', 'Photon torpedoes', `${c.torpedoes} of ${c.carried}${tp ? ' · reloading' : ''}`);
+  const blocked = !c.lock || c.disabled || noPower;
+  wp.querySelector('#fire-phaser').disabled = blocked || ph > 0 || c.lock.distance > c.phaser.range;
+  wp.querySelector('#fire-torpedo').disabled = blocked || tp > 0 || !c.torpedoes || c.lock.distance > c.torpedo.range;
+}
+setInterval(updateWeaponTimers, 250);
+
 // Engineering: route the reactor's output. Sliders per system (0-100%), the
 // total against the reactor, and what the settings mean for the ship.
 let powerDraft = null; // Engineering's unsent changes
+const ownAllocation = () => lastNav?.own?.allocated || ownPower();
 function renderPower() {
   const root = document.querySelector('[data-power]');
-  const p = ownPower();
+  const p = ownAllocation();
   if (!root || !p) return;
   const reactor = lastNav.own.reactor || 450;
   const draft = powerDraft || { ...p };
@@ -374,7 +496,7 @@ function renderPower() {
         const row = document.createElement('label');
         row.className = 'pw-row';
         row.innerHTML = `<span class="pw-label">${label}</span><input type="range" min="0" max="100" step="5" class="pw-slider" data-system="${k}" aria-label="${label} power"><b class="pw-value"></b>`;
-        row.querySelector('input').oninput = (e) => { powerDraft = { ...(powerDraft || ownPower()), [k]: Number(e.target.value) }; renderPower(); };
+        row.querySelector('input').oninput = (e) => { powerDraft = { ...(powerDraft || ownAllocation()), [k]: Number(e.target.value) }; renderPower(); };
         return row;
       }),
       Object.assign(document.createElement('p'), { className: 'pw-total' }),
@@ -400,6 +522,9 @@ function renderPower() {
     draft.shields < 20 ? 'Shields: too little power to hold them' : 'Shields: can be raised',
     draft.transporter <= 0 ? 'Transporter: no power' : 'Transporter: ready',
     draft.lifeSupport < 50 ? `Life support: ${draft.lifeSupport}%, crew warned` : 'Life support: nominal',
+    // The more power the ship uses, the further off other ships' sensors see it.
+    `Power signature ${Math.round(Math.min(1, Math.max(0.1, total / reactor)) * 100)}%: seen from ${Math.round(600 * Math.min(1, Math.max(0.1, total / reactor)))} units by full sensors${total / reactor < 0.6 ? ' (running quiet)' : ''}`,
+    ...(Object.values(lastNav.own.combat?.damage || {}).some((d) => d > 0) ? ['Damaged systems get less than routed: see Damage control'] : []),
   ].map((t) => Object.assign(document.createElement('li'), { textContent: t })));
   root.querySelector('#power-apply').disabled = !powerDraft || over;
   root.querySelector('#power-reset').disabled = !powerDraft;
@@ -435,7 +560,10 @@ async function onMessage(msg) {
   if (ops?.handle(msg)) return;
   if (await bc.handle(msg)) return;
   if (msg.type === 'notice' && /^(Helm|Sensors|Science|Course plotted|No ship's computer is flying)/.test(msg.text)) navPanel?.status(msg.text);
-  if (msg.type === 'notice' && /^(Engineering|Tactical)/.test(msg.text)) log(msg.text, 'warn');
+  if (msg.type === 'notice' && /^(Engineering|Tactical)/.test(msg.text)) {
+    const st = document.getElementById(msg.text.startsWith('Tactical') ? 'weapons-status' : 'damage-status');
+    if (st) st.textContent = msg.text;
+  }
   if (msg.type === 'notice' && msg.text.startsWith('Transporter:')) {
     const st = document.getElementById('beam-status');
     if (st) st.textContent = msg.text;
@@ -501,6 +629,7 @@ async function onMessage(msg) {
       renderShipState();
       renderPower();
       renderCrewPanels();
+      renderCombat();
       break;
     case 'course-plotted':
       log(`${msg.by.name} plotted a course to ${msg.label}`);

@@ -149,7 +149,8 @@
           el('span', { textContent: `Position ${Math.round(own.x)}, ${Math.round(own.y)}` }),
           el('span', { textContent: `Heading ${String(Math.round(own.heading)).padStart(3, '0')}` }),
           el('span', { textContent: speedName(own.warp) }),
-          el('span', { textContent: `Destination: ${dest}${eta != null ? ` · ETA ${eta < 60 ? `${Math.ceil(eta)} s` : `${Math.round(eta / 60)} min`}` : ''}` }));
+          el('span', { textContent: `Destination: ${dest}${eta != null ? ` · ETA ${eta < 60 ? `${Math.ceil(eta)} s` : `${Math.round(eta / 60)} min`}` : ''}` }),
+          ...(mode === 'science' && own.signature != null ? [el('span', { id: 'nav-signature', textContent: `Our power signature ${Math.round(own.signature * 100)}%` })] : []));
       } else {
         readout.textContent = "No ship's computer is flying the ship";
       }
@@ -207,7 +208,9 @@
               ['Distance', `${d.distance} units${d.inTransporterRange ? ' (transporter range)' : d.inCommsRange ? ' (comms range)' : ''}`],
               ['Position', `${Math.round(d.x)}, ${Math.round(d.y)}`],
               ['Heading · speed', `${String(Math.round(d.heading)).padStart(3, '0')} · ${speedName(d.warp)}`],
-              ['Shields', d.shields ? 'Up' : 'Down'],
+              ['Shields', `${d.shields ? 'Up' : 'Down'}${d.shieldStrength != null ? ` · ${d.shieldStrength}% strength` : ''}`],
+              ...(d.hull != null ? [['Hull', `${d.hull}%${d.disabled ? ' · disabled' : ''}${d.damaged.length ? ` · damaged: ${d.damaged.join(', ')}` : ''}`]] : []),
+              ...(d.signature != null ? [['Power signature', `${d.signature}%${d.signature < 60 ? ' (running quiet)' : ''}`]] : []),
               ['Ops', d.ops ? 'On duty' : 'None on duty'],
               ['Life signs', `${d.crew} (${stations})`],
             ].map(([k, v]) => el('li', {}, el('span', { textContent: k }), el('b', { textContent: v })))));

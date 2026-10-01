@@ -38,14 +38,14 @@ Each crew member gets an LCARS console for their station, styled with `public/lc
 
 | Station | Displays |
 | --- | --- |
-| Captain | **command** (alert status: condition green, yellow or red alert; orders to all hands), ship status, tactical plot, **department readiness** (how many are on duty at each station aboard: green when manned, red when not), senior staff on duty, captain's log |
+| Captain | **command** (alert status: condition green, yellow or red alert; orders to all hands), **ship status** (real: alert, shields and their strength, hull, speed, weapons lock, damaged systems), tactical plot, **department readiness** (how many are on duty at each station aboard: green when manned, red when not), senior staff on duty, captain's log |
 | First Officer | **reassign crew** to any station, duty roster (who is actually aboard), department readiness (real, as for the Captain), ship status, duty log |
 | Helm | **navigation**: the sector map, course (a ship, or click the map for a waypoint) and speed (impulse, warp 1-9), Engage / All stop, courses plotted by Science; forward view starfield at the ship's real speed; helm systems |
-| Tactical | shield grid, weapons, **shield control** (raise/lower the ship's shields), targeting scan |
+| Tactical | **weapons** (target lock, phasers, photon torpedoes), shield grid (real shield strength), **shield control** (raise/lower the ship's shields), targeting scan |
 | Security | **security control** (transporter lockout force field, confine crew to quarters, beam-in alerts), internal sensors deck grid, force fields, security log |
-| Engineering | side view of the ship with the warp core, warp field harmonics, **power distribution** (route the reactor between engines, shields, sensors, transporter, weapons and life support) |
+| Engineering | side view of the ship with the warp core, warp field harmonics, **power distribution** (route the reactor between engines, shields, sensors, transporter, weapons and life support), **damage control** (damage to each system and the hull; direct repair crews) |
 | Medical | patient monitor with ECG and vitals, neural activity, **sickbay** (admit and discharge crew; patients are off duty), cellular analysis |
-| Science | **long range sensors**: the sector map and every contact on sensors with distance and speed, **Scan** (distance, position, heading and speed, shields, ops, life signs by station) and **Plot course** for Helm; spectral analysis, anomaly readings, science log |
+| Science | **long range sensors**: the sector map and every contact on sensors with distance and speed, **Scan** (distance, position, heading and speed, shields and their strength, hull and damage, power signature, ops, life signs by station) and **Plot course** for Helm; spectral analysis, anomaly readings, science log |
 | Communications | **comm traffic** (every call in progress or ringing, every hail waiting for an answer, and every all-hands broadcast, on the ship and its data network: who, and for how long; no listening in), subspace bands, carrier signal, message traffic |
 | Transporter | transporter controls (beam crew to another ship), transporter pad, pattern buffer |
 | Crew | ship schematic, ship status, deck status |
@@ -92,7 +92,20 @@ The reactor gives **450%** to share between six systems, each 0–100%, so not e
 - **Shields** need at least 20% to be raised, and drop if their power falls below that.
 - **Transporter** at 0% can't beam at all.
 - **Life support** under 50% puts a flashing warning on every console aboard.
-- **Weapons** wait for phase 3.
+- **Weapons** set how hard phasers hit (see Combat); at 0% nothing fires.
+- **Stealth:** a ship's **power signature** is the power it uses out of the reactor's 450%, and other ships' sensors only see it within their sensor range times that signature (never less than 10%). At the default 450% it shows up at the full 600 units; powered down to life support alone (100%) only within 133. So a ship can run quiet by cutting power, at the cost of speed, shields and weapons. Engineering's panel and Science's map show the ship's own signature; a scan shows the other ship's. Losing a ship from sensors breaks a weapons lock and Helm's intercept course.
+
+## Combat (Tactical)
+
+The relay runs combat; each ship's computer keeps its hull, shields, damage and torpedoes in `.nav.json`.
+
+- **Lock:** Tactical picks a ship on sensors and locks weapons; that ship's Tactical and Captain are warned ("has locked weapons on us"). The lock is lost if the target leaves sensor range.
+- **Phasers:** reach 150 units, recharge in 2 seconds, and hit for 15 at full weapons power (less with less power).
+- **Photon torpedoes:** reach 300 units, reload in 5 seconds, hit for 25. Ten carried, restocked one a minute.
+- **Shields** soak hits while up, draining their strength (less drain with more shield power; strength recharges with shield power). At 0% they fail and drop, and the generators need 10% strength back before they'll raise again.
+- **Hull and systems:** with shields down a hit takes off hull and damages one system at random. Damage caps what a system can draw (40% damaged sensors get at most 60%, even if 100% is routed), so it shrinks ranges, top speed and so on. At 0% hull the ship is **disabled**: no engines, shields or weapons until the hull is back to 10%.
+- **Repairs:** everything repairs slowly by itself. Engineering's damage control can direct repair crews to one system (or the hull) to fix it much faster.
+- Every console aboard a ship under fire shows "Taking fire from the …" with its shields and hull; Engineering is told which systems are hit.
 
 ## Ship's computers and the library
 
@@ -139,8 +152,10 @@ Starts the server and drives headless Chromium pages with a fake microphone thro
 
 - **Crew calls:** decline; accept with audio both ways; chat; a 300 KB file arrives byte-for-byte; hang-up; a peer going offline.
 - **Command, security, medical:** the force field refusing a beam-in and Security's beam-in alert; confinement (can call Security, not the First Officer); the First Officer reassigning bob; sickbay leaving Tactical unmanned until discharge; the Captain's orders, red alert (shields up, consoles red) and condition green.
+- **Combat:** Tactical locking on the Defiant (its Tactical warned, the Captain's status shows the lock); a torpedo draining raised shields with the hull untouched and the tubes reloading; "Taking fire" on the Defiant's consoles; a phaser hit with shields down damaging the hull and a system and capping its power; Engineering directing repairs until it's fixed, and the Defiant's computer saving the damage.
+- **Stealth:** the Defiant powering down to an 18% signature drops off the Enterprise's sensors 200 units away (and the weapons lock is lost), then shows up again when it powers up.
 - **Power:** over capacity can't be routed; sensors at 20% shrink every range so beaming falls short; no engine power refuses warp; no shield power disables Raise shields; low life support warns the crew.
-- **Navigation:** Science scanning the Defiant and plotting a course for Helm; Helm flying out of subspace range at warp 9 (the data link drops, the Defiant leaves hailing range, beaming is out of range), then intercepting the Defiant (back in range, beaming works).
+- **Navigation:** Science scanning the Defiant and plotting a course for Helm; Helm flying out of subspace range at warp 7 (the data link drops, the Defiant leaves hailing range, beaming is out of range), then intercepting the Defiant (back in range, beaming works).
 - **Broadcasts:** Communications seeing a hail before it's answered; all hands to the ship (heard, receive-only, other ships don't hear it); all hands to the fleet over a data link, ended by ops; the fleet radio playing on crew consoles and switching off.
 - **Subspace radio:** a local test station (a tone) tuned by URL and patched into a call (the outgoing track switches to the mix, the other side sees the note, the call stays up), unpatched back to the mic; a station without CORS plays locally with Patch disabled.
 - **Call waiting:** ignore (the caller hears busy), the caller giving up, join (three-way), switch, and a waiting call ringing once the current one ends.
