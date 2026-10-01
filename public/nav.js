@@ -65,6 +65,14 @@
         g.save(); g.strokeStyle = css('gold'); g.setLineDash([6, 6]); g.beginPath(); g.moveTo(ox, oy); g.lineTo(dx, dy); g.stroke(); g.restore();
         g.strokeStyle = css('gold'); g.beginPath(); g.moveTo(dx - 6, dy); g.lineTo(dx + 6, dy); g.moveTo(dx, dy - 6); g.lineTo(dx, dy + 6); g.stroke();
       }
+      // Starbases: dock to restock torpedoes and take dock power.
+      for (const b of nav.bases || []) {
+        const [x, y] = toScreen(b.x, b.y);
+        g.strokeStyle = css('sky'); g.lineWidth = 2;
+        g.strokeRect(x - 7, y - 7, 14, 14); g.beginPath(); g.arc(x, y, 3, 0, Math.PI * 2); g.stroke(); g.lineWidth = 1;
+        g.fillStyle = css('sky'); g.font = '13px Antonio, sans-serif';
+        g.fillText(b.name.toUpperCase(), x + 12, y + 4);
+      }
       for (const sh of nav.ships) {
         const [x, y] = toScreen(sh.x, sh.y);
         const isOwn = sh.name === own.name;
@@ -108,6 +116,8 @@
     speedSel.value = '5';
     const button = (text, id, onclick, alert) => { const b = el('button', { type: 'button', className: `lcars-button lcars-button--pill${alert ? ' lcars-button--alert' : ''}`, id, textContent: text }); b.onclick = onclick; return b; };
     const plotted = el('div', { className: 'nav-plotted', hidden: true });
+    // Docking at a starbase (within 10 units, at all stop).
+    const dockBtn = button('Dock', 'helm-dock', () => send({ type: 'dock', undock: !!nav?.own?.grid?.docked }));
     const contacts = el('ul', { className: 'nav-contacts' });
     const scanOut = el('div', { className: 'nav-scan' });
 
@@ -122,6 +132,7 @@
       const v = destSel.value;
       if (v === 'waypoint' && waypoint) return { x: waypoint.x, y: waypoint.y };
       if (v.startsWith('ship:')) return { ship: v.slice(5) };
+      if (v.startsWith('base:')) return { base: v.slice(5) };
       return null;
     };
 
@@ -134,6 +145,7 @@
             send({ type: 'helm', warp: Number(speedSel.value), ...(dest ? { dest } : {}) });
           }),
           button('All stop', 'helm-stop', () => send({ type: 'helm', warp: 0 }), true)),
+        el('div', { className: 'ops-form' }, el('span', { id: 'helm-dock-state' }), dockBtn),
         plotted);
     } else {
       controls.append(el('h3', { className: 'ops-subhead', textContent: 'Contacts' }), contacts, scanOut);
@@ -165,10 +177,15 @@
         }
         if (speedSel.selectedOptions[0]?.disabled) speedSel.value = [...speedSel.options].filter((o) => !o.disabled).pop().value;
         // Show what Helm picked, or else where the ship is actually heading.
-        const keep = selected ? `ship:${selected}` : waypoint ? 'waypoint' : own?.dest?.name ? `ship:${own.dest.name}` : '';
+        const keep = destSel.value.startsWith('base:') ? destSel.value : selected ? `ship:${selected}` : waypoint ? 'waypoint' : own?.dest?.name ? `${(nav.bases || []).some((b) => b.name === own.dest.name) ? 'base' : 'ship'}:${own.dest.name}` : '';
+        const g2 = own?.grid;
+        dockBtn.textContent = g2?.docked ? 'Undock' : 'Dock';
+        dockBtn.disabled = !g2?.docked && !g2?.near;
+        root.querySelector('#helm-dock-state').textContent = g2?.docked ? `Docked at ${g2.docked}` : g2?.near ? `${g2.near}: in docking range` : 'No starbase in docking range';
         destSel.replaceChildren(new Option('Hold current heading', ''),
           ...(waypoint ? [new Option(`Waypoint ${waypoint.x}, ${waypoint.y}`, 'waypoint')] : []),
-          ...others.map((s) => new Option(`The ${s.name} (${Math.round(s.distance)} units)`, `ship:${s.name}`)));
+          ...others.map((s) => new Option(`The ${s.name} (${Math.round(s.distance)} units)`, `ship:${s.name}`)),
+          ...(nav.bases || []).map((b) => new Option(`${b.name} (${b.distance} units)`, `base:${b.name}`)));
         if ([...destSel.options].some((o) => o.value === keep)) destSel.value = keep;
       } else {
         contacts.replaceChildren(...(others.length ? others : []).map((s) => {

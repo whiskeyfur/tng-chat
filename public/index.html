@@ -127,12 +127,27 @@
     [data-weapons] .st-state { margin: 0; font-size: 22px; text-transform: uppercase; color: var(--lcars-sky); }
     [data-weapons] .st-state[data-up] { color: var(--lcars-red); }
     .wp-fire .lcars-button { min-width: 180px; }
-    .dc-list { grid-template-columns: 1fr; }
-    .dc-list li.dc-row { display: grid; grid-template-columns: 160px 170px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+    .st-list.dc-list { grid-template-columns: 1fr; }
+    .st-list.dc-list li.dc-row { display: grid; grid-template-columns: 160px 170px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
     .dc-list .dc-note { color: var(--lcars-tan); font-size: 14px; }
     .dc-list .lcars-button { min-height: 30px; font-size: 13px; }
     .dc-active { outline: 3px solid #fff; outline-offset: 2px; }
-    @media (max-width: 700px) { .dc-list li.dc-row { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 700px) { .st-list.dc-list li.dc-row { grid-template-columns: 1fr 1fr; } }
+    /* A console without power */
+    .lcars-content { position: relative; }
+    #console-dark { position: absolute; inset: 0; z-index: 5; background: rgba(0, 0, 0, 0.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-transform: uppercase; }
+    #console-dark[hidden] { display: none; }
+    #console-dark p { margin: 0; font-size: 40px; color: var(--lcars-red); animation: lcars-blink 1.6s steps(2) infinite; }
+    #console-dark small { color: var(--lcars-tan); font-size: 16px; }
+    /* Engineering power grid */
+    [data-grid] { display: flex; flex-direction: column; gap: 12px; }
+    .grid-sources { gap: 12px 24px; }
+    .grid-choice { display: flex; align-items: center; gap: 8px; color: var(--lcars-gold); text-transform: uppercase; }
+    .st-list.grid-buses { grid-template-columns: 1fr; }
+    .st-list.grid-buses li.grid-bus { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 4px 12px; align-items: baseline; }
+    .grid-bus small { grid-column: 1 / -1; color: var(--lcars-tan); font-size: 13px; text-transform: none; }
+    .grid-bus[data-short] .grid-state { color: var(--lcars-red); }
+    .grid-containment[data-up] { color: var(--lcars-red); animation: lcars-blink 1s steps(2) infinite; }
     /* Engineering power routing */
     .pw { display: flex; flex-direction: column; gap: 8px; text-transform: uppercase; }
     .pw-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 60px; align-items: center; gap: 12px; }
@@ -204,6 +219,7 @@
 
       <div id="home" hidden style="display: contents">
         <div id="station-view" style="display: contents"></div>
+        <div id="console-dark" hidden><p>Console offline</p><small>No power on this console's bus: ask Engineering. Comms still work.</small></div>
         <div id="ops-view" style="display: contents" hidden>
         <div class="screen" data-screen="status" hidden>
           <section class="lcars-panel lcars-panel--auto" style="--accent: var(--lcars-gold)">

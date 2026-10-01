@@ -373,6 +373,8 @@
           live(readout('Containment field', 'sky', '%'), drift(100, 99, 100, 0.2), (v) => v.toFixed(1))),
         // Real power routing (client.js fills it in): every station feels it.
         panel('st-power', 'Power distribution', 'gold', true, h('div', { class: 'pw', 'data-power': '' })),
+        // Power sources, buses, the warp core and containment (client.js fills it in).
+        panel('st-grid', 'Power grid', 'sky', true, h('div', { 'data-grid': '' })),
         // Damage and where the repair crews go (client.js fills it in).
         panel('st-damage', 'Damage control', 'red', true, h('div', { 'data-damage': '' })),
       ] };

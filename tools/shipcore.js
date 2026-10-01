@@ -207,8 +207,11 @@ function onMessage(raw, isBinary) {
       // and the hull, shields and damage (the relay runs combat).
       const store = storeFor(msg.ship);
       if (!store || !store.primary || !msg.set) return;
-      for (const k of ['alert', 'lockout', 'combat']) if (k in msg.set) store.nav[k] = msg.set[k];
-      if (!('combat' in msg.set) || Object.keys(msg.set).length > 1) log(`${store.ship}: ${Object.entries(msg.set).filter(([k]) => k !== 'combat').map(([k, v]) => `${k} ${v}`).join(', ')}`);
+      for (const k of ['alert', 'lockout', 'combat', 'eng']) if (k in msg.set) store.nav[k] = msg.set[k];
+      // Destroyed: rebuilt at a starbase.
+      if (msg.set.respawn) { Object.assign(store.nav, { x: msg.set.respawn.x, y: msg.set.respawn.y, warp: 0, dest: null }); delete store.nav.arrived; log(`${store.ship}: destroyed, rebuilt at ${msg.set.respawn.x}, ${msg.set.respawn.y}`); }
+      const said = Object.entries(msg.set).filter(([k]) => !['combat', 'eng', 'respawn'].includes(k));
+      if (said.length) log(`${store.ship}: ${said.map(([k, v]) => `${k} ${v}`).join(', ')}`);
       store.saveNav();
       sendNav(store);
       break;

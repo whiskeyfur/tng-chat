@@ -358,26 +358,37 @@ function renderCrewPanels() {
   }
 }
 
-// --- combat: Tactical's weapons, Engineering's damage control, the Captain's status ---
-// Ready times count down here between 'nav' messages.
+// --- combat and the power grid: Tactical's weapons, Engineering's grid and
+// damage control, the Captain's status and self-destruct, dark consoles ---
+// The torpedo reload counts down here between 'nav' messages.
 let combatAt = 0;
 function renderCombat() {
   if (!me) return;
-  const own = lastNav?.own, c = own?.combat;
-  if (!c) return;
+  const own = lastNav?.own, c = own?.combat, grid = own?.grid;
+  if (!c || !grid) return;
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   const button = (text, id, onclick, extra = '') => el('button', { type: 'button', className: `lcars-button lcars-button--pill ${extra}`, id, textContent: text, onclick });
   const changed = (node, ...state) => { const sig = JSON.stringify(state); if (node.dataset.sig === sig) return false; node.dataset.sig = sig; return true; };
   const NAMES = Object.fromEntries(POWER);
+  const feed = (v) => (v === 'EPS' ? 'the EPS' : v ? `Bus ${v}` : 'off');
   combatAt = Date.now();
 
   // Warnings on every console aboard; a weapons lock on us for Tactical and the Captain.
-  bc.setAlert('fire', c.underFire ? `Taking fire from the ${c.underFire} · shields ${lastNav.own && ownShip()?.shields ? `${c.shield}%` : 'down'} · hull ${c.hull}%` : null);
-  bc.setAlert('disabled', c.disabled ? `Hull breached: the ${me.ship} is disabled until repaired (hull ${c.hull}%, 10% needed)` : null);
+  bc.setAlert('fire', c.underFire ? `Taking fire from the ${c.underFire} · shields ${ownShip()?.shields ? `${c.shield}%` : 'down'} · hull ${c.hull}%` : null);
   bc.setAlert('locked', c.lockedBy.length && ['Tactical', 'Captain'].includes(me.station) ? `Weapons lock: the ${c.lockedBy.join(', the ')} ${c.lockedBy.length > 1 ? 'have' : 'has'} locked on us` : null, { level: 'yellow' });
+  bc.setAlert('breach', grid.breach != null ? `Antimatter containment failing: core breach in ${grid.breach} s (no power from ${feed(grid.containment)})` : null);
+  bc.setAlert('selfdestruct', grid.selfDestruct ? `Self-destruct in ${grid.selfDestruct.seconds} s · ordered by ${grid.selfDestruct.by}` : null);
+
+  // This console goes dark when its bus has no power (comms still work).
+  const bus = grid.consoleBus[me.station] || 'B';
+  const dark = !grid.buses[bus].consolesOk;
+  const cover = $('console-dark');
+  cover.hidden = !dark;
+  if (dark) cover.querySelector('p').textContent = `Console offline · no power on Bus ${bus}`;
+  document.body.toggleAttribute('data-console-dark', dark);
   if (!stationView) return;
 
-  // Tactical: target, lock, fire.
+  // Tactical: target, lock, arm phasers, fire.
   const wp = document.querySelector('[data-weapons]');
   if (wp) {
     if (!wp.firstChild) {
@@ -388,12 +399,13 @@ function renderCombat() {
           button('Release', 'weapons-release', () => send({ type: 'lock', ship: null }))),
         el('p', { className: 'st-state', id: 'weapons-lock-state' }),
         el('div', { className: 'ops-form wp-fire' },
+          button('Arm phasers', 'arm-phasers', () => send({ type: 'arm', on: !lastNav?.own?.combat?.phaser.armed })),
           button('Fire phasers', 'fire-phaser', () => send({ type: 'fire', weapon: 'phaser' }), 'lcars-button--alert'),
           button('Fire torpedo', 'fire-torpedo', () => send({ type: 'fire', weapon: 'torpedo' }), 'lcars-button--alert')),
         el('div', { className: 'ops-readouts' },
           el('div', { className: 'lcars-readout', id: 'wp-phasers' }), el('div', { className: 'lcars-readout', id: 'wp-torpedoes' })),
         el('p', { className: 'ops-notice', id: 'weapons-status' }),
-        el('p', { className: 'ops-hint', textContent: `Phasers reach ${c.phaser.range} units, hit harder with more weapons power, and recharge in ${c.phaser.recharge / 1000} s. Torpedoes reach ${c.torpedo.range} units and reload in ${c.torpedo.reload / 1000} s; ${c.carried} carried, restocked one a minute. Shields soak hits until they fail; then the hull and systems take damage.` }));
+        el('p', { className: 'ops-hint', textContent: `Arm phasers to charge the banks (faster with more weapons power; armed weapons draw power, which shows on sensors). A full bank fires, up to ${c.phaser.range} units. Torpedoes reach ${c.torpedo.range} units and reload in ${c.torpedo.reload / 1000} s; ${c.carried} carried, restocked only when docked at a starbase. Shields soak hits until they fail; then the hull and systems take damage, and with no hull left the ship is destroyed.` }));
     }
     const sel = wp.querySelector('#weapons-target');
     const contacts = lastNav.ships.filter((s) => s.name !== own.name);
@@ -405,16 +417,61 @@ function renderCombat() {
     }
     for (const s of contacts) [...sel.options].find((o) => o.value === s.name).textContent = `The ${s.name} (${Math.round(s.distance)} units${s.shields ? ', shields up' : ''})`;
     const lockState = wp.querySelector('#weapons-lock-state');
-    lockState.textContent = c.disabled ? 'Ship disabled: weapons offline'
-      : c.lock ? `Locked on the ${c.lock.name} · ${c.lock.distance} units · shields ${c.lock.shields ? `up, ${c.lock.shield}%` : 'down'} · hull ${c.lock.hull}%${c.lock.disabled ? ' · disabled' : ''}` : 'No weapons lock';
+    lockState.textContent = c.lock ? `Locked on the ${c.lock.name} · ${c.lock.distance} units · shields ${c.lock.shields ? `up, ${c.lock.shield}%` : 'down'} · hull ${c.lock.hull}%` : 'No weapons lock';
     lockState.toggleAttribute('data-up', !!c.lock);
     wp.querySelector('#weapons-release').disabled = !c.lock;
+    const arm = wp.querySelector('#arm-phasers');
+    arm.textContent = c.phaser.armed ? 'Stand down phasers' : 'Arm phasers';
+    arm.setAttribute('aria-pressed', String(c.phaser.armed));
     updateWeaponTimers();
+  }
+
+  // Engineering: the power grid.
+  const gp = document.querySelector('[data-grid]');
+  if (gp && changed(gp, grid, own.power)) {
+    const status = gp.querySelector('#grid-status')?.textContent || '';
+    const choice = (id, label, value, options, onpick) => {
+      const s = el('select', { className: 'ops-select', id, ariaLabel: label }, ...options.map(([v, t]) => new Option(t, v)));
+      s.value = value ?? '';
+      s.onchange = () => onpick(s.value || null);
+      return el('label', { className: 'grid-choice' }, el('span', { textContent: label }), s);
+    };
+    const coreText = grid.core === 'online' ? `Online · ${grid.coreOutput} to the EPS` : grid.core === 'starting' ? `Starting · ${grid.start} of ${grid.startSecs} s on Bus A power` : 'Offline';
+    const busRow = (X) => {
+      const b = grid.buses[X];
+      const srcs = Object.entries(b.src).filter(([, v]) => v > 0).map(([n, v]) => `${n === 'eps' ? 'EPS' : n} ${v}`).join(' + ') || 'nothing';
+      const sys = Object.entries(grid.systemBus).filter(([, v]) => v === X).map(([k]) => NAMES[k]);
+      const consoles = Object.entries(grid.consoleBus).filter(([, v]) => v === X).map(([k]) => k);
+      const li = el('li', { className: 'grid-bus' },
+        el('b', { textContent: `Bus ${X}` }),
+        el('span', { className: 'grid-load', textContent: `${b.have} of ${b.need} needed · from ${srcs}` }),
+        el('span', { className: 'grid-state', textContent: !b.consolesOk ? 'DEAD: consoles dark' : b.fraction < 100 ? `Brownout: systems get ${b.fraction}%` : 'Nominal' }),
+        el('small', { textContent: `Systems: ${sys.join(', ')}${grid.containment === X ? ', antimatter containment' : ''}${X === 'A' ? ', warp core startup' : ''} · Consoles: ${consoles.join(', ')}` }));
+      li.dataset.bus = X;
+      li.toggleAttribute('data-short', b.fraction < 100 || !b.consolesOk);
+      return li;
+    };
+    gp.replaceChildren(
+      el('div', { className: 'st-control' },
+        el('p', { className: 'st-state', id: 'core-state', textContent: `Warp core (M/ARC): ${coreText}` }),
+        el('div', { className: 'ops-form' },
+          grid.core === 'offline' ? button('Start warp core', 'core-start', () => send({ type: 'grid', core: 'start' })) : button('Shut down warp core', 'core-stop', () => send({ type: 'grid', core: 'stop' }), 'lcars-button--alert'),
+          ...['A', 'B'].map((X) => button(`EPS tap ${X}: ${grid.taps[X] ? 'open' : 'closed'}`, `tap-${X}`, () => send({ type: 'grid', tap: { bus: X, on: !grid.taps[X] } }), grid.taps[X] ? '' : 'lcars-button--alert')))),
+      el('div', { className: 'ops-form grid-sources' },
+        choice('grid-containment', 'Antimatter containment', grid.containment, [['A', 'Bus A'], ['B', 'Bus B'], ['EPS', 'EPS']], (v) => send({ type: 'grid', containment: v })),
+        choice('grid-battery', `Batteries ${grid.battery.charge}%${grid.battery.charging ? ' (charging)' : ''}`, grid.battery.bus, [['A', 'Bus A'], ['B', 'Bus B'], ['', 'Off']], (v) => send({ type: 'grid', battery: v })),
+        choice('grid-solar', 'Solar', grid.solar, [['A', 'Bus A'], ['', 'Off']], (v) => send({ type: 'grid', solar: v })),
+        choice('grid-dock', grid.docked ? `Dock power (${grid.docked})` : 'Dock power (not docked)', grid.dock, [['A', 'Bus A'], ['', 'Off']], (v) => send({ type: 'grid', dock: v }))),
+      el('p', { className: 'st-state grid-containment', id: 'containment-state', textContent: grid.breach != null ? `CONTAINMENT FAILING: breach in ${grid.breach} s` : `Containment holding, fed from ${feed(grid.containment)}` }),
+      el('ul', { className: 'st-list grid-buses' }, busRow('A'), busRow('B')),
+      el('p', { className: 'ops-notice', id: 'grid-status', textContent: status }),
+      el('p', { className: 'ops-hint', textContent: `The core starts on Bus A power (${grid.startSecs} s), then feeds the EPS. Antimatter containment must always have power: if its feed fails, the core breaches in seconds. A short bus feeds containment first, then consoles, then shares the rest among its systems. Total drawn ${grid.drawn} (that's what other ships' sensors see).` }));
+    gp.querySelector('#containment-state').toggleAttribute('data-up', grid.breach != null);
   }
 
   // Engineering: damage and repair crews.
   const dc = document.querySelector('[data-damage]');
-  if (dc && changed(dc, c.hull, c.damage, c.repair, c.disabled, own.power, own.allocated)) {
+  if (dc && changed(dc, c.hull, c.damage, c.repair, own.power, own.allocated, grid.docked)) {
     const status = dc.querySelector('#damage-status')?.textContent || '';
     const row = (key, label, value, note) => el('li', { className: 'dc-row' },
       el('span', { className: 'dc-label', textContent: label }),
@@ -424,56 +481,60 @@ function renderCombat() {
         : button('Direct repairs', '', () => send({ type: 'repair', system: key }), (key === 'hull' ? c.hull < 100 : c.damage[key] > 0) ? 'lcars-button--alert' : ''));
     dc.replaceChildren(
       el('ul', { className: 'st-list dc-list' },
-        row('hull', 'Hull', `${c.hull}%`, c.disabled ? 'Breached: ship disabled' : c.hull < 100 ? 'Damaged' : 'Intact'),
+        row('hull', 'Hull', `${c.hull}%`, c.hull < 100 ? 'Damaged: at 0% the ship is destroyed' : 'Intact'),
         ...POWER.map(([k, label]) => row(k, label, c.damage[k] ? `${c.damage[k]}% damaged` : 'Operational',
-          own.power[k] < own.allocated[k] ? `gets ${own.power[k]}% of ${own.allocated[k]}% routed` : `${own.power[k]}%`))),
+          own.power[k] < own.allocated[k] ? `gets ${own.power[k]}% of ${own.allocated[k]}% set` : `${own.power[k]}%`))),
       el('p', { className: 'ops-notice', id: 'damage-status', textContent: status }),
-      el('p', { className: 'ops-hint', textContent: 'Damage caps what a system can draw. Repair crews fix everything slowly; directed to one system (or the hull) they fix it six to ten times faster.' }));
+      el('p', { className: 'ops-hint', textContent: `Damage caps what a system can draw. Repair crews fix everything slowly; directed to one system (or the hull) they fix it six to ten times faster.${grid.docked ? ` Docked at ${grid.docked}: repairs go four times faster.` : ''}` }));
     for (const li of dc.querySelectorAll('.dc-row')) li.dataset.system = li.querySelector('.dc-label').textContent;
   }
 
-  // Captain: the ship's real status.
+  // Captain: the ship's real status, and the self-destruct.
   const ss = document.querySelector('[data-ship-status]');
   if (ss) {
     const up = !!ownShip()?.shields;
     const damaged = POWER.filter(([k]) => c.damage[k] > 0).map(([k]) => NAMES[k].toLowerCase());
-    const speed = own.warp <= 0 ? 'All stop' : own.warp < 1 ? 'Impulse' : `Warp ${+own.warp.toFixed(1)}`;
+    const speed = own.warp <= 0 ? (grid.docked ? `Docked at ${grid.docked}` : 'All stop') : own.warp < 1 ? 'Impulse' : `Warp ${+own.warp.toFixed(1)}`;
     const items = [
       ['Alert status', own.alert && own.alert !== 'green' ? `${own.alert[0].toUpperCase()}${own.alert.slice(1)} alert` : 'Condition green', 'sky'],
       ['Shields', `${up ? 'Up' : 'Down'} · ${c.shield}%`, 'sky'],
-      ['Hull integrity', `${c.hull}%${c.disabled ? ' · disabled' : ''}`, 'gold'],
+      ['Hull integrity', `${c.hull}%`, 'gold'],
       ['Velocity', speed, 'orange'],
-      ['Weapons', c.lock ? `Locked: the ${c.lock.name}` : 'Standby', 'red'],
+      ['Weapons', c.lock ? `Locked: the ${c.lock.name}` : c.phaser.armed ? 'Phasers armed' : 'Standby', 'red'],
+      ['Warp core', grid.core === 'online' ? 'Online' : grid.core === 'starting' ? 'Starting' : 'Offline', 'blue'],
       ['Damage', damaged.length ? damaged.join(', ') : 'None', 'peach'],
     ];
-    if (changed(ss, items)) {
-      ss.replaceChildren(el('div', { className: 'ops-readouts' }, ...items.map(([label, value, color]) => {
-        const r = el('div', { className: 'lcars-readout' }, el('span', { className: 'lcars-readout__label', textContent: label }), el('span', { className: 'lcars-readout__value', textContent: value }));
-        r.style.setProperty('--accent', `var(--lcars-${color})`);
-        r.dataset.readout = label;
-        return r;
-      })));
+    if (changed(ss, items, grid.selfDestruct)) {
+      const sd = grid.selfDestruct;
+      ss.replaceChildren(
+        el('div', { className: 'ops-readouts' }, ...items.map(([label, value, color]) => {
+          const r = el('div', { className: 'lcars-readout' }, el('span', { className: 'lcars-readout__label', textContent: label }), el('span', { className: 'lcars-readout__value', textContent: value }));
+          r.style.setProperty('--accent', `var(--lcars-${color})`);
+          r.dataset.readout = label;
+          return r;
+        })),
+        el('div', { className: 'ops-form' },
+          sd ? el('span', { className: 'st-state', id: 'self-destruct-state', textContent: `Self-destruct in ${sd.seconds} s` }) : el('span', { textContent: 'Self-destruct' }),
+          sd ? button('Abort self-destruct', 'self-destruct-abort', () => send({ type: 'self-destruct', on: false }))
+            : button('Self-destruct', 'self-destruct', () => { if (confirm(`Destroy the ${me.ship}? Everyone aboard is warned, and you can abort until the countdown ends.`)) send({ type: 'self-destruct', on: true }); }, 'lcars-button--alert')));
     }
   }
 }
 
-// Phaser charge and torpedo reload, counted down between updates.
+// Phaser charge and torpedo reload, between updates.
 function updateWeaponTimers() {
   const wp = document.querySelector('[data-weapons]');
   const c = lastNav?.own?.combat;
   if (!wp?.firstChild || !c) return;
-  const since = Date.now() - combatAt;
-  const left = (w) => Math.max(0, w.ready - since);
-  const noPower = (ownPower()?.weapons ?? 0) <= 0;
-  const ph = left(c.phaser), tp = left(c.torpedo);
+  const tp = Math.max(0, c.torpedo.ready - (Date.now() - combatAt));
   const set = (id, label, value) => wp.querySelector(id).replaceChildren(
     Object.assign(document.createElement('span'), { className: 'lcars-readout__label', textContent: label }),
     Object.assign(document.createElement('span'), { className: 'lcars-readout__value', textContent: value }));
-  set('#wp-phasers', 'Phasers', c.disabled || noPower ? 'Offline' : ph ? `Charging ${Math.round((1 - ph / c.phaser.recharge) * 100)}%` : `Ready · ${ownPower().weapons}% power`);
+  const weapons = ownPower()?.weapons ?? 0;
+  set('#wp-phasers', 'Phaser banks', !c.phaser.armed ? 'Not armed' : c.phaser.charge >= 100 ? 'Charged · ready' : weapons <= 0 ? `${c.phaser.charge}% · no power` : `Charging ${c.phaser.charge}%`);
   set('#wp-torpedoes', 'Photon torpedoes', `${c.torpedoes} of ${c.carried}${tp ? ' · reloading' : ''}`);
-  const blocked = !c.lock || c.disabled || noPower;
-  wp.querySelector('#fire-phaser').disabled = blocked || ph > 0 || c.lock.distance > c.phaser.range;
-  wp.querySelector('#fire-torpedo').disabled = blocked || tp > 0 || !c.torpedoes || c.lock.distance > c.torpedo.range;
+  wp.querySelector('#fire-phaser').disabled = !c.lock || !c.phaser.armed || c.phaser.charge < 100 || c.lock.distance > c.phaser.range;
+  wp.querySelector('#fire-torpedo').disabled = !c.lock || tp > 0 || !c.torpedoes || c.lock.distance > c.torpedo.range;
 }
 setInterval(updateWeaponTimers, 250);
 
@@ -485,7 +546,6 @@ function renderPower() {
   const root = document.querySelector('[data-power]');
   const p = ownAllocation();
   if (!root || !p) return;
-  const reactor = lastNav.own.reactor || 450;
   const draft = powerDraft || { ...p };
   const total = POWER.reduce((n, [k]) => n + draft[k], 0);
   const f = draft.sensors / 100;
@@ -513,9 +573,15 @@ function renderPower() {
     if (document.activeElement !== input) input.value = draft[k];
     input.parentElement.querySelector('.pw-value').textContent = `${draft[k]}%`;
   }
-  const over = total > reactor;
-  root.querySelector('.pw-total').textContent = `Reactor ${total}% of ${reactor}%${over ? ': over capacity' : ''}${powerDraft ? ' · not routed yet' : ''}`;
-  root.querySelector('.pw-total').toggleAttribute('data-over', over);
+  // The sliders set each system's demand; the grid (Power grid screen) decides what it gets.
+  const grid = lastNav.own.grid;
+  const busDemand = (X) => POWER.filter(([k]) => grid?.systemBus[k] === X).reduce((n, [k]) => n + (k === 'weapons' && !lastNav.own.combat?.phaser.armed ? 0 : draft[k]), 0);
+  const short = grid ? ['A', 'B'].filter((X) => grid.buses[X].fraction < 100 || !grid.buses[X].consolesOk) : [];
+  const over = false;
+  root.querySelector('.pw-total').textContent = grid
+    ? `Systems demand: Bus A ${busDemand('A')} · Bus B ${busDemand('B')} (weapons draw only when armed)${short.length ? ` · brownout on Bus ${short.join(' and ')}` : ''}${powerDraft ? ' · not routed yet' : ''}`
+    : `Demand ${total}%${powerDraft ? ' · not routed yet' : ''}`;
+  root.querySelector('.pw-total').toggleAttribute('data-over', short.length > 0);
   root.querySelector('.pw-effects').replaceChildren(...[
     `Top speed: ${warp <= 0 ? 'none (no engine power)' : warp < 1 ? 'impulse' : `warp ${warp}`}`,
     `Sensors ${Math.round(600 * f)} · subspace ${Math.round(400 * f)} · transporter ${Math.round(20 * f)} units`,
@@ -523,7 +589,7 @@ function renderPower() {
     draft.transporter <= 0 ? 'Transporter: no power' : 'Transporter: ready',
     draft.lifeSupport < 50 ? `Life support: ${draft.lifeSupport}%, crew warned` : 'Life support: nominal',
     // The more power the ship uses, the further off other ships' sensors see it.
-    `Power signature ${Math.round(Math.min(1, Math.max(0.1, total / reactor)) * 100)}%: seen from ${Math.round(600 * Math.min(1, Math.max(0.1, total / reactor)))} units by full sensors${total / reactor < 0.6 ? ' (running quiet)' : ''}`,
+    `Power signature now ${Math.round(lastNav.own.signature * 100)}%: seen from ${Math.round(600 * lastNav.own.signature)} units by full sensors${lastNav.own.signature < 0.6 ? ' (running quiet)' : ''}`,
     ...(Object.values(lastNav.own.combat?.damage || {}).some((d) => d > 0) ? ['Damaged systems get less than routed: see Damage control'] : []),
   ].map((t) => Object.assign(document.createElement('li'), { textContent: t })));
   root.querySelector('#power-apply').disabled = !powerDraft || over;
@@ -561,7 +627,7 @@ async function onMessage(msg) {
   if (await bc.handle(msg)) return;
   if (msg.type === 'notice' && /^(Helm|Sensors|Science|Course plotted|No ship's computer is flying)/.test(msg.text)) navPanel?.status(msg.text);
   if (msg.type === 'notice' && /^(Engineering|Tactical)/.test(msg.text)) {
-    const st = document.getElementById(msg.text.startsWith('Tactical') ? 'weapons-status' : 'damage-status');
+    const st = document.getElementById(msg.text.startsWith('Tactical') ? 'weapons-status' : /^Engineering: (warp core|EPS|batteries|solar|dock|antimatter|not enough)/.test(msg.text) ? 'grid-status' : 'damage-status');
     if (st) st.textContent = msg.text;
   }
   if (msg.type === 'notice' && msg.text.startsWith('Transporter:')) {
@@ -641,6 +707,10 @@ async function onMessage(msg) {
     case 'order':
       log(`Captain's orders (${msg.from.name}): ${msg.text}`);
       bc.addOrder(msg.from, msg.text);
+      break;
+    case 'destroyed':
+      log(`The ${msg.ship} was destroyed (${msg.cause}). Rebuilt and docked at ${msg.base}.`, 'warn');
+      bc.setAlert(`destroyed-${msg.at}`, `The ${msg.ship} was destroyed: ${msg.cause}. Rebuilt and docked at ${msg.base}`, { dismiss: true });
       break;
     case 'security-alert':
       securityAlerts.push(`${new Date(msg.at).toLocaleTimeString()} ${msg.text}`);

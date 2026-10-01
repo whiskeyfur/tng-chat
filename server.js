@@ -680,21 +680,18 @@ const SYSTEMS = ['engines', 'shields', 'sensors', 'transporter', 'weapons', 'lif
 const REACTOR = 450; // total power to share, in percent of one system at full
 const MIN_SHIELD_POWER = 20;
 const DEFAULT_POWER = { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100 };
-// Power as Engineering routed it, and what each system actually gets: damage
-// caps a system (at 100% minus its damage), and a disabled ship has no
-// engines, shields or weapons.
+// Power as Engineering set it (each system's demand), and what each system
+// actually gets from the power grid (see "the power grid" below): damage caps
+// a system, unarmed weapons draw nothing, and a bus short of power browns out.
 const allocOf = (k) => ({ ...DEFAULT_POWER, ...(navState.get(k)?.power || {}) });
 function powerOf(k) {
-  const p = allocOf(k), c = combat.get(k);
-  if (!c) return p;
-  for (const s of SYSTEMS) p[s] = Math.min(p[s], Math.max(0, Math.floor(100 - c.damage[s])));
-  if (c.disabled) p.engines = p.shields = p.weapons = 0;
-  return p;
+  const f = flow(k);
+  return Object.fromEntries(SYSTEMS.map((s) => [s, Math.floor(f.delivered[s] + 1e-9)]));
 }
-// How visible a ship is to other ships' sensors: the more power it uses, the
-// further off it shows up. Everything at the reactor's full output: 1 (seen at
-// full sensor range); power down to run quiet.
-const signatureOf = (k) => { const p = powerOf(k); return Math.max(0.1, Math.min(1, SYSTEMS.reduce((n, s) => n + p[s], 0) / REACTOR)); };
+// How visible a ship is to other ships' sensors: the more power it uses (all
+// of it: systems, consoles, the warp core's containment), the further off it
+// shows up. 450 units drawn or more: seen at full sensor range; power down to run quiet.
+const signatureOf = (k) => Math.max(0.1, Math.min(1, flow(k).drawn / REACTOR));
 function rangesOf(k) {
   const f = Math.max(0, Math.min(100, powerOf(k).sensors)) / 100;
   return { comms: COMMS_RANGE * f, sensors: SENSOR_RANGE * f, transporter: TRANSPORTER_RANGE * f };
@@ -720,7 +717,8 @@ function navMessage(key) {
   const seen = [...navState.keys()].filter((k) => cores.has(k) && sensorOk(key, k));
   return {
     type: 'nav',
-    own: own ? { name: shipName(key), ...own, power: powerOf(key), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key) } : null,
+    own: own ? { name: shipName(key), ...own, power: powerOf(key), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key) } : null,
+    bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
     ships: seen.map((k) => ({ name: shipName(k), ...navState.get(k), ops: opsOf(k).length > 0, shields: shields.has(k), distance: k === key ? 0 : distance(key, k) })),
     ranges: rangesOf(key),
     maxWarp: maxWarp(key),
@@ -770,7 +768,7 @@ function coreNav(c, key, nav) {
   if (nav.power && typeof nav.power === 'object') clean.power = Object.fromEntries(SYSTEMS.map((s) => [s, Math.max(0, Math.min(100, Number(nav.power[s]) || 0))]));
   // Hull, shields and damage: the relay runs combat, so it only takes the
   // computer's saved copy when it has none of its own.
-  if (!combat.get(key)?.loaded) combat.set(key, { ...freshCombat(nav.combat), loaded: true });
+  if (!combat.get(key)?.loaded) { combat.set(key, { ...freshCombat(nav.combat), loaded: true }); eng.set(key, freshEng(nav.eng)); flowCache.delete(key); }
   const current = primaryCore.get(key);
   if (!current) {
     primaryCore.set(key, c);
@@ -804,12 +802,19 @@ function reassignPrimary(key, gone) {
 }
 
 // Messages from crew about navigation: Helm flies, Science scans and plots.
+// "the Enterprise", but "Starbase 47".
+const d0 = (name) => (STARBASES.some((b) => b.name === name) ? name : `the ${name}`);
+
 function navCommand(ws, msg) {
   const note = (text) => send(ws, { type: 'notice', text });
   const key = ws.shipKey;
   // Resolve a destination: another ship (in sensor range) or a point.
   const resolve = (dest) => {
     if (!dest) return null;
+    if (typeof dest.base === 'string') {
+      const b = STARBASES.find((sb) => sb.name.toLowerCase() === dest.base.toLowerCase());
+      return b ? { x: b.x, y: b.y, name: b.name } : { error: 'no such starbase' };
+    }
     if (typeof dest.ship === 'string') {
       const t = shipKey(clean(dest.ship));
       if (t === key || !navState.has(t) || !sensorOk(key, t)) return { error: `the ${clean(dest.ship)} is not on sensors` };
@@ -839,7 +844,7 @@ function navCommand(ws, msg) {
     }
     if (order.warp === 0) navTargets.delete(key);
     send(core, order);
-    const what = order.warp === 0 ? 'all stop' : `${order.dest ? `course for ${order.dest.name ? `the ${order.dest.name}` : `${Math.round(order.dest.x)}, ${Math.round(order.dest.y)}`}` : typeof order.heading === 'number' ? `heading ${Math.round(order.heading)}` : 'speed'}${order.warp ? `, ${order.warp < 1 ? 'impulse' : `warp ${order.warp}`}` : ''}`;
+    const what = order.warp === 0 ? 'all stop' : `${order.dest ? `course for ${order.dest.name ? `${d0(order.dest.name)}` : `${Math.round(order.dest.x)}, ${Math.round(order.dest.y)}`}` : typeof order.heading === 'number' ? `heading ${Math.round(order.heading)}` : 'speed'}${order.warp ? `, ${order.warp < 1 ? 'impulse' : `warp ${order.warp}`}` : ''}`;
     opLog(key, `Helm (${ws.name}): ${what}`);
     return;
   }
@@ -850,8 +855,6 @@ function navCommand(ws, msg) {
     if (!core) return note("Engineering: no ship's computer is running the ship");
     const p = allocOf(key);
     for (const s of SYSTEMS) if (msg.power && Number.isFinite(msg.power[s])) p[s] = Math.max(0, Math.min(100, Math.round(msg.power[s])));
-    const total = SYSTEMS.reduce((n, s) => n + p[s], 0);
-    if (total > REACTOR) return note(`Engineering: that needs ${total}% but the reactor gives ${REACTOR}%`);
     send(core, { type: 'core-power', ship: ws.ship, power: p });
     opLog(key, `Engineering (${ws.name}): power ${SYSTEMS.map((s) => `${s} ${p[s]}%`).join(', ')}`);
     return;
@@ -870,7 +873,7 @@ function navCommand(ws, msg) {
       shields: shields.has(t), ops: opsOf(t).length > 0, crew: crew.length, stations,
       inCommsRange: commsOk(key, t), inTransporterRange: transporterOk(key, t),
       hull: Math.round(combatOf(t).hull), shieldStrength: Math.round(combatOf(t).shield), signature: Math.round(signatureOf(t) * 100),
-      damaged: SYSTEMS.filter((s) => combatOf(t).damage[s] >= 1).map((s) => SYSTEM_NAMES[s]), disabled: !!combatOf(t).disabled,
+      damaged: SYSTEMS.filter((s) => combatOf(t).damage[s] >= 1).map((s) => SYSTEM_NAMES[s]), core: engOf(t).core, docked: engOf(t).docked,
     } });
   }
 
@@ -878,10 +881,10 @@ function navCommand(ws, msg) {
     if (ws.station !== 'Science') return note('Only Science plots courses');
     const d = resolve(msg.dest);
     if (!d || d.error) return note(`Science: ${d?.error || 'no destination'}`);
-    const dest = d.name ? { ship: d.name } : { x: d.x, y: d.y };
+    const dest = d.key ? { ship: d.name } : d.name ? { base: d.name } : { x: d.x, y: d.y };
     const helm = crewOf(key).filter((u) => u.station === 'Helm');
-    for (const u of helm) send(u, { type: 'course-plotted', by: info(ws), dest, label: d.name ? `the ${d.name}` : `${Math.round(d.x)}, ${Math.round(d.y)}` });
-    return note(helm.length ? `Course plotted for Helm: ${d.name ? `the ${d.name}` : `${Math.round(d.x)}, ${Math.round(d.y)}`}` : 'Course plotted, but nobody is at Helm');
+    for (const u of helm) send(u, { type: 'course-plotted', by: info(ws), dest, label: d.name ? d0(d.name) : `${Math.round(d.x)}, ${Math.round(d.y)}` });
+    return note(helm.length ? `Course plotted for Helm: ${d.name ? d0(d.name) : `${Math.round(d.x)}, ${Math.round(d.y)}`}` : 'Course plotted, but nobody is at Helm');
   }
 }
 
@@ -974,59 +977,263 @@ function crewCommand(ws, msg) {
   }
 }
 
+// --- the power grid (Engineering) ----------------------------------------------------
+//
+// Power comes from four sources, each tied by Engineering to a bus:
+//  - solar collectors: a trickle, Bus A or off
+//  - dock power: plenty, Bus A or off, only while docked at a starbase
+//  - batteries: Bus A, Bus B or off; they run down while they supply power and
+//    recharge from spare power on their bus
+//  - the warp core (M/ARC): starts on Bus A power (a startup draw for a few
+//    seconds); once online it feeds the EPS grid, with taps to Bus A and Bus B
+//    that Engineering switches on or off
+// Antimatter containment always draws power, from Bus A, Bus B or straight
+// from the EPS (Engineering picks). It can only be switched off by
+// self-destruct: if it loses power for a few seconds, the core breaches and
+// the ship is destroyed.
+// Systems and consoles hang off the buses (SYSTEM_BUS, CONSOLE_BUS). A bus
+// short of power feeds containment and the core's startup first, then the
+// consoles (a console without power goes dark), then shares what's left
+// between its systems.
+
+const GRID = { core: 500, coreStartDraw: 60, coreStartSecs: 10, containment: 20, solar: 25, dock: 300, batteryOut: 150, batteryCap: 3000, batteryCharge: 50, console: 2, breachSecs: 5 };
+const BUSES = ['A', 'B'];
+const SYSTEM_BUS = { lifeSupport: 'A', sensors: 'A', engines: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
+const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
+const busOf = (station) => CONSOLE_BUS[station] || 'B';
+// Starbases: dock to restock torpedoes, take dock power and repair faster.
+// A destroyed ship comes back docked at one of them.
+const STARBASES = [{ name: 'Starbase 47', x: 500, y: 120 }, { name: 'Starbase 12', x: 120, y: 860 }, { name: 'Starbase 74', x: 880, y: 820 }, { name: 'Deep Space 4', x: 860, y: 160 }];
+const DOCK_RANGE = 10;
+const SELF_DESTRUCT_SECS = Number(process.env.SELF_DESTRUCT_SECONDS) || 30;
+const BLAST = { range: 30, damage: 30 }; // a ship blowing up hurts ships close by
+const eng = new Map(); // ship key -> { core, start, taps, battery, solar, dock, containment, docked, breach, selfDestruct, dirty }
+
+function freshEng(saved) {
+  const s = saved && typeof saved === 'object' ? saved : {};
+  const pick = (v, ok, d) => (ok.includes(v) ? v : d);
+  return {
+    core: pick(s.core, ['online', 'offline'], 'online'), start: 0, // a startup in progress starts over
+    taps: { A: s.taps?.A !== false, B: s.taps?.B !== false },
+    battery: { bus: pick(s.battery?.bus, ['A', 'B', null], 'B'), charge: Number.isFinite(s.battery?.charge) ? Math.max(0, Math.min(GRID.batteryCap, s.battery.charge)) : GRID.batteryCap },
+    solar: pick(s.solar, ['A', null], 'A'), dock: pick(s.dock, ['A', null], 'A'),
+    containment: pick(s.containment, ['A', 'B', 'EPS'], 'A'),
+    docked: STARBASES.some((b) => b.name === s.docked) ? s.docked : null,
+    breach: 0, selfDestruct: null, dirty: false,
+  };
+}
+const engOf = (k) => { if (!eng.has(k)) eng.set(k, freshEng()); return eng.get(k); };
+const savedEng = (k) => { const e = engOf(k); return { core: e.core === 'starting' ? 'offline' : e.core, taps: e.taps, battery: { bus: e.battery.bus, charge: Math.round(e.battery.charge) }, solar: e.solar, dock: e.dock, containment: e.containment, docked: e.docked }; };
+
+// Where each ship's power goes, worked out fresh (cached briefly: it's asked a lot).
+const flowCache = new Map();
+function flow(k) {
+  const hit = flowCache.get(k);
+  if (hit && Date.now() - hit.at < 200) return hit.f;
+  const e = engOf(k), c = combatOf(k), a = allocOf(k);
+  const demand = {};
+  for (const s of SYSTEMS) demand[s] = s === 'weapons' && !c.armed ? 0 : Math.min(a[s], Math.max(0, 100 - c.damage[s]));
+  let eps = e.core === 'online' ? GRID.core : 0;
+  let containmentOk = false, drawn = 0;
+  if (e.containment === 'EPS') { containmentOk = eps >= GRID.containment; eps = Math.max(0, eps - GRID.containment); if (containmentOk) drawn += GRID.containment; }
+  const crew = crewOf(k);
+  const buses = {};
+  for (const X of BUSES) {
+    const core = (e.containment === X ? GRID.containment : 0) + (X === 'A' && e.core === 'starting' ? GRID.coreStartDraw : 0);
+    const consoles = crew.filter((u) => busOf(u.station) === X).length * GRID.console;
+    const systems = SYSTEMS.filter((s) => SYSTEM_BUS[s] === X).reduce((n, s) => n + demand[s], 0);
+    const need = core + consoles + systems;
+    const src = { solar: e.solar === X ? GRID.solar : 0, dock: e.dock === X && e.docked ? GRID.dock : 0, eps: 0, battery: 0 };
+    let have = src.solar + src.dock;
+    if (e.taps[X]) { src.eps = Math.min(eps, Math.max(0, need - have)); eps -= src.eps; have += src.eps; }
+    if (e.battery.bus === X && e.battery.charge > 0) { src.battery = Math.min(GRID.batteryOut, e.battery.charge, Math.max(0, need - have)); have += src.battery; }
+    if (e.containment === X) containmentOk = have >= GRID.containment;
+    drawn += Math.min(have, need);
+    buses[X] = {
+      need: Math.round(need), have: Math.round(have), src, core, consoles, systems,
+      coreOk: have >= core, consolesOk: have >= core + consoles,
+      fraction: systems ? Math.max(0, Math.min(1, (have - core - consoles) / systems)) : 1,
+    };
+  }
+  // Batteries recharge from what their bus has spare (its own sources, or the EPS if tapped).
+  let charging = 0;
+  const bb = e.battery.bus && buses[e.battery.bus];
+  if (bb && !bb.src.battery && e.battery.charge < GRID.batteryCap) {
+    const spare = Math.max(0, bb.src.solar + bb.src.dock + bb.src.eps - bb.need) + (e.taps[e.battery.bus] ? eps : 0);
+    charging = Math.min(GRID.batteryCharge, spare, GRID.batteryCap - e.battery.charge);
+  }
+  const delivered = Object.fromEntries(SYSTEMS.map((s) => [s, demand[s] * buses[SYSTEM_BUS[s]].fraction]));
+  const f = { buses, demand, delivered, containmentOk, charging, drawn: drawn + charging };
+  flowCache.set(k, { at: Date.now(), f });
+  return f;
+}
+const gridChanged = (k) => { flowCache.delete(k); scheduleNav(); };
+// A console with no power on its bus is dark (ops and Engineering's grid controls aside).
+const consoleDark = (ws) => !flow(ws.shipKey).buses[busOf(ws.station)].consolesOk;
+const darkNote = (ws) => send(ws, { type: 'notice', text: `${ws.station}: console offline, no power on Bus ${busOf(ws.station)}` });
+
+function gridView(k) {
+  const e = engOf(k), f = flow(k);
+  const near = STARBASES.find((b) => navState.has(k) && Math.hypot(navState.get(k).x - b.x, navState.get(k).y - b.y) <= DOCK_RANGE);
+  return {
+    core: e.core, start: e.start, startSecs: GRID.coreStartSecs, coreOutput: GRID.core,
+    taps: e.taps, solar: e.solar, dock: e.dock, containment: e.containment, containmentOk: f.containmentOk,
+    breach: e.breach ? GRID.breachSecs - e.breach : null,
+    battery: { bus: e.battery.bus, charge: Math.round((e.battery.charge / GRID.batteryCap) * 100), charging: Math.round(f.charging) },
+    docked: e.docked, near: near?.name || null,
+    selfDestruct: e.selfDestruct ? { seconds: Math.max(0, Math.ceil((e.selfDestruct.at - Date.now()) / 1000)), by: e.selfDestruct.by } : null,
+    buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: b.need, have: b.have, src: Object.fromEntries(Object.entries(b.src).map(([n, v]) => [n, Math.round(v)])), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
+    systemBus: SYSTEM_BUS, consoleBus: CONSOLE_BUS, drawn: Math.round(f.drawn),
+  };
+}
+
+// Engineering's grid controls: the warp core, EPS taps, sources and containment.
+function gridCommand(ws, msg) {
+  const key = ws.shipKey, e = engOf(key);
+  const note = (text) => send(ws, { type: 'notice', text: `Engineering: ${text}` });
+  if (ws.station !== 'Engineering') return send(ws, { type: 'notice', text: 'Only Engineering runs the power grid' });
+  const said = [];
+  if (msg.core === 'start' && e.core === 'offline') {
+    e.core = 'starting'; e.start = 0; flowCache.delete(key);
+    if (!flow(key).buses.A.coreOk) { e.core = 'offline'; flowCache.delete(key); return note(`not enough power on Bus A to start the warp core (needs ${GRID.coreStartDraw} for ${GRID.coreStartSecs} s; tie the batteries or dock power to Bus A)`); }
+    said.push('warp core startup');
+  } else if (msg.core === 'stop' && e.core !== 'offline') {
+    e.core = 'offline'; e.start = 0;
+    said.push('warp core shut down');
+    if (e.containment === 'EPS') said.push('WARNING: containment is on the EPS');
+  }
+  if (msg.tap && BUSES.includes(msg.tap.bus)) { e.taps[msg.tap.bus] = !!msg.tap.on; said.push(`EPS tap to Bus ${msg.tap.bus} ${msg.tap.on ? 'open' : 'closed'}`); }
+  if ('battery' in msg && ['A', 'B', null].includes(msg.battery)) { e.battery.bus = msg.battery; said.push(`batteries ${msg.battery ? `on Bus ${msg.battery}` : 'off'}`); }
+  if ('solar' in msg && ['A', null].includes(msg.solar)) { e.solar = msg.solar; said.push(`solar ${msg.solar ? 'on Bus A' : 'off'}`); }
+  if ('dock' in msg && ['A', null].includes(msg.dock)) { e.dock = msg.dock; said.push(`dock power ${msg.dock ? 'on Bus A' : 'off'}`); }
+  if ('containment' in msg) {
+    if (!['A', 'B', 'EPS'].includes(msg.containment)) return note('containment can only be fed from Bus A, Bus B or the EPS (switching it off takes a self-destruct)');
+    e.containment = msg.containment;
+    said.push(`antimatter containment fed from ${msg.containment === 'EPS' ? 'the EPS' : `Bus ${msg.containment}`}`);
+  }
+  if (!said.length) return;
+  e.dirty = true;
+  opLog(key, `Engineering (${ws.name}): ${said.join(', ')}`);
+  note(said.join(', '));
+  gridChanged(key);
+}
+
+// Helm docks at a starbase within range, at all stop (and leaves by going anywhere).
+function dockCommand(ws, msg) {
+  const key = ws.shipKey, e = engOf(key), nav = navState.get(key);
+  const note = (text) => send(ws, { type: 'notice', text: `Helm: ${text}` });
+  if (ws.station !== 'Helm') return send(ws, { type: 'notice', text: 'Only Helm docks the ship' });
+  if (msg.undock) {
+    if (!e.docked) return;
+    opLog(key, `undocked from ${e.docked}`);
+    note(`undocked from ${e.docked}`);
+    e.docked = null; e.dirty = true;
+    return gridChanged(key);
+  }
+  const base = nav && STARBASES.find((b) => Math.hypot(nav.x - b.x, nav.y - b.y) <= DOCK_RANGE);
+  if (!base) return note(`no starbase within docking range (${DOCK_RANGE} units)`);
+  if (nav.warp > 0) return note('come to all stop before docking');
+  e.docked = base.name; e.dirty = true;
+  opLog(key, `Helm (${ws.name}): docked at ${base.name}`);
+  for (const u of crewOf(key)) send(u, { type: 'notice', text: `Helm: docked at ${base.name}` });
+  gridChanged(key);
+}
+
+// The Captain sets (or aborts) the self-destruct.
+function selfDestructCommand(ws, msg) {
+  const key = ws.shipKey, e = engOf(key);
+  if (ws.station !== 'Captain') return send(ws, { type: 'notice', text: 'Only the Captain can order the self-destruct' });
+  if (msg.on && !e.selfDestruct) {
+    e.selfDestruct = { at: Date.now() + SELF_DESTRUCT_SECS * 1000, by: ws.name };
+    opLog(key, `${ws.name}: self-destruct in ${SELF_DESTRUCT_SECS} seconds`);
+    for (const u of crewOf(key)) send(u, { type: 'notice', text: `Self-destruct in ${SELF_DESTRUCT_SECS} seconds, by order of ${ws.name}` });
+  } else if (!msg.on && e.selfDestruct) {
+    e.selfDestruct = null;
+    opLog(key, `${ws.name}: self-destruct aborted`);
+    for (const u of crewOf(key)) send(u, { type: 'notice', text: `Self-destruct aborted by ${ws.name}` });
+  }
+  scheduleNav();
+}
+
+// A ship is destroyed: it takes ships close by with it (some), and comes back
+// docked at a starbase picked at random, good as new.
+function destroy(k, cause) {
+  const c = combatOf(k);
+  if (c.destroying) return;
+  c.destroying = true;
+  const name = shipName(k);
+  for (const o of [...combat.keys()]) if (o !== k && cores.has(o) && distance(k, o) <= BLAST.range) hit(o, BLAST.damage, k, 'the blast');
+  const base = STARBASES[Math.floor(Math.random() * STARBASES.length)];
+  console.log(`the ${name} was destroyed (${cause}); back at ${base.name}`);
+  opLog(k, `the ${name} was destroyed: ${cause}. Rebuilt and docked at ${base.name}`);
+  for (const u of crewOf(k)) send(u, { type: 'destroyed', ship: name, cause, base: base.name, at: Date.now() });
+  for (const [o, oc] of combat) if (oc.lock === k) { oc.lock = null; tellStations(o, ['Tactical'], `Tactical: the ${name} was destroyed`); }
+  combat.set(k, { ...freshCombat(), loaded: true });
+  eng.set(k, { ...freshEng(), docked: base.name });
+  shields.delete(k);
+  navTargets.delete(k);
+  const nav = navState.get(k);
+  if (nav) Object.assign(nav, { x: base.x, y: base.y + 5, warp: 0, dest: null });
+  const core = primaryCore.get(k);
+  if (core) send(core, { type: 'core-set', ship: name, set: { respawn: { x: base.x, y: base.y + 5 }, combat: savedCombat(k), eng: savedEng(k) } });
+  flowCache.delete(k);
+  broadcastShips();
+  scheduleNav();
+}
+
 // --- combat: Tactical's weapons ----------------------------------------------------
 //
-// Tactical locks onto a ship on sensors (its Tactical and Captain are warned)
-// and fires phasers (damage scales with weapons power) or photon torpedoes
-// (a limited supply, restocked slowly). Raised shields take the hits, draining
-// their strength (less with more shield power) until they fail. Then the hull
-// takes them, and each hit damages a system: damage caps that system's power,
-// so damaged sensors see less, damaged engines go slower, and so on. With the
-// hull gone the ship is disabled: no engines, shields or weapons until
-// repaired. Everything repairs slowly by itself; Engineering can direct
-// repairs to one system (or the hull) to speed it up. Shields recharge with
+// Tactical locks onto a ship on sensors (its Tactical and Captain are warned).
+// Phasers: arm them and the banks charge (faster with more weapons power;
+// armed weapons draw power, unarmed they draw none); a full bank fires.
+// Photon torpedoes: a limited supply, restocked only while docked at a
+// starbase. Raised shields take the hits, draining their strength (less with
+// more shield power) until they fail. Then the hull takes them, and each hit
+// damages a system: damage caps that system's power, so damaged sensors see
+// less, damaged engines go slower, and so on. With the hull gone the ship is
+// destroyed. Everything repairs slowly by itself (faster docked); Engineering
+// can direct repairs to one system (or the hull). Shields recharge with
 // shield power. The ship's computer keeps the hull, shields and damage.
 
-const PHASER = { range: 150, recharge: 2000, damage: 15 };
-const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 60000 };
+const PHASER = { range: 150, damage: 15, chargeRate: 20 }; // charge in % a second at full weapons power
+const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 5000 }; // restock: one every 5 s, docked
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
-const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1 }; // per second
+const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
 const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', lifeSupport: 'life support' };
-const combat = new Map(); // ship key -> { hull, shield, damage, torpedoes, repair, disabled, lock, phaserAt, torpedoAt, restockAt, hitAt, hitBy, dirty }
+const combat = new Map(); // ship key -> { hull, shield, damage, torpedoes, repair, lock, armed, phaserCharge, torpedoAt, restockAt, hitAt, hitBy, dirty }
 
 function freshCombat(saved) {
   const s = saved && typeof saved === 'object' ? saved : {};
   const num = (v, d, max = 100) => (Number.isFinite(v) ? Math.max(0, Math.min(max, v)) : d);
   return {
-    hull: num(s.hull, 100), shield: num(s.shield, 100),
+    hull: num(s.hull, 100) || 100, shield: num(s.shield, 100),
     damage: Object.fromEntries(SYSTEMS.map((k) => [k, num(s.damage?.[k], 0)])),
     torpedoes: num(s.torpedoes, TORPEDO.carried, TORPEDO.carried),
     repair: s.repair === 'hull' || SYSTEMS.includes(s.repair) ? s.repair : null,
-    disabled: !!s.disabled,
-    lock: null, phaserAt: 0, torpedoAt: 0, restockAt: Date.now(), hitAt: 0, hitBy: null, dirty: false,
+    lock: null, armed: false, phaserCharge: 0, torpedoAt: 0, restockAt: Date.now(), hitAt: 0, hitBy: null, dirty: false,
   };
 }
 const combatOf = (k) => { if (!combat.has(k)) combat.set(k, freshCombat()); return combat.get(k); };
 const round1 = (v) => Math.round(v * 10) / 10;
 const savedCombat = (k) => {
   const c = combatOf(k);
-  return { hull: round1(c.hull), shield: round1(c.shield), damage: Object.fromEntries(SYSTEMS.map((s) => [s, round1(c.damage[s])])), torpedoes: c.torpedoes, repair: c.repair, disabled: c.disabled };
+  return { hull: round1(c.hull), shield: round1(c.shield), damage: Object.fromEntries(SYSTEMS.map((s) => [s, round1(c.damage[s])])), torpedoes: c.torpedoes, repair: c.repair };
 };
-// What a ship's computer keeps: its position and settings, plus combat state.
-const coreCopy = (k) => (navState.has(k) ? { ...navState.get(k), combat: savedCombat(k) } : undefined);
+// What a ship's computer keeps: its position and settings, plus combat and grid state.
+const coreCopy = (k) => (navState.has(k) ? { ...navState.get(k), combat: savedCombat(k), eng: savedEng(k) } : undefined);
 
 // The ship's own combat state, for its consoles.
 function combatView(k) {
   const c = combatOf(k), now = Date.now();
   const t = c.lock && navState.has(c.lock) ? c.lock : null;
   return {
-    hull: Math.round(c.hull), shield: Math.round(c.shield), disabled: c.disabled,
+    hull: Math.round(c.hull), shield: Math.round(c.shield),
     damage: Object.fromEntries(SYSTEMS.map((s) => [s, Math.ceil(c.damage[s])])),
     repair: c.repair, torpedoes: c.torpedoes, carried: TORPEDO.carried,
-    phaser: { range: PHASER.range, ready: Math.max(0, c.phaserAt - now), recharge: PHASER.recharge },
+    phaser: { range: PHASER.range, armed: c.armed, charge: Math.floor(c.phaserCharge) },
     torpedo: { range: TORPEDO.range, ready: Math.max(0, c.torpedoAt - now), reload: TORPEDO.reload },
-    lock: t ? { name: shipName(t), distance: Math.round(distance(k, t)), shields: shields.has(t), shield: Math.round(combatOf(t).shield), hull: Math.round(combatOf(t).hull), disabled: combatOf(t).disabled } : null,
+    lock: t ? { name: shipName(t), distance: Math.round(distance(k, t)), shields: shields.has(t), shield: Math.round(combatOf(t).shield), hull: Math.round(combatOf(t).hull) } : null,
     lockedBy: [...combat].filter(([o, oc]) => oc.lock === k && cores.has(o)).map(([o]) => shipName(o)),
     underFire: now - c.hitAt < UNDER_FIRE_MS ? c.hitBy : null,
   };
@@ -1034,10 +1241,11 @@ function combatView(k) {
 
 const tellStations = (k, stations, text) => { for (const u of crewOf(k)) if (stations.includes(u.station)) send(u, { type: 'notice', text }); };
 
-// A ship's systems changed (damage, repair): keep it within what it has.
+// A ship's systems changed (damage, repair, the grid): keep it within what it has.
 function enforcePower(k) {
+  flowCache.delete(k);
   const p = powerOf(k);
-  if (shields.has(k) && p.shields < MIN_SHIELD_POWER) { shields.delete(k); opLog(k, 'shields down: the shield generators have failed'); broadcastShips(); }
+  if (shields.has(k) && p.shields < MIN_SHIELD_POWER) { shields.delete(k); opLog(k, 'shields down: not enough power to the shield generators'); broadcastShips(); }
   const nav = navState.get(k), core = primaryCore.get(k);
   if (nav && core && nav.warp > maxWarp(k)) {
     const warp = p.engines <= 0 ? 0 : maxWarp(k);
@@ -1047,7 +1255,7 @@ function enforcePower(k) {
 }
 
 // A hit on ship t from ship `from`. Returns what happened, for the firing ship.
-function hit(t, dmg, from) {
+function hit(t, dmg, from, what = '') {
   const c = combatOf(t);
   c.hitAt = Date.now();
   c.hitBy = shipName(from);
@@ -1072,15 +1280,13 @@ function hit(t, dmg, from) {
     const sys = SYSTEMS[Math.floor(Math.random() * SYSTEMS.length)];
     c.damage[sys] = Math.min(100, c.damage[sys] + rest * 2);
     said.push(`hull ${Math.round(c.hull)}%`, `${SYSTEM_NAMES[sys]} damaged`);
-    opLog(t, `hit by the ${shipName(from)}: hull ${Math.round(c.hull)}%, ${SYSTEM_NAMES[sys]} damaged`);
+    opLog(t, `hit by the ${shipName(from)}${what ? ` (${what})` : ''}: hull ${Math.round(c.hull)}%, ${SYSTEM_NAMES[sys]} damaged`);
     tellStations(t, ['Engineering'], `Engineering: ${SYSTEM_NAMES[sys]} damaged (${Math.ceil(c.damage[sys])}%)`);
-    if (c.hull <= 0 && !c.disabled) {
-      c.disabled = true;
-      c.lock = null;
-      opLog(t, 'hull breached: the ship is disabled');
-      opLog(from, `the ${shipName(t)} is disabled`);
-      for (const u of crewOf(t)) send(u, { type: 'notice', text: `Tactical: hull breached, the ${shipName(t)} is disabled (no engines, shields or weapons until repaired)` });
-      said.push('disabled');
+    if (c.hull <= 0) {
+      said.push('destroyed');
+      opLog(from, `the ${shipName(t)} was destroyed`);
+      destroy(t, `destroyed by the ${shipName(from)}`);
+      return said.join(', ');
     }
     enforcePower(t);
   }
@@ -1095,13 +1301,22 @@ function combatCommand(ws, msg) {
     if (ws.station !== 'Engineering') return send(ws, { type: 'notice', text: 'Only Engineering directs repairs' });
     c.repair = msg.system === 'hull' || SYSTEMS.includes(msg.system) ? msg.system : null;
     c.dirty = true;
-    opLog(key, `Engineering (${ws.name}): ${c.repair ? `repair crews to the ${c.repair === 'hull' ? 'hull' : SYSTEM_NAMES[c.repair]}` : 'repair crews spread across the ship'}`);
-    send(ws, { type: 'notice', text: `Engineering: ${c.repair ? `repair crews to the ${c.repair === 'hull' ? 'hull' : SYSTEM_NAMES[c.repair]}` : 'repair crews spread across the ship'}` });
+    const what = c.repair ? `repair crews to the ${c.repair === 'hull' ? 'hull' : SYSTEM_NAMES[c.repair]}` : 'repair crews spread across the ship';
+    opLog(key, `Engineering (${ws.name}): ${what}`);
+    send(ws, { type: 'notice', text: `Engineering: ${what}` });
     scheduleNav();
     return;
   }
 
   if (ws.station !== 'Tactical') return send(ws, { type: 'notice', text: 'Only Tactical controls the weapons' });
+
+  if (msg.type === 'arm') {
+    c.armed = !!msg.on;
+    if (!c.armed) c.phaserCharge = 0; // the banks bleed off
+    opLog(key, `${ws.name}: phasers ${c.armed ? 'armed' : 'stood down'}`);
+    gridChanged(key);
+    return note(c.armed ? 'phasers armed, banks charging' : 'phasers stood down');
+  }
 
   if (msg.type === 'lock') {
     if (!msg.ship) {
@@ -1113,7 +1328,6 @@ function combatCommand(ws, msg) {
     const t = shipKey(clean(msg.ship));
     if (t === key) return note('cannot target our own ship');
     if (!cores.has(t) || !navState.has(t) || !sensorOk(key, t)) return note(`the ${clean(msg.ship)} is not on sensors`);
-    if (c.disabled) return note('the ship is disabled');
     if (c.lock === t) return;
     c.lock = t;
     opLog(key, `${ws.name}: weapons locked on the ${shipName(t)}`);
@@ -1129,53 +1343,78 @@ function combatCommand(ws, msg) {
     const t = c.lock;
     if (!t) return note('no target: lock weapons first');
     if (!cores.has(t) || !sensorOk(key, t)) { c.lock = null; scheduleNav(); return note('target lost'); }
-    if (c.disabled) return note('the ship is disabled');
-    const p = powerOf(key);
-    if (p.weapons <= 0) return note('no power to the weapons: ask Engineering');
     const d = distance(key, t);
     if (d > w.range) return note(`the ${shipName(t)} is out of ${what} range (${Math.round(d)} units; get within ${w.range})`);
     const now = Date.now();
     if (torpedo) {
-      if (c.torpedoes <= 0) return note('no torpedoes left');
+      if (c.torpedoes <= 0) return note('no torpedoes left: restock at a starbase');
       if (now < c.torpedoAt) return note('torpedo tubes reloading');
       c.torpedoes--;
       c.torpedoAt = now + TORPEDO.reload;
       c.dirty = true;
     } else {
-      if (now < c.phaserAt) return note('phasers recharging');
-      c.phaserAt = now + PHASER.recharge;
+      if (!c.armed) return note('phasers are not armed');
+      if (c.phaserCharge < 100) return note(`phaser banks charging (${Math.floor(c.phaserCharge)}%)`);
+      c.phaserCharge = 0;
     }
-    const result = hit(t, torpedo ? TORPEDO.damage : (PHASER.damage * p.weapons) / 100, key);
+    const result = hit(t, w.damage, key, torpedo ? 'torpedo' : 'phasers');
     opLog(key, `${ws.name} fired ${torpedo ? 'a torpedo' : 'phasers'} at the ${shipName(t)}: ${result}`);
     note(`${torpedo ? 'torpedo' : 'phaser'} hit on the ${shipName(t)}: ${result}`);
     scheduleNav();
   }
 }
 
-// Once a second: shields recharge, repairs, torpedo restock, locks lost when
-// the target leaves sensor range. The ship's computers get a copy every few seconds.
+// Once a second: the grid (batteries, the core starting, containment, the
+// self-destruct countdown, docking), shields recharge, repairs, phaser banks
+// charge, torpedoes restock while docked, locks lost when the target leaves
+// sensor range. The ship's computers get a copy every few seconds.
 let combatTick = 0;
 setInterval(() => {
   combatTick++;
   const now = Date.now();
   let changed = false;
-  for (const [k, c] of combat) {
-    if (!cores.has(k)) continue;
-    const before = JSON.stringify([c.hull, c.shield, c.damage, c.torpedoes, c.disabled, c.repair]);
+  for (const k of [...cores.keys()]) {
+    if (!navState.has(k)) continue;
+    const c = combatOf(k), e = engOf(k);
+    const state = () => JSON.stringify([c.hull, c.shield, c.damage, c.torpedoes, c.repair, Math.floor(c.phaserCharge), e.core, e.start, e.breach, Math.round(e.battery.charge / 30), e.docked]);
+    const before = state();
+    flowCache.delete(k);
+    const f = flow(k);
+
+    // Self-destruct: containment off, and the core goes.
+    if (e.selfDestruct && now >= e.selfDestruct.at) { destroy(k, `self-destruct, by order of ${e.selfDestruct.by}`); changed = true; continue; }
+    // Containment: a few seconds on reserve, then the core breaches.
+    if (!f.containmentOk) {
+      e.breach++;
+      if (e.breach === 1) { opLog(k, 'antimatter containment failing: no power'); for (const u of crewOf(k)) send(u, { type: 'notice', text: `Warning: antimatter containment failing (no power from ${e.containment === 'EPS' ? 'the EPS' : `Bus ${e.containment}`})` }); }
+      if (e.breach >= GRID.breachSecs) { destroy(k, 'warp core breach: antimatter containment lost'); changed = true; continue; }
+    } else if (e.breach) { e.breach = 0; opLog(k, 'antimatter containment restored'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: antimatter containment restored'); }
+    // The core starting up, on Bus A power.
+    if (e.core === 'starting') {
+      if (!f.buses.A.coreOk) { e.core = 'offline'; e.start = 0; opLog(k, 'warp core startup failed: not enough power on Bus A'); tellStations(k, ['Engineering'], 'Engineering: warp core startup failed, not enough power on Bus A'); }
+      else if (++e.start >= GRID.coreStartSecs) { e.core = 'online'; e.start = 0; e.dirty = true; opLog(k, 'warp core online'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: warp core online'); }
+    }
+    // Batteries.
+    const bb = e.battery.bus && f.buses[e.battery.bus];
+    if (bb) e.battery.charge = Math.max(0, Math.min(GRID.batteryCap, e.battery.charge - bb.src.battery + f.charging));
+    // Docking ends when the ship moves off.
+    const nav = navState.get(k);
+    if (e.docked) {
+      const base = STARBASES.find((b) => b.name === e.docked);
+      if (!base || nav.warp > 0 || Math.hypot(nav.x - base.x, nav.y - base.y) > DOCK_RANGE) { opLog(k, `departed ${e.docked}`); e.docked = null; e.dirty = true; }
+    }
+
     const p = powerOf(k);
     if (c.shield < 100 && p.shields > 0) c.shield = Math.min(100, c.shield + (2 * p.shields) / 100);
-    for (const s of SYSTEMS) if (c.damage[s] > 0) c.damage[s] = Math.max(0, c.damage[s] - (c.repair === s ? REPAIR.directed : REPAIR.auto));
-    if (c.hull < 100) c.hull = Math.min(100, c.hull + (c.repair === 'hull' ? REPAIR.hullDirected : REPAIR.hull));
+    const fast = e.docked ? REPAIR.docked : 1;
+    for (const s of SYSTEMS) if (c.damage[s] > 0) c.damage[s] = Math.max(0, c.damage[s] - (c.repair === s ? REPAIR.directed : REPAIR.auto) * fast);
+    if (c.hull < 100) c.hull = Math.min(100, c.hull + (c.repair === 'hull' ? REPAIR.hullDirected : REPAIR.hull) * fast);
     if (c.repair && (c.repair === 'hull' ? c.hull >= 100 : c.damage[c.repair] <= 0)) {
       tellStations(k, ['Engineering'], `Engineering: ${c.repair === 'hull' ? 'hull' : SYSTEM_NAMES[c.repair]} repaired`);
       c.repair = null;
     }
-    if (c.disabled && c.hull >= 10) {
-      c.disabled = false;
-      opLog(k, 'hull repaired: the ship is no longer disabled');
-      for (const u of crewOf(k)) send(u, { type: 'notice', text: 'Tactical: hull repaired, systems back online' });
-    }
-    if (c.torpedoes >= TORPEDO.carried) c.restockAt = now;
+    if (c.armed && c.phaserCharge < 100) c.phaserCharge = Math.min(100, c.phaserCharge + (PHASER.chargeRate * p.weapons) / 100);
+    if (!e.docked || c.torpedoes >= TORPEDO.carried) c.restockAt = now;
     else if (now - c.restockAt >= TORPEDO.restock) { c.torpedoes++; c.restockAt = now; }
     if (c.lock && (!cores.has(c.lock) || !sensorOk(k, c.lock))) {
       opLog(k, `weapons lock on the ${shipName(c.lock)} lost`);
@@ -1183,14 +1422,15 @@ setInterval(() => {
       c.lock = null;
       changed = true;
     }
-    if (JSON.stringify([c.hull, c.shield, c.damage, c.torpedoes, c.disabled, c.repair]) !== before) { c.dirty = true; changed = true; enforcePower(k); }
-    if (c.dirty && combatTick % 5 === 0 && primaryCore.has(k)) {
-      send(primaryCore.get(k), { type: 'core-set', ship: shipName(k), set: { combat: savedCombat(k) } });
-      c.dirty = false;
+    if (state() !== before || e.selfDestruct) { c.dirty = true; changed = true; enforcePower(k); }
+    if ((c.dirty || e.dirty) && combatTick % 5 === 0 && primaryCore.has(k)) {
+      send(primaryCore.get(k), { type: 'core-set', ship: shipName(k), set: { combat: savedCombat(k), eng: savedEng(k) } });
+      c.dirty = e.dirty = false;
     }
   }
   if (changed) scheduleNav();
 }, 1000).unref();
+
 
 // POST   /api/library            upload to your own ship (X-Token, X-Filename)
 // GET    /api/library/<ship>/<f> download, from any ship on your data network
@@ -1518,6 +1758,7 @@ wss.on('connection', (ws) => {
     // Tactical raises or lowers the ship's shields.
     if (msg.type === 'shields' && ws.id) {
       if (ws.station !== 'Tactical') return send(ws, { type: 'notice', text: 'Only Tactical can raise or lower shields' });
+      if (consoleDark(ws)) return darkNote(ws);
       if (msg.up && powerOf(ws.shipKey).shields < MIN_SHIELD_POWER) return send(ws, { type: 'notice', text: `Tactical: not enough power to raise shields (needs ${MIN_SHIELD_POWER}%; ask Engineering)` });
       if (msg.up && combatOf(ws.shipKey).shield < MIN_SHIELD_STRENGTH) return send(ws, { type: 'notice', text: `Tactical: the shield generators are recharging (${Math.floor(combatOf(ws.shipKey).shield)}%; they hold from ${MIN_SHIELD_STRENGTH}%)` });
       if (msg.up) shields.add(ws.shipKey); else shields.delete(ws.shipKey);
@@ -1530,6 +1771,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'beam' && ws.id) {
       const fail = (text) => send(ws, { type: 'notice', text: `Transporter: ${text}` });
       if (ws.station !== 'Transporter') return fail('only the transporter room can beam people');
+      if (consoleDark(ws)) return fail(`console offline, no power on Bus ${busOf(ws.station)}`);
       const u = typeof msg.who === 'string' && users.get(msg.who);
       const toKey = shipKey(clean(msg.ship));
       if (!u || u.shipKey !== ws.shipKey) return fail('that person is not aboard');
@@ -1580,9 +1822,12 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if ((msg.type === 'helm' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return navCommand(ws, msg);
-    if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay'].includes(msg.type) && ws.id) return crewCommand(ws, msg);
-    if (['lock', 'fire', 'repair'].includes(msg.type) && ws.id) return combatCommand(ws, msg);
+    if ((msg.type === 'helm' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return consoleDark(ws) && msg.type !== 'power' ? darkNote(ws) : navCommand(ws, msg);
+    if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : crewCommand(ws, msg);
+    if (['lock', 'fire', 'repair', 'arm'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : combatCommand(ws, msg);
+    if (msg.type === 'grid' && ws.id) return gridCommand(ws, msg); // emergency power: works with the console dark
+    if (msg.type === 'dock' && ws.id) return consoleDark(ws) ? darkNote(ws) : dockCommand(ws, msg);
+    if (msg.type === 'self-destruct' && ws.id) return consoleDark(ws) ? darkNote(ws) : selfDestructCommand(ws, msg);
 
     // Call waiting, "join": bring the person calling us into the call we're in.
     // Everyone in it is told, and the caller connects to each of them.

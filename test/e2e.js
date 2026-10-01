@@ -876,11 +876,9 @@ const audioBytes = (page) => page.evaluate(async () => {
       }
       await scotty.click('#power-apply');
     };
-    // Over capacity can't be routed.
-    await scotty.$eval('[data-system="weapons"]', (el) => { el.value = 100; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    // The sliders set demand, shown per bus before it's routed.
     await scotty.$eval('[data-system="engines"]', (el) => { el.value = 100; el.dispatchEvent(new Event('input', { bubbles: true })); });
-    assert.match(await scotty.textContent('.pw-total'), /over capacity/);
-    assert.equal(await scotty.isDisabled('#power-apply'), true);
+    assert.match(await scotty.textContent('.pw-total'), /Bus B 220 .*not routed yet/);
     await scotty.click('#power-reset');
     // Sensors at 20%: every range drops to a fifth, so the transporter (4 units) can't reach.
     await route({ sensors: 20 });
@@ -997,6 +995,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     await carol.waitForSelector('#weapons-lock-state:has-text("Locked on the Defiant")');
     await waitFor(() => kira.msgs.some((m) => m.type === 'notice' && /the Enterprise has locked weapons on us/.test(m.text)));
     await waitFor(() => kira.nav()?.own.combat.lockedBy.includes('Enterprise'));
+    await carol.click('#arm-phasers'); // the banks charge while we go on
+    await carol.waitForSelector('#wp-phasers:has-text("Charging")');
     await picard.waitForSelector('[data-readout="Weapons"]:has-text("Locked: the Defiant")', { state: 'attached' });
     step("Tactical locked weapons on the Defiant: the Defiant's Tactical was warned, and the Captain's status shows the lock");
 
@@ -1013,7 +1013,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Shields down: phasers hit the hull and damage a system, which caps its power.
     kira.send({ type: 'shields', up: false });
     await waitFor(async () => !(await carol.textContent('#weapons-lock-state')).includes('shields up'));
-    await carol.waitForSelector('#fire-phaser:not([disabled])');
+    await carol.waitForSelector('#fire-phaser:not([disabled])', { timeout: 20000 });
     await carol.click('#fire-phaser');
     await waitFor(() => kira.nav()?.own.combat.hull < 100);
     const hit = kira.nav().own;
@@ -1036,15 +1036,59 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); return n?.own.warp === 0 && n.own.x < 320; }, 30000);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     obrien.send({ type: 'power', power: { engines: 0, shields: 0, sensors: 20, transporter: 0, weapons: 0, lifeSupport: 60 } });
-    await waitFor(() => Math.round(obrien.nav()?.own.signature * 100) === 18);
+    await waitFor(() => obrien.nav()?.own.signature < 0.3);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'detached' });
     await carol.waitForSelector('#weapons-lock-state:has-text("No weapons lock")');
-    step('the Defiant powered down to an 18% signature: off the Enterprise\'s sensors 200 units away, and the weapons lock was lost');
+    step(`the Defiant powered down to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 200 units away, and the weapons lock was lost`);
     obrien.send({ type: 'power', power: { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100 } });
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     step('powered up again, the Defiant showed up on sensors');
     kira.close();
     obrien.close();
+
+    // Starbases: Helm docks at Starbase 12, and the torpedo fired earlier is restocked.
+    helm({ dest: { base: 'Starbase 12' }, warp: 7 });
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.near)) === 'Starbase 12', 30000);
+    sulu.send(JSON.stringify({ type: 'dock' }));
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.docked)) === 'Starbase 12');
+    await carol.waitForSelector('#wp-torpedoes:has-text("10 of 10")', { timeout: 15000 });
+    step('Helm flew to Starbase 12 and docked; the torpedo fired earlier was restocked');
+
+    // The power grid: with the core shut down and the batteries off, Bus B is
+    // dead: Tactical's console goes dark and refuses orders. Restarting the
+    // core (on dock power, Bus A) brings it back.
+    const laforge = await crewWs('laforge', 'Enterprise', 'Engineering');
+    laforge.send({ type: 'grid', core: 'stop', battery: null });
+    await carol.waitForSelector('#console-dark:not([hidden])');
+    await waitFor(() => laforge.nav()?.maxWarp === 0);
+    await carol.$eval('#fire-torpedo', (b) => { b.disabled = false; b.click(); });
+    await waitFor(async () => /console offline, no power on Bus B/.test(await carol.textContent('#log')));
+    laforge.send({ type: 'grid', core: 'start' });
+    await waitFor(() => laforge.nav()?.own.grid.core === 'starting');
+    await carol.waitForSelector('#console-dark', { state: 'hidden', timeout: 20000 });
+    assert.equal(laforge.nav().own.grid.core, 'online');
+    step('the warp core shut down with the batteries off left Bus B dead (Tactical dark, no engines); restarted on dock power, the consoles came back');
+
+    // The Captain sets the self-destruct; everyone aboard sees the countdown; aborted.
+    picard.on('dialog', (d) => d.accept());
+    await screen(picard, 'st-status');
+    await picard.click('#self-destruct');
+    await bob.waitForSelector('.bcast--alert:has-text("Self-destruct in")', { state: 'attached' });
+    await picard.click('#self-destruct-abort');
+    await bob.waitForSelector('.bcast--alert:has-text("Self-destruct")', { state: 'detached' });
+    step('the Captain set the self-destruct (every console counted down) and aborted it');
+
+    // Containment fed from Bus B with Bus B cut off: the core breaches and the
+    // Enterprise is destroyed, then rebuilt docked at a starbase.
+    laforge.send({ type: 'grid', containment: 'B' });
+    laforge.send({ type: 'grid', tap: { bus: 'B', on: false } });
+    await bob.waitForSelector('.bcast--alert:has-text("containment failing")', { state: 'attached' });
+    await waitFor(() => suluMsgs.some((m) => m.type === 'destroyed' && /breach/.test(m.cause)), 15000);
+    const reborn = suluMsgs.find((m) => m.type === 'destroyed');
+    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last.own); return n.grid.docked === reborn.base && n.combat.hull === 100 && n.grid.containment === 'A'; });
+    await bob.waitForSelector(`.bcast--alert:has-text("Rebuilt and docked at ${reborn.base}")`, { state: 'attached' });
+    step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt docked at ${reborn.base}`);
+    laforge.close();
     for (const page of [worf, riker, picard]) await page.close();
 
     sulu.close();
