@@ -172,10 +172,11 @@ function fillReassign() {
   if (!me) return;
   $('assignment').textContent = `${me.name}: ${me.station}, the ${me.ship}`;
   // Every vessel lists every station, Operations included; where you are now is greyed out.
-  const tap = (name, ship) => {
+  const tap = (name, ship, remote) => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: name });
     b.dataset.station = name;
     if (ship) b.dataset.ship = ship;
+    if (remote) { b.dataset.remote = ''; b.onclick = () => { $('reassign-error').textContent = ''; send({ type: 'change-station', station: name, ship, remote: true }); }; return b; }
     if (!ship && name === me.station) { b.disabled = true; b.title = 'You are here'; b.setAttribute('aria-current', 'true'); }
     b.onclick = () => {
       $('reassign-error').textContent = '';
@@ -187,7 +188,8 @@ function fillReassign() {
   const all = ['Operations', ...stations];
   $('station-taps').replaceChildren(...all.map((n) => tap(n)));
   const across = lastNav?.own?.grid?.dockedWith || [];
-  dockSig = JSON.stringify(across);
+  const remote = lastNav?.own?.remoteTargets || [];
+  dockSig = JSON.stringify([across, remote, me.remoteFrom]);
   $('dock-stations').replaceChildren(...across.map((v) => {
     const box = document.createElement('div');
     box.className = 'dock-stations';
@@ -196,7 +198,23 @@ function fillReassign() {
       Object.assign(document.createElement('div'), { className: 'tr-taps' }));
     box.lastChild.append(...all.map((n) => tap(n, v)));
     return box;
-  }));
+  }), ...remote.map((v) => {
+    // Remote control over a data link: a crewless ship's stations (not ops).
+    const box = document.createElement('div');
+    box.className = 'dock-stations';
+    box.dataset.remoteVessel = v;
+    box.append(Object.assign(document.createElement('h3'), { className: 'ops-subhead', textContent: `By data link (no crew aboard): the ${v}` }),
+      Object.assign(document.createElement('div'), { className: 'tr-taps' }));
+    box.lastChild.append(...stations.map((n) => tap(n, v, true)));
+    return box;
+  }), ...(me.remoteFrom ? [(() => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill lcars-button--alert', id: 'remote-return', textContent: `Return to the ${me.remoteFrom}` });
+    b.onclick = () => send({ type: 'change-station', station: 'Crew', ship: me.remoteFrom });
+    const box = document.createElement('div');
+    box.className = 'dock-stations';
+    box.append(Object.assign(document.createElement('h3'), { className: 'ops-subhead', textContent: `Remote control of the ${me.ship} from the ${me.remoteFrom}` }), b);
+    return box;
+  })()] : []));
   $('reassign-form').hidden = true;
   $('reassign-key').value = '';
 }
@@ -939,19 +957,21 @@ async function onMessage(msg) {
   if (await comms.handle(msg)) return;
   switch (msg.type) {
     case 'registered':
-      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station };
+      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, remoteFrom: msg.remoteFrom || null };
       token = msg.token;
       if (ops) hideOps();
       queueMicrotask(() => comms.radio?.render());
       if (msg.beamedFrom) log(`beamed from the ${msg.beamedFrom} to the ${me.ship}`);
       if (msg.walkedFrom) log(`crossed the dock from the ${msg.walkedFrom} to the ${me.ship}`);
+      if (msg.remoteVia) log(`remote control of the ${me.ship} over the data link`);
+      if (msg.returnedFrom) log(`back aboard the ${me.ship} from remote control of the ${msg.returnedFrom}`);
       document.title = `LCARS: ${me.station} · ${me.ship}`;
       $('home').hidden = false;
       $('comms-button').hidden = false;
       $('log-tab').hidden = false;
       $('reassign-tab').hidden = false;
       $('library-tab').hidden = false;
-      log(msg.beamedFrom || msg.walkedFrom ? `${me.name} now aboard the ${me.ship}: ${me.station}` : `${me.name} reporting for duty aboard the ${me.ship}: ${me.station}`);
+      log(msg.beamedFrom || msg.walkedFrom || msg.remoteVia || msg.returnedFrom ? `${me.name} now aboard the ${me.ship}: ${me.station}` : `${me.name} reporting for duty aboard the ${me.ship}: ${me.station}`);
       showStation();
       try { localStorage.setItem('voice-reg', JSON.stringify({ name: me.name, ship: me.ship, station: me.station })); } catch {}
       break;
@@ -994,7 +1014,7 @@ async function onMessage(msg) {
       renderCrewPanels();
       renderCombat();
       renderServices();
-      if (JSON.stringify(msg.own?.grid?.dockedWith || []) !== dockSig) fillReassign();
+      if (JSON.stringify([msg.own?.grid?.dockedWith || [], msg.own?.remoteTargets || [], me?.remoteFrom || null]) !== dockSig) fillReassign();
       break;
     case 'course-plotted':
       log(`${msg.by.name} plotted a course to ${msg.label}`);

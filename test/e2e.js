@@ -23,7 +23,7 @@ const START = { Enterprise: '500,500', Defiant: '510,500', "K'Vatch": '505,505',
 function startComputer(folder, ...ships) {
   const opts = typeof ships[ships.length - 1] === 'object' ? ships.pop() : {};
   const proc = spawn(process.execPath, [path.join(__dirname, '..', 'tools', 'shipcore.js'),
-    '--relay', `ws://localhost:${process.env.PORT}`, '--data', path.join(DATA_DIR, folder), ...(opts.cold ? [] : ['--warm', '--position', START[ships[0]] || '500,500']), ...ships], { stdio: ['ignore', 'pipe', 'pipe'] });
+    '--relay', `ws://localhost:${process.env.PORT}`, '--data', path.join(DATA_DIR, folder), ...(opts.cold ? [] : ['--warm', '--position', opts.position || START[ships[0]] || '500,500']), ...ships], { stdio: ['ignore', 'pipe', 'pipe'] });
   proc.stdout.on('data', (d) => process.stdout.write(String(d).replace(/^(?=.)/gm, `  [computer ${folder}] `)));
   proc.stderr.on('data', (d) => process.stdout.write(String(d).replace(/^(?=.)/gm, `  [computer ${folder} ERR] `)));
   computers.add(proc);
@@ -1269,6 +1269,34 @@ const audioBytes = (page) => page.evaluate(async () => {
     bashir.close();
     await alice.waitForFunction(() => window.__voice.state === 'idle', null, { timeout: 10000 });
     step(`with a Captain aboard ${reborn.base}, the automated station put alice's hail straight through to them`);
+
+    // A crewless ship: the Enterprise forces a data link onto it (nobody to
+    // refuse), and a crew member takes its Helm by remote control.
+    const here = await spock.evaluate(() => window.__nav.last.own);
+    const reliantCore = startComputer('r', 'Reliant', { position: `${Math.round(here.x + 8)},${Math.round(here.y)}` });
+    await op.waitForFunction(() => window.__operator.ships.includes('Reliant'), null, { timeout: 15000 });
+    await screen(op, 'link');
+    await op.selectOption('#link-ship', 'Reliant');
+    await op.click('#link-form button');
+    await op.waitForFunction(() => window.__operator.network.includes('Reliant'));
+    await op.waitForSelector('#ops-log li:has-text("forced")', { state: 'attached' });
+    const data = await crewWs('data', 'Enterprise', 'Crew');
+    await waitFor(() => data.nav()?.own?.remoteTargets?.includes('Reliant'));
+    data.send({ type: 'change-station', station: 'Helm', ship: 'Reliant', remote: true });
+    await waitFor(() => data.msgs.some((m) => m.type === 'registered' && m.ship === 'Reliant' && m.station === 'Helm' && m.remoteFrom === 'Enterprise'));
+    data.send({ type: 'helm', heading: 90, warp: 0.25 });
+    await waitFor(() => data.nav()?.own?.name === 'Reliant' && data.nav().own.warp > 0);
+    data.send({ type: 'change-station', station: 'Crew', ship: 'Enterprise' });
+    await waitFor(() => data.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && !m.remoteFrom));
+    step('the Enterprise forced a data link onto the crewless Reliant; Data took its Helm by remote control, flew it, and came back');
+    data.send({ type: 'change-station', station: 'Helm', ship: 'Reliant', remote: true });
+    await waitFor(() => data.msgs.filter((m) => m.type === 'registered' && m.ship === 'Reliant').length >= 2);
+    await op.click('#links li:has-text("Reliant") button');
+    await waitFor(() => data.msgs.some((m) => m.type === 'notice' && /remote control of the Reliant ended/.test(m.text)));
+    await waitFor(() => [...data.msgs].reverse().find((m) => m.type === 'registered')?.ship === 'Enterprise');
+    step("when the data link closed, remote control ended and Data was back aboard the Enterprise");
+    data.close();
+    await stopComputer(reliantCore);
 
     // A starbase can't dock with itself, and a ship's computer run for one
     // only holds its library: the station stays put and isn't harmed.

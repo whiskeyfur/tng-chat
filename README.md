@@ -184,6 +184,11 @@ node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-
 - Anyone aboard can upload and download; ops can **delete** from their own ship's library. File names are cleaned up (no folders, control characters or leading dots; a taken name gets " (2)"). Uploads and downloads go over HTTP with a per-session token handed out at sign-in. With `OPERATOR_KEY` set, ship's computers need `--key` too.
 - To bring in files from an older version that kept them in the relay's `data/<ship>/`, point a computer at that folder: `node tools/shipcore.js --data ./data <ship>`.
 
+## Crewless ships: forced data links and remote control
+
+- **Forcing a data link:** a ship with nobody aboard (only its ship's computer) has no one to accept or refuse a data link, so ops' link request opens it at once ("forced"). Crewless ships are listed for ops to link to.
+- **Remote control:** linked to a crewless ship, the Station screen lists its stations under "By data link (no crew aboard)". Tap one to take that station by remote control: your console moves aboard as a remote operator (marked as such), with every system there, its Helm, Engineering and so on. **Return to the …** brings you back to your own station; if the data link closes, remote control ends and you're returned automatically. A ship with real crew aboard can't be taken over, and ops isn't run remotely.
+
 ## Ops console (Operations station)
 
 Pick **Operations** at sign-in, or open `?station=Operations&name=O'Brien&ship=Enterprise` (or the old `operator.html` link). The page remembers the last sign-in. Ops is assumed to be on the bridge. The operator is aboard as crew at the **Operations** station and has the same Comms menu as everyone. It adds **Transfer to**: hand the call you're in to anyone aboard or on the data network, or to another ship by hail, and drop off the line. A call with several people is handed over whole.

@@ -97,7 +97,7 @@ const clean = (s) => (typeof s === 'string' ? s.trim().replace(/\s+/g, ' ') : ''
 const shipKey = (ship) => ship.toLowerCase();
 const userId = (name, ship) => `${name.toLowerCase()}@${shipKey(ship)}`;
 const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station,
-  ...(ws.sickbay ? { sickbay: true } : {}), ...(ws.confined ? { confined: true } : {}) });
+  ...(ws.sickbay ? { sickbay: true } : {}), ...(ws.confined ? { confined: true } : {}), ...(ws.remoteFrom ? { remoteFrom: shipName(ws.remoteFrom) } : {}) });
 const crewOf = (key) => [...users.values()].filter((u) => u.shipKey === key);
 const opsOf = (key) => [...operators].filter((op) => op.shipKey === key);
 const shipName = (key) => ships.get(key) || key;
@@ -160,7 +160,9 @@ function broadcastOps(key) {
     .map((u) => ({ ...info(u), state: u.state, peers: u.peers.map(peerInfo) }))
     .sort((a, b) => a.name.localeCompare(b.name));
   // Ships in range: ops on duty, within subspace (comms) range.
-  const otherShips = [...new Set([...[...operators].map((op) => op.shipKey), ...BASE_KEYS])]
+  // (crewless ships too: a data link can be forced onto them)
+  const crewless = [...cores.keys()].filter((k2) => !isBase(k2) && !crewOf(k2).some((u) => !u.remoteFrom));
+  const otherShips = [...new Set([...[...operators].map((op) => op.shipKey), ...BASE_KEYS, ...crewless])]
     .filter((k) => k !== key && commsOk(key, k)).map(shipName).sort();
   const describe = (h) => ({ id: h.id, fromShip: shipName(h.fromShip), toShip: shipName(h.toShip), caller: peerInfo(h.caller) });
   const all = [...hails.values()];
@@ -366,12 +368,22 @@ function operatorMessage(op, msg) {
     case 'link-request': {
       const target = shipKey(clean(msg.ship));
       if (target === op.shipKey) return fail('that is this ship');
-      if (!opsOf(target).length && !isBase(target)) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
+      // Nobody aboard at all (only its computer): the link is forced, nobody's there to refuse it.
+      const crewless = present(target) && !isBase(target) && !crewOf(target).some((u) => !u.remoteFrom);
+      if (!opsOf(target).length && !isBase(target) && !crewless) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
       if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
       if (!commsUp(op.shipKey, 'subspace')) return fail('our subspace relay has no power: data links need it');
       if (!commsUp(target, 'subspace')) return fail(`the ${shipName(target)}'s subspace relay is down`);
       if (links.has(linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already open`);
       if ([...linkRequests.values()].some((r) => linkKey(r.fromShip, r.toShip) === linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already being negotiated`);
+      if (crewless && !opsOf(target).length) {
+        links.add(linkKey(op.shipKey, target));
+        opLog(target, `the ${shipName(op.shipKey)} forced a data link (nobody aboard)`);
+        opLog(op.shipKey, `data link with the ${shipName(target)} forced: nobody aboard to refuse it`);
+        refreshNetworks([op.shipKey]);
+        broadcastAllOps();
+        return ok(`data link with the ${shipName(target)} forced (nobody aboard)`);
+      }
       const req = { id: newId('l-'), fromShip: op.shipKey, toShip: target };
       linkRequests.set(req.id, req);
       opLog(target, `the ${shipName(op.shipKey)} requests a data link`);
@@ -481,12 +493,12 @@ function beam(u, toKey, station, how = 'beamed') {
   signOut(u);
   Object.assign(u, { id: userId(u.name, shipName(toKey)), shipKey: toKey, ship: shipName(toKey), state: 'idle', peers: [], cid: null });
   users.set(u.id, u);
-  send(u, { type: 'registered', ...info(u), token: u.token, [how === 'walked' ? 'walkedFrom' : 'beamedFrom']: from });
+  send(u, { type: 'registered', ...info(u), token: u.token, [how === 'walked' ? 'walkedFrom' : how === 'beamed' ? 'beamedFrom' : how === 'returned' ? 'returnedFrom' : 'remoteVia']: from });
   sendShipRadio(u);
   joinBroadcasts(u);
   broadcastCrew(toKey);
   broadcastShips();
-  opLog(toKey, `${u.name} (${u.station}) ${how === 'walked' ? 'came aboard across the dock' : 'beamed aboard'} from the ${from}`);
+  opLog(toKey, `${u.name} (${u.station}) ${{ walked: 'came aboard across the dock', beamed: 'beamed aboard', remote: 'took remote control', returned: 'came back from remote control' }[how]} from the ${from}`);
   // Security is told whenever someone beams aboard (walking in across the dock is expected).
   if (how === 'beamed') for (const s of crewOf(toKey)) if (s.station === 'Security' && s !== u) send(s, { type: 'security-alert', text: `${u.name} (${u.station}) beamed aboard from the ${from}`, at: Date.now() });
   console.log(`${u.name} ${how} from the ${from} to the ${u.ship}`);
@@ -768,6 +780,8 @@ function navMessage(key) {
     type: 'nav',
     own: own ? { name: shipName(key), ...own, power: powerOf(key), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
       autopilot: autopilots.get(key)?.target || null,
+      // Crewless ships on a data link with us: their stations can be taken by remote control.
+      remoteTargets: linkedTo(key).filter((t) => present(t) && !isBase(t) && !crewOf(t).some((u) => !u.remoteFrom)).map(shipName),
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
     bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
     ships: seen.map((k) => ({ name: shipName(k), ...navState.get(k), ops: opsOf(k).length > 0, shields: shields.has(k), distance: k === key ? 0 : distance(key, k) })),
@@ -2005,6 +2019,15 @@ function combatCommand(ws, msg) {
 let combatTick = 0;
 setInterval(() => {
   combatTick++;
+  // Remote controllers whose data link has gone come back to their own ship.
+  for (const u of [...users.values()]) {
+    if (!u.remoteFrom || links.has(linkKey(u.shipKey, u.remoteFrom))) continue;
+    const home = u.remoteFrom, st = u.remoteStation || 'Crew';
+    u.remoteFrom = null;
+    if (users.has(userId(u.name, shipName(home)))) continue;
+    send(u, { type: 'notice', text: `Data link lost: remote control of the ${u.ship} ended` });
+    beam(u, home, st, 'returned');
+  }
   const now = Date.now();
   let changed = false;
   for (const k of [...cores.keys()]) {
@@ -2429,6 +2452,27 @@ wss.on('connection', (ws) => {
       if (msg.station !== OPS_STATION && !STATIONS.includes(msg.station)) return send(ws, { type: 'notice', text: 'No such station' });
       // Across the dock: walk over to a station aboard a vessel docked with this one.
       const there = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey;
+      // By data link: take a station aboard a crewless ship by remote control
+      // (or return home from one).
+      if (there !== ws.shipKey && (msg.remote || there === ws.remoteFrom)) {
+        const home = there === ws.remoteFrom;
+        if (!home) {
+          if (!linkedTo(ws.shipKey).includes(there)) return send(ws, { type: 'station-failed', reason: `no data link with the ${clean(msg.ship)}` });
+          if (crewOf(there).some((u) => !u.remoteFrom)) return send(ws, { type: 'station-failed', reason: `the ${shipName(there)} has crew aboard: remote control is only for a crewless ship` });
+          if (msg.station === OPS_STATION) return send(ws, { type: 'station-failed', reason: 'ops can\'t be run by remote control' });
+        }
+        if (users.has(userId(ws.name, shipName(there)))) return send(ws, { type: 'station-failed', reason: `someone called ${ws.name} is already aboard the ${shipName(there)}` });
+        if (ws.operator) leaveOps(ws);
+        const from = ws.shipKey;
+        if (home) { const st = ws.remoteStation || 'Crew'; ws.remoteFrom = null; beam(ws, there, msg.station === OPS_STATION ? st : msg.station || st, 'returned'); return; }
+        ws.remoteStation = ws.station;
+        opLog(from, `${ws.name} took remote control of the ${shipName(there)} (${msg.station}) over the data link`);
+        beam(ws, there, msg.station, 'remote');
+        ws.remoteFrom = from;
+        send(ws, { type: 'registered', ...info(ws), token: ws.token, remoteFrom: shipName(from) });
+        broadcastCrew(there);
+        return;
+      }
       if (there !== ws.shipKey) {
         if (!dockedWith(ws.shipKey).includes(there)) return send(ws, { type: 'station-failed', reason: `not docked with the ${clean(msg.ship)}` });
         if (msg.station === OPS_STATION && OPERATOR_KEY && msg.key !== OPERATOR_KEY) return send(ws, { type: 'station-failed', reason: 'wrong operator key' });
