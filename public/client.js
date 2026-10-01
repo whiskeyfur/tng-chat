@@ -391,7 +391,8 @@ function renderCrewPanels() {
 
   // Security: transporter lockout, confinement, beam-in alerts.
   const sec = document.querySelector('[data-security]');
-  if (sec && changed(sec, crewSig, !!lastNav?.own?.lockout, securityAlerts.length)) {
+  const fields = lastNav?.own?.grid?.forcefields || [];
+  if (sec && changed(sec, crewSig, !!lastNav?.own?.lockout, securityAlerts.length, fields, lastNav?.own?.grid?.fieldsUp)) {
     const lockout = !!lastNav?.own?.lockout;
     const keep = sec.querySelector('#sec-who')?.value;
     const others = crew.filter((u) => u.id !== me.id);
@@ -401,6 +402,16 @@ function renderCrewPanels() {
       el('div', { className: 'st-control' },
         el('p', { className: 'st-state', textContent: lockout ? 'Transporter lockout: force field up' : 'Transporter lockout: off' }),
         button(lockout ? 'Drop force field' : 'Raise force field', () => send({ type: 'lockout', on: !lockout }), lockout ? '' : 'lcars-button--alert')),
+      el('h3', { className: 'ops-subhead', textContent: 'Console force fields' }),
+      el('div', { className: 'tr-taps', id: 'sec-fields' }, ...stations.filter((st) => st !== 'Security').map((st) => {
+        const on = fields.includes(st);
+        const b = button(st, () => send({ type: 'forcefield', station: st, on: !on }), on ? 'lcars-button--alert' : '');
+        b.classList.add('tr-tap');
+        b.dataset.station = st;
+        b.setAttribute('aria-pressed', String(on));
+        return b;
+      })),
+      el('p', { className: 'ops-hint', textContent: fields.length ? `Sealed: ${fields.join(', ')}${lastNav?.own?.grid?.fieldsUp ? '' : ' (emitters have no power: fields are down)'}` : 'Tap a console to seal it with a force field (5 power each, from the emitters).' }),
       el('div', { className: 'ops-form' }, el('span', { textContent: 'Quarters' }), who,
         button('Confine', () => send({ type: 'confine', who: who.value, on: true }), 'lcars-button--alert'),
         button('Release', () => send({ type: 'confine', who: who.value, on: false }))),
@@ -459,12 +470,13 @@ function renderCombat() {
   // This console goes dark when its bus has no power (comms still work).
   const tied = grid.ties[`console:${me.station}`] || [];
   const bus = tied.length ? tied.map((n) => `Bus ${n}`).join(' or ') : 'its bus (not tied in)';
-  const dark = grid.consoleOk[me.station] === false;
-  // Engineering's power grid runs on emergency power, so it's never covered.
-  const emergency = dark && me.station === 'Engineering';
+  const fielded = grid.fieldsUp && grid.forcefields.includes(me.station);
+  const dark = fielded || grid.consoleOk[me.station] === false;
+  // Engineering's power grid runs on emergency power, so it's never covered (a force field still seals it).
+  const emergency = dark && !fielded && me.station === 'Engineering';
   bc.setAlert('emergency', emergency ? `Console on emergency power (no power on ${bus}): Power grid controls only` : null, { level: 'yellow' });
   consoleDark = dark && !emergency;
-  if (dark) $('console-dark').querySelector('p').textContent = `Console offline · no power on ${bus}`;
+  if (dark) $('console-dark').querySelector('p').textContent = fielded ? 'Console sealed · Security force field' : `Console offline · no power on ${bus}`;
   updateCover();
   document.body.toggleAttribute('data-console-dark', dark);
   if (!stationView) return;

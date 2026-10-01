@@ -1015,6 +1015,19 @@ function crewCommand(ws, msg) {
       opLog(key, `${ws.name}: transporter lockout ${msg.on ? 'on' : 'off'}`);
       return;
     }
+    case 'forcefield': {
+      // Seal a console (or release it): nobody can use it while the field holds.
+      if (ws.station !== 'Security') return note('Only Security controls the force fields');
+      if (!STATIONS.includes(msg.station) || msg.station === 'Security') return note('Pick another station\'s console');
+      const e = engOf(key);
+      e.forcefields = msg.on ? [...new Set([...e.forcefields, msg.station])] : e.forcefields.filter((st) => st !== msg.station);
+      e.dirty = true;
+      flowCache.delete(key);
+      for (const u of crewOf(key)) if (u.station === msg.station) send(u, { type: 'notice', text: msg.on ? `Security: a force field seals the ${msg.station} console` : `Security: the force field around the ${msg.station} console is down` });
+      opLog(key, `${ws.name}: force field ${msg.on ? 'up around' : 'down from'} the ${msg.station} console`);
+      scheduleNav();
+      return note(`Force field ${msg.on ? 'up around' : 'down from'} the ${msg.station} console`);
+    }
     case 'confine': {
       if (ws.station !== 'Security') return note('Only Security confines crew to quarters');
       const u = aboard(msg.who);
@@ -1068,7 +1081,7 @@ function crewCommand(ws, msg) {
 // containment, the reactors' subsystems, consoles, Communications, a docked
 // ship, then systems a bus at a time in priority order.
 
-const GRID = { core: 650, coreStartSecs: 10, containment: 20, constriction: { start: 60, run: 20 }, corePump: 10, injector: 10, solar: 25, dock: 700, impulse: 75, impulseStartSecs: 5, impulsePump: 10, comms: 10, batteryOut: 150, batteryCap: 3000, batteryCharge: 50, console: 2, breachSecs: 5 };
+const GRID = { forcefield: 5, core: 650, coreStartSecs: 10, containment: 20, constriction: { start: 60, run: 20 }, corePump: 10, injector: 10, solar: 25, dock: 700, impulse: 75, impulseStartSecs: 5, impulsePump: 10, comms: 10, batteryOut: 150, batteryCap: 3000, batteryCharge: 50, console: 2, breachSecs: 5 };
 const BUS_MAX = { A: 300, B: 300, C: 300, EPS: 1000 };
 // Supplies: the warp core burns antimatter and deuterium (per second, at full
 // output; less as it gives less), each impulse drive deuterium while it runs.
@@ -1110,6 +1123,7 @@ const SUBSYSTEMS = {
   injector: { parent: 'core', ties: ['A'], name: 'antimatter injector' },
   portPump: { parent: 'impulsePort', ties: ['B'], name: 'deuterium pump' },
   starboardPump: { parent: 'impulseStarboard', ties: ['B'], name: 'deuterium pump' },
+  forcefields: { parent: 'Security', ties: ['B'], name: 'force field emitters' },
   rf: { parent: 'Communications', ties: ['B'], name: 'local RF (calls aboard)' },
   radio: { parent: 'Communications', ties: ['B'], name: 'radio (hails, ship-to-ship calls)' },
   subspace: { parent: 'Communications', ties: ['B'], name: 'subspace relay (data links)' },
@@ -1212,6 +1226,7 @@ function freshEng(saved, { cold = false } = {}) {
     taps: Object.fromEntries(BUSES.map((X) => { const t = s.taps?.[X]; return [X, typeof t === 'number' ? Math.max(0, Math.min(BUS_MAX[X], t)) : t === false ? 0 : t === true || X !== 'C' ? BUS_MAX[X] : 0]; })), ties,
 
     transfer: null, feed: 0, fed: 0, // power offered to a ship docked with us, and what actually went
+    forcefields: Array.isArray(s.forcefields) ? s.forcefields.filter((st) => STATIONS.includes(st) && st !== 'Security') : [], // consoles Security has sealed
     // Docked with another ship: kept across restarts (it's checked once both are back).
     dockedShip: typeof s.dockedShip === 'string' ? shipKey(s.dockedShip) : null, partnerGoneAt: typeof s.dockedShip === 'string' ? Date.now() : 0,
     battery: { charge: Number.isFinite(s.battery?.charge) ? Math.max(0, Math.min(GRID.batteryCap, s.battery.charge)) : GRID.batteryCap },
@@ -1224,7 +1239,7 @@ const savedEng = (k) => {
   const e = engOf(k);
   return {
     core: e.core === 'starting' ? 'offline' : e.core, drives: Object.fromEntries(DRIVES.map((d) => [d, e.drives[d].state === 'running' ? 'running' : 'off'])),
-    antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, battery: { charge: Math.round(e.battery.charge) }, docked: e.docked,
+    antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, battery: { charge: Math.round(e.battery.charge) }, docked: e.docked,
     ...(e.dockedShip ? { dockedShip: shipName(e.dockedShip) } : {}),
   };
 };
@@ -1333,6 +1348,7 @@ function flow(k) {
     ...DRIVES.map((d) => [`sub:${d}Pump`, e.drives[d].state === 'starting' ? GRID.impulsePump : 0]), // running drives power their own pumps
     ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => u.station === st).length * GRID.console]),
     ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
+    ['sub:forcefields', e.forcefields.length * GRID.forcefield],
     ['feed', Math.max(0, net)],
     ...SYSTEM_PRIORITY.map((sys) => [`system:${sys}`, sys === 'tractor' ? (e.towing ? TRACTOR.draw : 0) : demand[sys]]),
   ];
@@ -1403,8 +1419,10 @@ function flow(k) {
 }
 const gridChanged = (k) => { flowCache.delete(k); scheduleNav(); };
 // A console with no power on its bus is dark (ops and Engineering's grid controls aside).
-const consoleDark = (ws) => flow(ws.shipKey).consoleOk[ws.station] === false;
-const darkNote = (ws) => send(ws, { type: 'notice', text: `${ws.station}: console offline, no power on its bus` });
+// A console Security has sealed with a force field (while the emitters have power).
+const sealed = (k, station) => engOf(k).forcefields.includes(station) && flow(k).subOk.forcefields !== false;
+const consoleDark = (ws) => sealed(ws.shipKey, ws.station) || flow(ws.shipKey).consoleOk[ws.station] === false;
+const darkNote = (ws) => send(ws, { type: 'notice', text: sealed(ws.shipKey, ws.station) ? `${ws.station}: console sealed by a Security force field` : `${ws.station}: console offline, no power on its bus` });
 // Communications' subsystems: local RF (calls aboard), radio (hails, calls
 // between ships), subspace relay (data links). Starbases always have them.
 const commsUp = (k, name) => isBase(k) || !present(k) || flow(k).subOk[name] !== false;
@@ -1462,7 +1480,7 @@ function gridView(k) {
     towing: e.towing ? shipName(e.towing) : null, towedBy: tower ? shipName(tower) : null,
     selfDestruct: e.selfDestruct ? { seconds: Math.max(0, Math.ceil((e.selfDestruct.at - Date.now()) / 1000)), by: e.selfDestruct.by } : null,
     buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: Math.round(b.need), have: Math.round(b.have), src: r(b.src), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
-    consoleOk: f.consoleOk, stationSystems: STATION_SYSTEMS, subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
+    consoleOk: f.consoleOk, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, stationSystems: STATION_SYSTEMS, subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
     tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: BUS_MAX,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
   };
@@ -1474,6 +1492,7 @@ function gridCommand(ws, msg) {
   const key = ws.shipKey, e = engOf(key);
   const note = (text) => send(ws, { type: 'notice', text: `Engineering: ${text}` });
   if (ws.station !== 'Engineering') return send(ws, { type: 'notice', text: 'Only Engineering runs the power grid' });
+  if (sealed(key, 'Engineering')) return note('the console is sealed by a Security force field');
   const said = [];
   const NAME = { thrustersPort: 'port maneuvering thrusters', thrustersStarboard: 'starboard maneuvering thrusters', crosslink: 'bus crosslink', solar: 'solar', dock: 'dock power', ship: 'docked-ship power', core: 'warp core', battery: 'batteries', containment: 'antimatter containment', impulsePort: 'port impulse drive', impulseStarboard: 'starboard impulse drive' };
   const feeds = (list) => (list.length ? list.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(' + ') : 'off');
@@ -2447,8 +2466,8 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if ((msg.type === 'helm' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return consoleDark(ws) && msg.type !== 'power' ? darkNote(ws) : navCommand(ws, msg);
-    if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : crewCommand(ws, msg);
+    if ((msg.type === 'helm' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return (msg.type === 'power' ? sealed(ws.shipKey, ws.station) : consoleDark(ws)) ? darkNote(ws) : navCommand(ws, msg);
+    if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : crewCommand(ws, msg);
     if (['lock', 'fire', 'repair', 'arm'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : combatCommand(ws, msg);
     if (msg.type === 'grid' && ws.id) return gridCommand(ws, msg); // emergency power: works with the console dark
     if (msg.type === 'tractor' && ws.id) return consoleDark(ws) ? darkNote(ws) : tractorCommand(ws, msg);

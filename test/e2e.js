@@ -949,6 +949,15 @@ const audioBytes = (page) => page.evaluate(async () => {
     await worf.waitForSelector('.bcast--alert:has-text("Security: rand")', { state: 'attached' });
     step('Security: the force field refused a beam-in; with it down, Security was alerted when rand beamed aboard');
 
+    // Security seals the Helm console with a force field: Helm's orders are refused until it drops.
+    await worf.click('#sec-fields button[data-station="Helm"]');
+    await worf.waitForSelector('#sec-fields button[data-station="Helm"][aria-pressed="true"]');
+    helm({ warp: 0 });
+    await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /console sealed by a Security force field/.test(m.text)));
+    await worf.click('#sec-fields button[data-station="Helm"]');
+    await worf.waitForSelector('#sec-fields button[data-station="Helm"][aria-pressed="false"]');
+    step('Security sealed the Helm console with a force field (its orders refused), then dropped it');
+
     // Security confines alice to quarters: she can call Security, not the First Officer.
     const riker = await openAs(browser, 'riker', 'riker', 'Enterprise', 'First Officer');
     await riker.waitForFunction(() => window.__voice.myName === 'riker');
