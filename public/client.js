@@ -80,8 +80,24 @@ function connect() {
 // are, reload once the relay is back, and rejoin. Calls aren't resumed.
 const REJOIN = 'stchat-rejoin';
 let reloading = false;
+// Kept up to date while signed in (the screen showing too), so a refresh
+// by hand comes back the same way.
+const shownScreen = () => [...document.querySelectorAll('[data-screen]')].find((x) => !x.hidden)?.dataset.screen;
+function saveRejoin() {
+  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: me.station, screen: shownScreen() })); } catch {}
+}
+window.addEventListener("screenchange", () => { if (me) saveRejoin(); });
+window.addEventListener('pagehide', saveRejoin);
+let pendingScreen = null;
+// After rejoining: back to the screen it was on, if this station has it.
+function restoreScreen() {
+  const id = pendingScreen;
+  pendingScreen = null;
+  if (id && document.querySelector(`[data-screen="${CSS.escape(id)}"]`)) showScreen(id);
+  saveRejoin();
+}
 function prepareReload(restart) {
-  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: me.station })); } catch {}
+  saveRejoin();
   reloading = true;
   log(restart ? 'the comm relay is restarting: back in a moment' : 'consoles updated: reloading');
   if (!restart) setTimeout(() => location.reload(), 300);
@@ -102,7 +118,7 @@ function tryRejoin() {
   if (!rejoin || me || !ships.some((x) => x.computer && x.name.toLowerCase() === rejoin.ship.toLowerCase())) return;
   const r = rejoin;
   rejoin = null;
-  try { sessionStorage.removeItem(REJOIN); } catch {}
+  pendingScreen = r.screen || null;
   if (r.station === 'Operations' && opsKeyRequired) { $('name').value = r.name; return; } // needs the code: sign in by hand
   if (r.station === 'Operations') send({ type: 'operator', name: r.name, ship: r.ship });
   else send({ type: 'register', name: r.name, ship: r.ship, station: r.station });
@@ -198,6 +214,7 @@ function showStation() {
   renderTraffic();
   renderCommLinks();
   showScreen(stationView.sections[0].id);
+  restoreScreen();
 }
 
 // The Station screen: any other station, Operations included.
@@ -1131,6 +1148,7 @@ function showOps() {
   ops = createOps({ send, comms, me: () => me });
   fillReassign();
   showScreen('status');
+  restoreScreen();
 }
 
 // Leaving the ops station for another one.

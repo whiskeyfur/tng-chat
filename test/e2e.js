@@ -1224,6 +1224,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await geordi.isChecked('#ties-battery input[data-node="A"]'), battTied, 'the refused tap changed nothing');
     assert.equal(await geordi.evaluate(() => localStorage.getItem('stchat-grid-order')), 'shutdown');
     await geordi.click('#grid-order-operations');
+    // A refresh comes back signed in, at the same station, on the same screen.
+    await geordi.reload();
+    await geordi.waitForFunction(() => window.__voice.me?.station === 'Engineering' && window.__voice.myName === 'geordi');
+    await geordi.waitForSelector('[data-screen="st-grid"]:not([hidden])');
+    step('a refresh rejoined geordi at Engineering, on the power grid screen');
     await geordi.close();
     step('the grid table: Operations order (power sources, crosslink, batteries, consoles), the Startup checklist and Shutdown in reverse, a locked step refusing a tap; the tractor beam on the EPS');
 
