@@ -163,7 +163,7 @@ function broadcastOps(key) {
   // (crewless ships too: a data link can be forced onto them)
   const crewless = [...cores.keys()].filter((k2) => !isBase(k2) && !crewOf(k2).length);
   const otherShips = [...new Set([...[...operators].map((op) => op.shipKey), ...BASE_KEYS, ...crewless])]
-    .filter((k) => k !== key && commsOk(key, k)).map(shipName).sort();
+    .filter((k) => k !== key && (commsOk(key, k) || hardLine(key, k))).map(shipName).sort();
   const describe = (h) => ({ id: h.id, fromShip: shipName(h.fromShip), toShip: shipName(h.toShip), caller: peerInfo(h.caller) });
   const all = [...hails.values()];
   const requests = [...linkRequests.values()].map((r) => ({ id: r.id, fromShip: shipName(r.fromShip), toShip: shipName(r.toShip), from: r.fromShip, to: r.toShip }));
@@ -382,9 +382,11 @@ function operatorMessage(op, msg) {
       // Nobody aboard at all (only its computer): the link is forced, nobody's there to refuse it.
       const crewless = present(target) && !isBase(target) && !crewOf(target).length;
       if (!opsOf(target).length && !isBase(target) && !crewless) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
-      if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
-      if (!commsUp(op.shipKey, 'subspace')) return fail('our subspace relay has no power: data links need it');
-      if (!commsUp(target, 'subspace')) return fail(`the ${shipName(target)}'s subspace relay is down`);
+      if (!hardLine(op.shipKey, target)) {
+        if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
+        if (!commsUp(op.shipKey, 'subspace')) return fail('our subspace relay has no power: data links need it');
+        if (!commsUp(target, 'subspace')) return fail(`the ${shipName(target)}'s subspace relay is down`);
+      }
       if (links.has(linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already open`);
       if ([...linkRequests.values()].some((r) => linkKey(r.fromShip, r.toShip) === linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already being negotiated`);
       if (crewless && !opsOf(target).length) {
@@ -414,8 +416,8 @@ function operatorMessage(op, msg) {
       const other = msg.type === 'link-cancel' ? req.toShip : req.fromShip;
       if (msg.type === 'link-accept') {
         if (!opsOf(other).length) { broadcastOps(op.shipKey); return fail(`no operator on duty aboard the ${shipName(other)}`); }
-        if (!commsOk(op.shipKey, other)) { broadcastOps(op.shipKey); return fail(`the ${shipName(other)} is out of subspace range (${rangeText(op.shipKey, other)})`); }
-        if (!commsUp(op.shipKey, 'subspace') || !commsUp(other, 'subspace')) { broadcastOps(op.shipKey); return fail('a subspace relay is down: no data link'); }
+        if (!hardLine(op.shipKey, other) && !commsOk(op.shipKey, other)) { broadcastOps(op.shipKey); return fail(`the ${shipName(other)} is out of subspace range (${rangeText(op.shipKey, other)})`); }
+        if (!hardLine(op.shipKey, other) && (!commsUp(op.shipKey, 'subspace') || !commsUp(other, 'subspace'))) { broadcastOps(op.shipKey); return fail('a subspace relay is down: no data link'); }
         links.add(linkKey(req.fromShip, req.toShip));
         opLog(other, `the ${shipName(op.shipKey)} accepted: data link open`);
         refreshNetworks([op.shipKey]);
@@ -876,7 +878,7 @@ function scheduleNav() {
     for (const l of [...links]) {
       const [a, b] = l.split('|');
       const relayDown = !commsUp(a, 'subspace') || !commsUp(b, 'subspace');
-      if ((!commsOk(a, b) || relayDown) && present(a) && present(b)) {
+      if (!hardLine(a, b) && (!commsOk(a, b) || relayDown) && present(a) && present(b)) {
         links.delete(l);
         for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} lost: ${relayDown ? 'a subspace relay is down' : 'out of subspace range'}`);
         refreshNetworks([a, b]);
@@ -1309,7 +1311,7 @@ function autoAcceptLink(id) {
   if (!req) return; // answered already
   linkRequests.delete(id);
   const base = shipName(req.toShip);
-  if (!opsOf(req.fromShip).length || !commsOk(req.fromShip, req.toShip) || !commsUp(req.fromShip, 'subspace')) { opLog(req.fromShip, `${base} could not open the data link`); broadcastAllOps(); return; }
+  if (!opsOf(req.fromShip).length || (!hardLine(req.fromShip, req.toShip) && (!commsOk(req.fromShip, req.toShip) || !commsUp(req.fromShip, 'subspace')))) { opLog(req.fromShip, `${base} could not open the data link`); broadcastAllOps(); return; }
   links.add(linkKey(req.fromShip, req.toShip));
   opLog(req.fromShip, `${base} (automated) accepted: data link open`);
   opLog(req.toShip, `data link with the ${shipName(req.fromShip)} open (automated)`);
@@ -1773,6 +1775,10 @@ function dockCommand(ws, msg) {
   for (const u of crewOf(key)) send(u, { type: 'notice', text: `Helm: docked at ${base.name}` });
   gridChanged(key);
 }
+
+// Docked vessels are joined by a hard line through the dock: always in data
+// link reach of each other, whatever their sensors or subspace relays.
+const hardLine = (a, b) => present(a) && present(b) && dockedWith(a).includes(b);
 
 // The vessels docked with this one: its starbase and the ship docked with it
 // (for a starbase, every ship docked there).

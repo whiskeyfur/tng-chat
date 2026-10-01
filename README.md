@@ -73,6 +73,7 @@ Comms opens an LCARS modal, the same for every role, ops included:
 
 Ships have a real position in a 1000 × 1000 sector, flown by their ship's computer (new ships start cold, docked at a random starbase: see Supplies and cold starts; `--position x,y` sets where instead, and `--warm` starts them powered up and fuelled). **Helm** sets course and speed: impulse is 0.5 units a second, warp *w* is 2·*w*^1.8 (warp 9 crosses the sector in about ten seconds); heading for another ship tracks it and stops 5 units short. **Science** watches everything within **sensor range (600)**, scans ships and plots courses that Helm can engage with one click. Distance now matters everywhere:
 
+- **Hard line:** vessels docked together (a ship at a starbase, or two ships) are always in data-link reach of each other, through the dock, whatever their sensors or subspace relays.
 - **Subspace range (400):** hails, data links and transfers to another ship need it. Ops only list ships in range to hail or link, and a data link drops when the ships drift out of range.
 - **Transporter range (20):** beaming needs the ships close: have Helm intercept the other ship first.
 

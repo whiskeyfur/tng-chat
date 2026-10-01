@@ -1156,6 +1156,19 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /containment can't be switched off/.test(m.text)));
     step('batteries tied to Bus A and B and the A-B crosslink on; the warp core (EPS only) and batteries (no EPS) refused other ties; containment could not be left without a feed');
 
+    // Docked, a hard line: the Enterprise links to Starbase 12 with its subspace relay untied.
+    laforge.send({ type: 'grid', ties: { 'sub:subspace': [] } });
+    await waitFor(() => laforge.nav()?.own.grid.subOk.subspace === false);
+    await screen(op, 'link');
+    await op.selectOption('#link-ship', 'Starbase 12');
+    await op.click('#link-form button');
+    await op.waitForFunction(() => window.__operator.network.includes('Starbase 12'), null, { timeout: 15000 });
+    await screen(op, 'link');
+    await op.click('#links li:has-text("Starbase 12") button');
+    await op.waitForFunction(() => !window.__operator.network.includes('Starbase 12'));
+    laforge.send({ type: 'grid', ties: { 'sub:subspace': ['B'] } });
+    step('docked at Starbase 12, the Enterprise opened a data link to it over the hard line with its subspace relay unpowered');
+
     // Every subsystem is listed under its console in the grid table, Security's emitters included.
     const geordi = await openAs(browser, 'geordi', 'geordi', 'Enterprise', 'Engineering');
     await screen(geordi, 'st-grid');
