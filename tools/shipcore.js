@@ -210,7 +210,9 @@ function onMessage(raw, isBinary) {
       for (const k of ['alert', 'lockout', 'combat', 'eng']) if (k in msg.set) store.nav[k] = msg.set[k];
       // Destroyed: rebuilt at a starbase.
       if (msg.set.respawn) { Object.assign(store.nav, { x: msg.set.respawn.x, y: msg.set.respawn.y, warp: 0, dest: null }); delete store.nav.arrived; log(`${store.ship}: destroyed, rebuilt at ${msg.set.respawn.x}, ${msg.set.respawn.y}`); }
-      const said = Object.entries(msg.set).filter(([k]) => !['combat', 'eng', 'respawn'].includes(k));
+      // Towed by another ship's tractor beam: moved along behind it.
+      if (msg.set.moveTo) { Object.assign(store.nav, { x: msg.set.moveTo.x, y: msg.set.moveTo.y, heading: msg.set.moveTo.heading ?? store.nav.heading, warp: 0, dest: null }); delete store.nav.arrived; }
+      const said = Object.entries(msg.set).filter(([k]) => !['combat', 'eng', 'respawn', 'moveTo'].includes(k));
       if (said.length) log(`${store.ship}: ${said.map(([k, v]) => `${k} ${v}`).join(', ')}`);
       store.saveNav();
       sendNav(store);

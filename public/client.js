@@ -370,13 +370,14 @@ function renderCombat() {
   const button = (text, id, onclick, extra = '') => el('button', { type: 'button', className: `lcars-button lcars-button--pill ${extra}`, id, textContent: text, onclick });
   const changed = (node, ...state) => { const sig = JSON.stringify(state); if (node.dataset.sig === sig) return false; node.dataset.sig = sig; return true; };
   const NAMES = Object.fromEntries(POWER);
-  const feed = (v) => (v === 'EPS' ? 'the EPS' : v ? `Bus ${v}` : 'off');
+  const feeds = (list) => (list.length ? list.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(' + ') : 'nothing');
   combatAt = Date.now();
 
   // Warnings on every console aboard; a weapons lock on us for Tactical and the Captain.
   bc.setAlert('fire', c.underFire ? `Taking fire from the ${c.underFire} · shields ${ownShip()?.shields ? `${c.shield}%` : 'down'} · hull ${c.hull}%` : null);
   bc.setAlert('locked', c.lockedBy.length && ['Tactical', 'Captain'].includes(me.station) ? `Weapons lock: the ${c.lockedBy.join(', the ')} ${c.lockedBy.length > 1 ? 'have' : 'has'} locked on us` : null, { level: 'yellow' });
-  bc.setAlert('breach', grid.breach != null ? `Antimatter containment failing: core breach in ${grid.breach} s (no power from ${feed(grid.containment)})` : null);
+  bc.setAlert('breach', grid.breach != null ? `Antimatter containment failing: core breach in ${grid.breach} s (no power from ${feeds(grid.ties.containment)})` : null);
+  bc.setAlert('tractor', grid.towedBy ? `Held in the ${grid.towedBy}'s tractor beam` : null, { level: 'yellow' });
   bc.setAlert('selfdestruct', grid.selfDestruct ? `Self-destruct in ${grid.selfDestruct.seconds} s · ordered by ${grid.selfDestruct.by}` : null);
 
   // This console goes dark when its bus has no power (comms still work).
@@ -398,6 +399,10 @@ function renderCombat() {
           button('Lock weapons', 'weapons-lock', () => sel.value && send({ type: 'lock', ship: sel.value }), 'lcars-button--alert'),
           button('Release', 'weapons-release', () => send({ type: 'lock', ship: null }))),
         el('p', { className: 'st-state', id: 'weapons-lock-state' }),
+        el('div', { className: 'ops-form' },
+          button('Tractor beam', 'tractor-lock', () => sel.value && send({ type: 'tractor', ship: sel.value })),
+          button('Release tractor', 'tractor-release', () => send({ type: 'tractor', ship: null })),
+          el('span', { className: 'ops-hint', id: 'tractor-state' })),
         el('div', { className: 'ops-form wp-fire' },
           button('Arm phasers', 'arm-phasers', () => send({ type: 'arm', on: !lastNav?.own?.combat?.phaser.armed })),
           button('Fire phasers', 'fire-phaser', () => send({ type: 'fire', weapon: 'phaser' }), 'lcars-button--alert'),
@@ -420,6 +425,8 @@ function renderCombat() {
     lockState.textContent = c.lock ? `Locked on the ${c.lock.name} · ${c.lock.distance} units · shields ${c.lock.shields ? `up, ${c.lock.shield}%` : 'down'} · hull ${c.lock.hull}%` : 'No weapons lock';
     lockState.toggleAttribute('data-up', !!c.lock);
     wp.querySelector('#weapons-release').disabled = !c.lock;
+    wp.querySelector('#tractor-release').disabled = !grid.towing;
+    wp.querySelector('#tractor-state').textContent = grid.towing ? `Towing the ${grid.towing} (warp 3 at most)` : grid.towedBy ? `Held in the ${grid.towedBy}'s tractor beam` : 'Tractor beam: holds a ship within 20 units with its shields down';
     const arm = wp.querySelector('#arm-phasers');
     arm.textContent = c.phaser.armed ? 'Stand down phasers' : 'Arm phasers';
     arm.setAttribute('aria-pressed', String(c.phaser.armed));
@@ -430,23 +437,26 @@ function renderCombat() {
   const gp = document.querySelector('[data-grid]');
   if (gp && changed(gp, grid, own.power)) {
     const status = gp.querySelector('#grid-status')?.textContent || '';
-    const choice = (id, label, value, options, onpick) => {
-      const s = el('select', { className: 'ops-select', id, ariaLabel: label }, ...options.map(([v, t]) => new Option(t, v)));
-      s.value = value ?? '';
-      s.onchange = () => onpick(s.value || null);
-      return el('label', { className: 'grid-choice' }, el('span', { textContent: label }), s);
-    };
-    const coreText = grid.core === 'online' ? `Online · ${grid.coreOutput} to the EPS` : grid.core === 'starting' ? `Starting · ${grid.start} of ${grid.startSecs} s on Bus A power` : 'Offline';
+    // A source's ties: any of Bus A, Bus B and the EPS (checkboxes).
+    const ties = (key, label) => el('div', { className: 'grid-ties', id: `ties-${key}` },
+      el('span', { className: 'grid-ties-label', textContent: label }),
+      ...['A', 'B', 'EPS'].map((n) => {
+        const box = el('input', { type: 'checkbox', checked: grid.ties[key].includes(n), ariaLabel: `${label}: ${n === 'EPS' ? 'EPS' : `Bus ${n}`}` });
+        box.dataset.node = n;
+        box.onchange = () => send({ type: 'grid', ties: { [key]: ['A', 'B', 'EPS'].filter((m) => (m === n ? box.checked : grid.ties[key].includes(m))) } });
+        return el('label', { className: 'grid-tie' }, box, el('span', { textContent: n === 'EPS' ? 'EPS' : `Bus ${n}` }));
+      }));
+    const coreText = grid.core === 'online' ? `Online · ${grid.coreOutput} to ${feeds(grid.ties.core)}` : grid.core === 'starting' ? `Starting · ${grid.start} of ${grid.startSecs} s on Bus A power` : grid.core === 'ejected' ? 'Ejected · solar and batteries only' : 'Offline';
     const busRow = (X) => {
       const b = grid.buses[X];
-      const srcs = Object.entries(b.src).filter(([, v]) => v > 0).map(([n, v]) => `${n === 'eps' ? 'EPS' : n} ${v}`).join(' + ') || 'nothing';
+      const srcs = Object.entries(b.src).filter(([, v]) => v > 0).map(([n, v]) => `${n === 'core' ? 'warp core' : n} ${v}`).join(' + ') || 'nothing';
       const sys = Object.entries(grid.systemBus).filter(([, v]) => v === X).map(([k]) => NAMES[k]);
       const consoles = Object.entries(grid.consoleBus).filter(([, v]) => v === X).map(([k]) => k);
       const li = el('li', { className: 'grid-bus' },
         el('b', { textContent: `Bus ${X}` }),
         el('span', { className: 'grid-load', textContent: `${b.have} of ${b.need} needed · from ${srcs}` }),
         el('span', { className: 'grid-state', textContent: !b.consolesOk ? 'DEAD: consoles dark' : b.fraction < 100 ? `Brownout: systems get ${b.fraction}%` : 'Nominal' }),
-        el('small', { textContent: `Systems: ${sys.join(', ')}${grid.containment === X ? ', antimatter containment' : ''}${X === 'A' ? ', warp core startup' : ''} · Consoles: ${consoles.join(', ')}` }));
+        el('small', { textContent: `Systems: ${sys.join(', ')}${grid.antimatter && grid.ties.containment.includes(X) ? ', antimatter containment' : ''}${X === 'A' ? ', warp core startup' : ''}${X === 'B' && grid.towing ? ', tractor beam' : ''} · Consoles: ${consoles.join(', ')}` }));
       li.dataset.bus = X;
       li.toggleAttribute('data-short', b.fraction < 100 || !b.consolesOk);
       return li;
@@ -455,18 +465,22 @@ function renderCombat() {
       el('div', { className: 'st-control' },
         el('p', { className: 'st-state', id: 'core-state', textContent: `Warp core (M/ARC): ${coreText}` }),
         el('div', { className: 'ops-form' },
-          grid.core === 'offline' ? button('Start warp core', 'core-start', () => send({ type: 'grid', core: 'start' })) : button('Shut down warp core', 'core-stop', () => send({ type: 'grid', core: 'stop' }), 'lcars-button--alert'),
-          ...['A', 'B'].map((X) => button(`EPS tap ${X}: ${grid.taps[X] ? 'open' : 'closed'}`, `tap-${X}`, () => send({ type: 'grid', tap: { bus: X, on: !grid.taps[X] } }), grid.taps[X] ? '' : 'lcars-button--alert')))),
-      el('div', { className: 'ops-form grid-sources' },
-        choice('grid-containment', 'Antimatter containment', grid.containment, [['A', 'Bus A'], ['B', 'Bus B'], ['EPS', 'EPS']], (v) => send({ type: 'grid', containment: v })),
-        choice('grid-battery', `Batteries ${grid.battery.charge}%${grid.battery.charging ? ' (charging)' : ''}`, grid.battery.bus, [['A', 'Bus A'], ['B', 'Bus B'], ['', 'Off']], (v) => send({ type: 'grid', battery: v })),
-        choice('grid-solar', 'Solar', grid.solar, [['A', 'Bus A'], ['', 'Off']], (v) => send({ type: 'grid', solar: v })),
-        choice('grid-dock', grid.docked ? `Dock power (${grid.docked})` : 'Dock power (not docked)', grid.dock, [['A', 'Bus A'], ['', 'Off']], (v) => send({ type: 'grid', dock: v }))),
-      el('p', { className: 'st-state grid-containment', id: 'containment-state', textContent: grid.breach != null ? `CONTAINMENT FAILING: breach in ${grid.breach} s` : `Containment holding, fed from ${feed(grid.containment)}` }),
+          grid.core === 'ejected' ? button('Install new warp core', 'core-refit', () => send({ type: 'grid', refit: true }))
+            : grid.core === 'offline' ? button('Start warp core', 'core-start', () => send({ type: 'grid', core: 'start' })) : button('Shut down warp core', 'core-stop', () => send({ type: 'grid', core: 'stop' }), 'lcars-button--alert'),
+          ...['A', 'B'].map((X) => button(`EPS tap ${X}: ${grid.taps[X] ? 'open' : 'closed'}`, `tap-${X}`, () => send({ type: 'grid', tap: { bus: X, on: !grid.taps[X] } }), grid.taps[X] ? '' : 'lcars-button--alert')),
+          ...(grid.antimatter ? [button('Eject warp core', 'core-eject', () => { if (confirm('Eject the warp core and antimatter pods? The ship is left with solar and batteries until a new core is installed at a starbase.')) send({ type: 'grid', eject: true }); }, 'lcars-button--alert')] : []))),
+      el('div', { className: 'grid-sources' },
+        ...(grid.antimatter ? [ties('containment', 'Antimatter containment')] : []),
+        ties('core', 'Warp core'),
+        ties('battery', `Batteries ${grid.battery.charge}%${grid.battery.charging ? ' (charging)' : grid.battery.supplying ? ' (supplying)' : ''}`),
+        ties('solar', 'Solar'),
+        ties('dock', grid.docked ? `Dock power (${grid.docked})` : 'Dock power (not docked)')),
+      el('p', { className: 'st-state grid-containment', id: 'containment-state', textContent: !grid.antimatter ? 'No antimatter aboard: core ejected' : grid.breach != null ? `CONTAINMENT FAILING: breach in ${grid.breach} s` : `Containment holding, fed from ${feeds(grid.ties.containment)}` }),
       el('ul', { className: 'st-list grid-buses' }, busRow('A'), busRow('B')),
       el('p', { className: 'ops-notice', id: 'grid-status', textContent: status }),
-      el('p', { className: 'ops-hint', textContent: `The core starts on Bus A power (${grid.startSecs} s), then feeds the EPS. Antimatter containment must always have power: if its feed fails, the core breaches in seconds. A short bus feeds containment first, then consoles, then shares the rest among its systems. Total drawn ${grid.drawn} (that's what other ships' sensors see).` }));
+      el('p', { className: 'ops-hint', textContent: `Tie each source to any of Bus A, Bus B and the EPS; the EPS reaches a bus through its open tap. The core starts on Bus A power (${grid.startSecs} s). Antimatter containment must always have power from one of its feeds, or the core breaches in seconds (ejecting the core ends that). Power goes to containment first, then consoles, then is shared among systems. EPS carrying ${grid.eps}; total drawn ${grid.drawn} (that's what other ships' sensors see).` }));
     gp.querySelector('#containment-state').toggleAttribute('data-up', grid.breach != null);
+    for (const box of gp.querySelectorAll('#ties-containment input')) box.disabled = box.checked && grid.ties.containment.length === 1; // never none
   }
 
   // Engineering: damage and repair crews.
@@ -494,14 +508,14 @@ function renderCombat() {
   if (ss) {
     const up = !!ownShip()?.shields;
     const damaged = POWER.filter(([k]) => c.damage[k] > 0).map(([k]) => NAMES[k].toLowerCase());
-    const speed = own.warp <= 0 ? (grid.docked ? `Docked at ${grid.docked}` : 'All stop') : own.warp < 1 ? 'Impulse' : `Warp ${+own.warp.toFixed(1)}`;
+    const speed = grid.towedBy ? `Towed by the ${grid.towedBy}` : own.warp <= 0 ? (grid.docked ? `Docked at ${grid.docked}` : 'All stop') : `${own.warp < 1 ? 'Impulse' : `Warp ${+own.warp.toFixed(1)}`}${grid.towing ? `, towing the ${grid.towing}` : ''}`;
     const items = [
       ['Alert status', own.alert && own.alert !== 'green' ? `${own.alert[0].toUpperCase()}${own.alert.slice(1)} alert` : 'Condition green', 'sky'],
       ['Shields', `${up ? 'Up' : 'Down'} · ${c.shield}%`, 'sky'],
       ['Hull integrity', `${c.hull}%`, 'gold'],
       ['Velocity', speed, 'orange'],
       ['Weapons', c.lock ? `Locked: the ${c.lock.name}` : c.phaser.armed ? 'Phasers armed' : 'Standby', 'red'],
-      ['Warp core', grid.core === 'online' ? 'Online' : grid.core === 'starting' ? 'Starting' : 'Offline', 'blue'],
+      ['Warp core', { online: 'Online', starting: 'Starting', offline: 'Offline', ejected: 'Ejected' }[grid.core], 'blue'],
       ['Damage', damaged.length ? damaged.join(', ') : 'None', 'peach'],
     ];
     if (changed(ss, items, grid.selfDestruct)) {

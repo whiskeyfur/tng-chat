@@ -696,7 +696,10 @@ function rangesOf(k) {
   const f = Math.max(0, Math.min(100, powerOf(k).sensors)) / 100;
   return { comms: COMMS_RANGE * f, sensors: SENSOR_RANGE * f, transporter: TRANSPORTER_RANGE * f };
 }
-const maxWarp = (k) => (powerOf(k).engines <= 0 ? 0 : Math.max(0.25, Math.round((powerOf(k).engines / 100) * 9 * 10) / 10));
+const maxWarp = (k) => {
+  const w = powerOf(k).engines <= 0 ? 0 : Math.max(0.25, Math.round((powerOf(k).engines / 100) * 9 * 10) / 10);
+  return eng.get(k)?.towing ? Math.min(w, TRACTOR.maxWarp) : w; // towing holds a ship back
+};
 // Both ships' sensors have to reach for subspace comms (hails, data links).
 const commsOk = (a, b) => a === b || distance(a, b) <= Math.min(rangesOf(a).comms, rangesOf(b).comms);
 const sensorOk = (a, b) => a === b || distance(a, b) <= rangesOf(a).sensors * signatureOf(b);
@@ -733,6 +736,7 @@ function scheduleNav() {
   if (navTimer) return;
   navTimer = setTimeout(() => {
     navTimer = null;
+    tow();
     for (const [k, t] of navTargets) {
       const nav = navState.get(k), tgt = navState.get(t), core = primaryCore.get(k);
       if (!nav?.dest || !tgt || !core || !sensorOk(k, t)) { navTargets.delete(k); continue; } // lost: carry on to where it was
@@ -828,6 +832,7 @@ function navCommand(ws, msg) {
     if (ws.station !== 'Helm') return note('Only Helm can set course and speed');
     const core = primaryCore.get(key);
     if (!core) return note("No ship's computer is flying the ship");
+    if (towedBy(key)) return note(`Helm: held in the ${shipName(towedBy(key))}'s tractor beam`);
     const order = { type: 'core-helm', ship: ws.ship };
     if (msg.dest) {
       const d = resolve(msg.dest);
@@ -979,91 +984,117 @@ function crewCommand(ws, msg) {
 
 // --- the power grid (Engineering) ----------------------------------------------------
 //
-// Power comes from four sources, each tied by Engineering to a bus:
-//  - solar collectors: a trickle, Bus A or off
-//  - dock power: plenty, Bus A or off, only while docked at a starbase
-//  - batteries: Bus A, Bus B or off; they run down while they supply power and
-//    recharge from spare power on their bus
+// Power comes from four sources. Engineering ties each one to any of Bus A,
+// Bus B and the EPS grid, in any combination (or none: off):
+//  - solar collectors: a trickle
+//  - dock power: plenty, only while docked at a starbase
+//  - batteries: run down while they supply power, recharge from spare power
 //  - the warp core (M/ARC): starts on Bus A power (a startup draw for a few
-//    seconds); once online it feeds the EPS grid, with taps to Bus A and Bus B
-//    that Engineering switches on or off
-// Antimatter containment always draws power, from Bus A, Bus B or straight
-// from the EPS (Engineering picks). It can only be switched off by
-// self-destruct: if it loses power for a few seconds, the core breaches and
-// the ship is destroyed.
-// Systems and consoles hang off the buses (SYSTEM_BUS, CONSOLE_BUS). A bus
-// short of power feeds containment and the core's startup first, then the
-// consoles (a console without power goes dark), then shares what's left
-// between its systems.
+//    seconds), then gives its full output
+// The EPS grid passes what's tied to it on to Bus A and Bus B through taps
+// Engineering opens or closes. Antimatter containment always draws power,
+// from any of Bus A, Bus B and the EPS (Engineering picks; any one that has
+// the power will do). It can only be switched off by self-destruct: with no
+// power for a few seconds, the core breaches and the ship is destroyed.
+// Engineering can eject the core and antimatter pods (no more breach, no more
+// core power: solar and batteries only) and install a new core when docked.
+// Systems and consoles hang off the buses (SYSTEM_BUS, CONSOLE_BUS). Power
+// goes first to containment, then the core's startup, consoles, a tractor beam
+// in use (Bus B), and what's left is shared between each bus's systems.
 
 const GRID = { core: 500, coreStartDraw: 60, coreStartSecs: 10, containment: 20, solar: 25, dock: 300, batteryOut: 150, batteryCap: 3000, batteryCharge: 50, console: 2, breachSecs: 5 };
 const BUSES = ['A', 'B'];
+const NODES = ['A', 'B', 'EPS'];
+const SOURCES = ['solar', 'dock', 'core', 'battery'];
 const SYSTEM_BUS = { lifeSupport: 'A', sensors: 'A', engines: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
 const busOf = (station) => CONSOLE_BUS[station] || 'B';
-// Starbases: dock to restock torpedoes, take dock power and repair faster.
-// A destroyed ship comes back docked at one of them.
+// Starbases: dock to restock torpedoes, take dock power, repair faster and
+// refit a warp core. A destroyed ship comes back docked at one of them.
 const STARBASES = [{ name: 'Starbase 47', x: 500, y: 120 }, { name: 'Starbase 12', x: 120, y: 860 }, { name: 'Starbase 74', x: 880, y: 820 }, { name: 'Deep Space 4', x: 860, y: 160 }];
 const DOCK_RANGE = 10;
 const SELF_DESTRUCT_SECS = Number(process.env.SELF_DESTRUCT_SECONDS) || 30;
 const BLAST = { range: 30, damage: 30 }; // a ship blowing up hurts ships close by
-const eng = new Map(); // ship key -> { core, start, taps, battery, solar, dock, containment, docked, breach, selfDestruct, dirty }
+// Tractor beam (Tactical): holds a ship whose shields are down and tows it.
+const TRACTOR = { range: 20, draw: 30, maxWarp: 3, behind: 3 };
+const eng = new Map(); // ship key -> { core, antimatter, start, taps, ties, battery, docked, breach, selfDestruct, towing, dirty }
 
+const DEFAULT_TIES = { solar: ['A'], dock: ['A'], core: ['EPS'], battery: ['B'], containment: ['A'] };
 function freshEng(saved) {
   const s = saved && typeof saved === 'object' ? saved : {};
-  const pick = (v, ok, d) => (ok.includes(v) ? v : d);
+  // Ties: a list of nodes (older saves had one bus, or null for off).
+  const tiesOf = (v, d) => (Array.isArray(v) ? NODES.filter((n) => v.includes(n)) : typeof v === 'string' ? NODES.filter((n) => n === v) : v === null ? [] : d);
+  const ties = Object.fromEntries(Object.entries(DEFAULT_TIES).map(([k, d]) => [k, tiesOf(s.ties?.[k] ?? (k === 'battery' ? s.battery?.bus : s[k]), d)]));
+  if (!ties.containment.length) ties.containment = DEFAULT_TIES.containment;
+  const antimatter = s.antimatter !== false;
   return {
-    core: pick(s.core, ['online', 'offline'], 'online'), start: 0, // a startup in progress starts over
-    taps: { A: s.taps?.A !== false, B: s.taps?.B !== false },
-    battery: { bus: pick(s.battery?.bus, ['A', 'B', null], 'B'), charge: Number.isFinite(s.battery?.charge) ? Math.max(0, Math.min(GRID.batteryCap, s.battery.charge)) : GRID.batteryCap },
-    solar: pick(s.solar, ['A', null], 'A'), dock: pick(s.dock, ['A', null], 'A'),
-    containment: pick(s.containment, ['A', 'B', 'EPS'], 'A'),
+    core: antimatter ? (s.core === 'offline' ? 'offline' : 'online') : 'ejected', antimatter, start: 0, // a startup in progress starts over
+    taps: { A: s.taps?.A !== false, B: s.taps?.B !== false }, ties,
+    battery: { charge: Number.isFinite(s.battery?.charge) ? Math.max(0, Math.min(GRID.batteryCap, s.battery.charge)) : GRID.batteryCap },
     docked: STARBASES.some((b) => b.name === s.docked) ? s.docked : null,
-    breach: 0, selfDestruct: null, dirty: false,
+    breach: 0, selfDestruct: null, towing: null, dirty: false,
   };
 }
 const engOf = (k) => { if (!eng.has(k)) eng.set(k, freshEng()); return eng.get(k); };
-const savedEng = (k) => { const e = engOf(k); return { core: e.core === 'starting' ? 'offline' : e.core, taps: e.taps, battery: { bus: e.battery.bus, charge: Math.round(e.battery.charge) }, solar: e.solar, dock: e.dock, containment: e.containment, docked: e.docked }; };
+const savedEng = (k) => { const e = engOf(k); return { core: e.core === 'starting' ? 'offline' : e.core, antimatter: e.antimatter, taps: e.taps, ties: e.ties, battery: { charge: Math.round(e.battery.charge) }, docked: e.docked }; };
+const towedBy = (k) => [...eng].find(([, e]) => e.towing === k)?.[0] || null;
 
 // Where each ship's power goes, worked out fresh (cached briefly: it's asked a lot).
 const flowCache = new Map();
 function flow(k) {
-  const hit = flowCache.get(k);
-  if (hit && Date.now() - hit.at < 200) return hit.f;
+  const cached = flowCache.get(k);
+  if (cached && Date.now() - cached.at < 200) return cached.f;
   const e = engOf(k), c = combatOf(k), a = allocOf(k);
   const demand = {};
   for (const s of SYSTEMS) demand[s] = s === 'weapons' && !c.armed ? 0 : Math.min(a[s], Math.max(0, 100 - c.damage[s]));
-  let eps = e.core === 'online' ? GRID.core : 0;
-  let containmentOk = false, drawn = 0;
-  if (e.containment === 'EPS') { containmentOk = eps >= GRID.containment; eps = Math.max(0, eps - GRID.containment); if (containmentOk) drawn += GRID.containment; }
-  const crew = crewOf(k);
-  const buses = {};
-  for (const X of BUSES) {
-    const core = (e.containment === X ? GRID.containment : 0) + (X === 'A' && e.core === 'starting' ? GRID.coreStartDraw : 0);
-    const consoles = crew.filter((u) => busOf(u.station) === X).length * GRID.console;
-    const systems = SYSTEMS.filter((s) => SYSTEM_BUS[s] === X).reduce((n, s) => n + demand[s], 0);
-    const need = core + consoles + systems;
-    const src = { solar: e.solar === X ? GRID.solar : 0, dock: e.dock === X && e.docked ? GRID.dock : 0, eps: 0, battery: 0 };
-    let have = src.solar + src.dock;
-    if (e.taps[X]) { src.eps = Math.min(eps, Math.max(0, need - have)); eps -= src.eps; have += src.eps; }
-    if (e.battery.bus === X && e.battery.charge > 0) { src.battery = Math.min(GRID.batteryOut, e.battery.charge, Math.max(0, need - have)); have += src.battery; }
-    if (e.containment === X) containmentOk = have >= GRID.containment;
-    drawn += Math.min(have, need);
-    buses[X] = {
-      need: Math.round(need), have: Math.round(have), src, core, consoles, systems,
-      coreOk: have >= core, consolesOk: have >= core + consoles,
-      fraction: systems ? Math.max(0, Math.min(1, (have - core - consoles) / systems)) : 1,
+  const cap = { solar: GRID.solar, dock: e.docked ? GRID.dock : 0, core: e.core === 'online' ? GRID.core : 0, battery: Math.min(GRID.batteryOut, e.battery.charge) };
+  const srcs = SOURCES.map((name) => ({ name, ties: e.ties[name], left: e.ties[name].length ? cap[name] : 0 }));
+  const buses = Object.fromEntries(BUSES.map((X) => [X, { need: 0, have: 0, src: {} }]));
+  let viaEps = 0;
+  // Draw up to amt for a node: from sources tied straight to it, then (for a
+  // bus with its tap open) from sources tied to the EPS. Batteries go last.
+  const take = (node, amt) => {
+    let got = 0;
+    const bus = buses[node];
+    const pull = (s, eps) => {
+      const t = Math.min(s.left, amt - got);
+      if (t <= 0) return;
+      s.left -= t; got += t;
+      if (eps) viaEps += t;
+      if (bus) bus.src[s.name] = (bus.src[s.name] || 0) + t;
     };
+    for (const last of [false, true]) { // batteries only when nothing else will do
+      for (const s of srcs) if ((s.name === 'battery') === last && s.ties.includes(node)) pull(s, node === 'EPS');
+      if (bus && e.taps[node]) for (const s of srcs) if ((s.name === 'battery') === last && s.ties.includes('EPS')) pull(s, true);
+    }
+    if (bus) { bus.need += amt; bus.have += got; }
+    return got;
+  };
+  // Containment first, from any of its feeds.
+  let contained = 0;
+  if (e.antimatter) for (const n of e.ties.containment) if (contained < GRID.containment) contained += take(n, GRID.containment - contained);
+  const containmentOk = !e.antimatter || contained >= GRID.containment;
+  const startOk = e.core !== 'starting' || take('A', GRID.coreStartDraw) >= GRID.coreStartDraw;
+  const crew = crewOf(k);
+  const consolesOk = {};
+  for (const X of BUSES) { const n = crew.filter((u) => busOf(u.station) === X).length * GRID.console; consolesOk[X] = take(X, n) >= n; }
+  const tractorOk = !e.towing || take('B', TRACTOR.draw) >= TRACTOR.draw;
+  for (const X of BUSES) {
+    const systems = SYSTEMS.filter((s) => SYSTEM_BUS[s] === X).reduce((n, s) => n + demand[s], 0);
+    const got = take(X, systems);
+    Object.assign(buses[X], { consolesOk: consolesOk[X], fraction: systems ? Math.min(1, got / systems) : 1 });
   }
-  // Batteries recharge from what their bus has spare (its own sources, or the EPS if tapped).
+  // Batteries recharge from what's left of sources that reach them.
+  const bt = e.ties.battery;
+  const reaches = (s) => s.ties.some((n) => bt.includes(n)) || (s.ties.includes('EPS') && bt.some((n) => BUSES.includes(n) && e.taps[n]));
+  const used = cap.battery - (bt.length ? srcs[3].left : cap.battery);
   let charging = 0;
-  const bb = e.battery.bus && buses[e.battery.bus];
-  if (bb && !bb.src.battery && e.battery.charge < GRID.batteryCap) {
-    const spare = Math.max(0, bb.src.solar + bb.src.dock + bb.src.eps - bb.need) + (e.taps[e.battery.bus] ? eps : 0);
-    charging = Math.min(GRID.batteryCharge, spare, GRID.batteryCap - e.battery.charge);
+  if (bt.length && used <= 0 && e.battery.charge < GRID.batteryCap) {
+    charging = Math.min(GRID.batteryCharge, GRID.batteryCap - e.battery.charge, srcs.slice(0, 3).filter(reaches).reduce((n, s) => n + s.left, 0));
   }
+  const drawn = SOURCES.reduce((n, name, i) => n + ((srcs[i].ties.length ? cap[name] : 0) - srcs[i].left), 0) + charging;
   const delivered = Object.fromEntries(SYSTEMS.map((s) => [s, demand[s] * buses[SYSTEM_BUS[s]].fraction]));
-  const f = { buses, demand, delivered, containmentOk, charging, drawn: drawn + charging };
+  const f = { buses, demand, delivered, containmentOk, startOk, tractorOk, batteryUsed: Math.max(0, used), charging, drawn, viaEps };
   flowCache.set(k, { at: Date.now(), f });
   return f;
 }
@@ -1075,41 +1106,56 @@ const darkNote = (ws) => send(ws, { type: 'notice', text: `${ws.station}: consol
 function gridView(k) {
   const e = engOf(k), f = flow(k);
   const near = STARBASES.find((b) => navState.has(k) && Math.hypot(navState.get(k).x - b.x, navState.get(k).y - b.y) <= DOCK_RANGE);
+  const tower = towedBy(k);
   return {
-    core: e.core, start: e.start, startSecs: GRID.coreStartSecs, coreOutput: GRID.core,
-    taps: e.taps, solar: e.solar, dock: e.dock, containment: e.containment, containmentOk: f.containmentOk,
+    core: e.core, antimatter: e.antimatter, start: e.start, startSecs: GRID.coreStartSecs, coreOutput: GRID.core,
+    taps: e.taps, ties: e.ties, containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
     breach: e.breach ? GRID.breachSecs - e.breach : null,
-    battery: { bus: e.battery.bus, charge: Math.round((e.battery.charge / GRID.batteryCap) * 100), charging: Math.round(f.charging) },
+    battery: { charge: Math.round((e.battery.charge / GRID.batteryCap) * 100), charging: Math.round(f.charging), supplying: Math.round(f.batteryUsed) },
     docked: e.docked, near: near?.name || null,
+    towing: e.towing ? shipName(e.towing) : null, towedBy: tower ? shipName(tower) : null,
     selfDestruct: e.selfDestruct ? { seconds: Math.max(0, Math.ceil((e.selfDestruct.at - Date.now()) / 1000)), by: e.selfDestruct.by } : null,
-    buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: b.need, have: b.have, src: Object.fromEntries(Object.entries(b.src).map(([n, v]) => [n, Math.round(v)])), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
+    buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: Math.round(b.need), have: Math.round(b.have), src: Object.fromEntries(Object.entries(b.src).map(([n, v]) => [n, Math.round(v)])), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
     systemBus: SYSTEM_BUS, consoleBus: CONSOLE_BUS, drawn: Math.round(f.drawn),
   };
 }
 
-// Engineering's grid controls: the warp core, EPS taps, sources and containment.
+// Engineering's grid controls: the warp core, EPS taps, ties, ejecting and refitting the core.
 function gridCommand(ws, msg) {
   const key = ws.shipKey, e = engOf(key);
   const note = (text) => send(ws, { type: 'notice', text: `Engineering: ${text}` });
   if (ws.station !== 'Engineering') return send(ws, { type: 'notice', text: 'Only Engineering runs the power grid' });
   const said = [];
+  const NAME = { solar: 'solar', dock: 'dock power', core: 'warp core', battery: 'batteries', containment: 'antimatter containment' };
+  const feeds = (list) => (list.length ? list.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(' + ') : 'off');
+  if (msg.eject) {
+    if (!e.antimatter) return note('the warp core is already gone');
+    Object.assign(e, { core: 'ejected', antimatter: false, start: 0, breach: 0 });
+    said.push('WARP CORE AND ANTIMATTER PODS EJECTED: solar and batteries only');
+    for (const u of crewOf(key)) if (u !== ws) send(u, { type: 'notice', text: `Engineering: the warp core has been ejected (${ws.name})` });
+  }
+  if (msg.refit) {
+    if (e.antimatter) return note('the ship already has a warp core');
+    if (!e.docked) return note('a new warp core can only be installed at a starbase');
+    Object.assign(e, { core: 'offline', antimatter: true, start: 0 });
+    said.push(`new warp core and antimatter installed at ${e.docked} (offline: start it up)`);
+  }
   if (msg.core === 'start' && e.core === 'offline') {
     e.core = 'starting'; e.start = 0; flowCache.delete(key);
-    if (!flow(key).buses.A.coreOk) { e.core = 'offline'; flowCache.delete(key); return note(`not enough power on Bus A to start the warp core (needs ${GRID.coreStartDraw} for ${GRID.coreStartSecs} s; tie the batteries or dock power to Bus A)`); }
+    if (!flow(key).startOk) { e.core = 'offline'; flowCache.delete(key); return note(`not enough power on Bus A to start the warp core (needs ${GRID.coreStartDraw} for ${GRID.coreStartSecs} s; tie the batteries or dock power to Bus A)`); }
     said.push('warp core startup');
-  } else if (msg.core === 'stop' && e.core !== 'offline') {
+  } else if (msg.core === 'start' && e.core === 'ejected') return note('there is no warp core: install a new one at a starbase');
+  else if (msg.core === 'stop' && (e.core === 'online' || e.core === 'starting')) {
     e.core = 'offline'; e.start = 0;
     said.push('warp core shut down');
-    if (e.containment === 'EPS') said.push('WARNING: containment is on the EPS');
   }
   if (msg.tap && BUSES.includes(msg.tap.bus)) { e.taps[msg.tap.bus] = !!msg.tap.on; said.push(`EPS tap to Bus ${msg.tap.bus} ${msg.tap.on ? 'open' : 'closed'}`); }
-  if ('battery' in msg && ['A', 'B', null].includes(msg.battery)) { e.battery.bus = msg.battery; said.push(`batteries ${msg.battery ? `on Bus ${msg.battery}` : 'off'}`); }
-  if ('solar' in msg && ['A', null].includes(msg.solar)) { e.solar = msg.solar; said.push(`solar ${msg.solar ? 'on Bus A' : 'off'}`); }
-  if ('dock' in msg && ['A', null].includes(msg.dock)) { e.dock = msg.dock; said.push(`dock power ${msg.dock ? 'on Bus A' : 'off'}`); }
-  if ('containment' in msg) {
-    if (!['A', 'B', 'EPS'].includes(msg.containment)) return note('containment can only be fed from Bus A, Bus B or the EPS (switching it off takes a self-destruct)');
-    e.containment = msg.containment;
-    said.push(`antimatter containment fed from ${msg.containment === 'EPS' ? 'the EPS' : `Bus ${msg.containment}`}`);
+  for (const [k, v] of Object.entries(msg.ties && typeof msg.ties === 'object' ? msg.ties : {})) {
+    if (!(k in DEFAULT_TIES) || !Array.isArray(v)) continue;
+    const list = NODES.filter((n) => v.includes(n));
+    if (k === 'containment' && !list.length) return note('antimatter containment can\'t be switched off (only self-destruct does that): leave it at least one feed');
+    e.ties[k] = list;
+    said.push(`${NAME[k]} ${k === 'containment' ? 'fed from' : 'tied to'} ${feeds(list)}`);
   }
   if (!said.length) return;
   e.dirty = true;
@@ -1155,6 +1201,68 @@ function selfDestructCommand(ws, msg) {
   scheduleNav();
 }
 
+// Tactical locks a tractor beam on a ship close by with its shields down (or lets go).
+function tractorCommand(ws, msg) {
+  const key = ws.shipKey, e = engOf(key);
+  const note = (text) => send(ws, { type: 'notice', text: `Tactical: ${text}` });
+  if (ws.station !== 'Tactical') return send(ws, { type: 'notice', text: 'Only Tactical runs the tractor beam' });
+  if (!msg.ship) return e.towing ? releaseTractor(key, `released by ${ws.name}`) : undefined;
+  const t = shipKey(clean(msg.ship));
+  if (t === key) return note('cannot put a tractor beam on our own ship');
+  if (!cores.has(t) || !navState.has(t) || !sensorOk(key, t)) return note(`the ${clean(msg.ship)} is not on sensors`);
+  if (distance(key, t) > TRACTOR.range) return note(`the ${shipName(t)} is out of tractor range (${Math.round(distance(key, t))} units; get within ${TRACTOR.range})`);
+  if (shields.has(t)) return note(`the ${shipName(t)} has its shields up: the tractor beam can't hold it`);
+  if (towedBy(key)) return note('we are held in a tractor beam ourselves');
+  if (towedBy(t) && towedBy(t) !== key) return note(`the ${shipName(t)} is already in the ${shipName(towedBy(t))}'s tractor beam`);
+  if (engOf(t).towing === key) return note(`the ${shipName(t)} has us in its tractor beam`);
+  if (e.towing && e.towing !== t) releaseTractor(key, 'switching target');
+  e.towing = t;
+  flowCache.delete(key);
+  if (!flow(key).tractorOk) { e.towing = null; flowCache.delete(key); return note(`not enough power on Bus B for the tractor beam (needs ${TRACTOR.draw})`); }
+  if (engOf(t).docked) { opLog(t, `undocked from ${engOf(t).docked} by a tractor beam`); engOf(t).docked = null; engOf(t).dirty = true; flowCache.delete(t); }
+  navTargets.delete(t);
+  const core = primaryCore.get(t);
+  if (core && navState.get(t).warp > 0) send(core, { type: 'core-helm', ship: shipName(t), warp: 0 });
+  opLog(key, `${ws.name}: tractor beam on the ${shipName(t)}`);
+  opLog(t, `held in the ${shipName(key)}'s tractor beam`);
+  for (const u of crewOf(t)) send(u, { type: 'notice', text: `The ${shipName(key)} has us in a tractor beam (raise shields to break free)` });
+  note(`tractor beam locked on the ${shipName(t)}: Helm is limited to warp ${TRACTOR.maxWarp} while towing`);
+  enforcePower(key);
+  scheduleNav();
+}
+
+function releaseTractor(k, why) {
+  const e = engOf(k), t = e.towing;
+  if (!t) return;
+  e.towing = null;
+  flowCache.delete(k);
+  opLog(k, `tractor beam on the ${shipName(t)} released: ${why}`);
+  opLog(t, `released from the ${shipName(k)}'s tractor beam: ${why}`);
+  tellStations(k, ['Tactical', 'Helm'], `Tactical: tractor beam on the ${shipName(t)} released (${why})`);
+  for (const u of crewOf(t)) send(u, { type: 'notice', text: `Released from the ${shipName(k)}'s tractor beam (${why})` });
+  scheduleNav();
+}
+
+// Towed ships follow just behind the ship towing them.
+function tow() {
+  for (const [k, e] of eng) {
+    const t = e.towing;
+    if (!t) continue;
+    const why = !cores.has(k) || !cores.has(t) ? 'lost contact' : shields.has(t) ? `the ${shipName(t)} raised shields` : !flow(k).tractorOk ? 'not enough power on Bus B' : consoleDarkFor(k, 'Tactical') ? 'no power to Tactical' : null;
+    if (why) { releaseTractor(k, why); continue; }
+    const n = navState.get(k), m = navState.get(t);
+    if (!n || !m) continue;
+    const a = (n.heading * Math.PI) / 180;
+    const x = Math.min(1000, Math.max(0, n.x - Math.sin(a) * TRACTOR.behind)), y = Math.min(1000, Math.max(0, n.y + Math.cos(a) * TRACTOR.behind));
+    if (Math.hypot(m.x - x, m.y - y) < 0.3 && !m.warp) continue;
+    Object.assign(m, { x, y, heading: n.heading, warp: 0, dest: null });
+    const core = primaryCore.get(t);
+    if (core) send(core, { type: 'core-set', ship: shipName(t), set: { moveTo: { x, y, heading: n.heading } } });
+  }
+}
+const consoleDarkFor = (k, station) => !flow(k).buses[busOf(station)].consolesOk;
+
+
 // A ship is destroyed: it takes ships close by with it (some), and comes back
 // docked at a starbase picked at random, good as new.
 function destroy(k, cause) {
@@ -1168,8 +1276,11 @@ function destroy(k, cause) {
   opLog(k, `the ${name} was destroyed: ${cause}. Rebuilt and docked at ${base.name}`);
   for (const u of crewOf(k)) send(u, { type: 'destroyed', ship: name, cause, base: base.name, at: Date.now() });
   for (const [o, oc] of combat) if (oc.lock === k) { oc.lock = null; tellStations(o, ['Tactical'], `Tactical: the ${name} was destroyed`); }
+  releaseTractor(k, `the ${name} was destroyed`);
+  const tower = towedBy(k);
+  if (tower) releaseTractor(tower, `the ${name} was destroyed`);
   combat.set(k, { ...freshCombat(), loaded: true });
-  eng.set(k, { ...freshEng(), docked: base.name });
+  eng.set(k, { ...freshEng(), docked: base.name }); // factory settings: the new ship has power
   shields.delete(k);
   navTargets.delete(k);
   const nav = navState.get(k);
@@ -1386,17 +1497,16 @@ setInterval(() => {
     // Containment: a few seconds on reserve, then the core breaches.
     if (!f.containmentOk) {
       e.breach++;
-      if (e.breach === 1) { opLog(k, 'antimatter containment failing: no power'); for (const u of crewOf(k)) send(u, { type: 'notice', text: `Warning: antimatter containment failing (no power from ${e.containment === 'EPS' ? 'the EPS' : `Bus ${e.containment}`})` }); }
+      if (e.breach === 1) { opLog(k, 'antimatter containment failing: no power'); for (const u of crewOf(k)) send(u, { type: 'notice', text: 'Warning: antimatter containment failing (no power on its feeds): restore power or eject the core' }); }
       if (e.breach >= GRID.breachSecs) { destroy(k, 'warp core breach: antimatter containment lost'); changed = true; continue; }
     } else if (e.breach) { e.breach = 0; opLog(k, 'antimatter containment restored'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: antimatter containment restored'); }
     // The core starting up, on Bus A power.
     if (e.core === 'starting') {
-      if (!f.buses.A.coreOk) { e.core = 'offline'; e.start = 0; opLog(k, 'warp core startup failed: not enough power on Bus A'); tellStations(k, ['Engineering'], 'Engineering: warp core startup failed, not enough power on Bus A'); }
+      if (!f.startOk) { e.core = 'offline'; e.start = 0; opLog(k, 'warp core startup failed: not enough power on Bus A'); tellStations(k, ['Engineering'], 'Engineering: warp core startup failed, not enough power on Bus A'); }
       else if (++e.start >= GRID.coreStartSecs) { e.core = 'online'; e.start = 0; e.dirty = true; opLog(k, 'warp core online'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: warp core online'); }
     }
     // Batteries.
-    const bb = e.battery.bus && f.buses[e.battery.bus];
-    if (bb) e.battery.charge = Math.max(0, Math.min(GRID.batteryCap, e.battery.charge - bb.src.battery + f.charging));
+    e.battery.charge = Math.max(0, Math.min(GRID.batteryCap, e.battery.charge - f.batteryUsed + f.charging));
     // Docking ends when the ship moves off.
     const nav = navState.get(k);
     if (e.docked) {
@@ -1826,6 +1936,7 @@ wss.on('connection', (ws) => {
     if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : crewCommand(ws, msg);
     if (['lock', 'fire', 'repair', 'arm'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : combatCommand(ws, msg);
     if (msg.type === 'grid' && ws.id) return gridCommand(ws, msg); // emergency power: works with the console dark
+    if (msg.type === 'tractor' && ws.id) return consoleDark(ws) ? darkNote(ws) : tractorCommand(ws, msg);
     if (msg.type === 'dock' && ws.id) return consoleDark(ws) ? darkNote(ws) : dockCommand(ws, msg);
     if (msg.type === 'self-destruct' && ws.id) return consoleDark(ws) ? darkNote(ws) : selfDestructCommand(ws, msg);
 

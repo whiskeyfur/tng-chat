@@ -1058,7 +1058,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // dead: Tactical's console goes dark and refuses orders. Restarting the
     // core (on dock power, Bus A) brings it back.
     const laforge = await crewWs('laforge', 'Enterprise', 'Engineering');
-    laforge.send({ type: 'grid', core: 'stop', battery: null });
+    laforge.send({ type: 'grid', core: 'stop', ties: { battery: [] } });
     await carol.waitForSelector('#console-dark:not([hidden])');
     await waitFor(() => laforge.nav()?.maxWarp === 0);
     await carol.$eval('#fire-torpedo', (b) => { b.disabled = false; b.click(); });
@@ -1068,6 +1068,54 @@ const audioBytes = (page) => page.evaluate(async () => {
     await carol.waitForSelector('#console-dark', { state: 'hidden', timeout: 20000 });
     assert.equal(laforge.nav().own.grid.core, 'online');
     step('the warp core shut down with the batteries off left Bus B dead (Tactical dark, no engines); restarted on dock power, the consoles came back');
+
+    // Ties are any combination: the core straight onto both buses and the EPS,
+    // the batteries on both buses. Containment can't be left with no feed.
+    laforge.send({ type: 'grid', ties: { core: ['A', 'B', 'EPS'], battery: ['A', 'B'] } });
+    await waitFor(() => { const t = laforge.nav()?.own.grid.ties; return t?.core.length === 3 && t.battery.join() === 'A,B'; });
+    laforge.send({ type: 'grid', ties: { containment: [] } });
+    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /containment can't be switched off/.test(m.text)));
+    step('Engineering tied the warp core to Bus A, Bus B and the EPS and the batteries to both buses; containment could not be left without a feed');
+
+    // Engineering ejects the warp core: no antimatter, no core power.
+    laforge.send({ type: 'grid', eject: true });
+    await waitFor(() => laforge.nav()?.own.grid.core === 'ejected' && !laforge.nav().own.grid.antimatter);
+    step('Engineering ejected the warp core and antimatter pods');
+
+    // The Defiant comes alongside and tows the crippled Enterprise with a tractor beam.
+    const ezri = await crewWs('ezri', 'Defiant', 'Helm');
+    const tuvok = await crewWs('tuvok', 'Defiant', 'Tactical');
+    const at = laforge.nav().own;
+    ezri.send({ type: 'helm', dest: { x: at.x, y: at.y - 4 }, warp: 7 });
+    await waitFor(() => { const n = ezri.nav(); const e = n?.ships.find((x) => x.name === 'Enterprise'); return n?.own.warp === 0 && e && e.distance <= 20; }, 30000);
+    tuvok.send({ type: 'tractor', ship: 'Enterprise' });
+    await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /has us in a tractor beam/.test(m.text)));
+    helm({ dest: { x: 500, y: 500 }, warp: 1 });
+    await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /held in the Defiant's tractor beam/.test(m.text)));
+    ezri.send({ type: 'helm', dest: { x: 120, y: 700 }, warp: 5 });
+    await waitFor(() => ezri.msgs.some((m) => m.type === 'notice' && /warp 3/.test(m.text)));
+    ezri.send({ type: 'helm', dest: { x: 120, y: 700 }, warp: 3 });
+    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last.own); return n.y < 720; }, 30000);
+    const towed = await spock.evaluate(() => window.__nav.last.own);
+    const tug = ezri.nav().own;
+    assert.ok(Math.hypot(towed.x - tug.x, towed.y - tug.y) < 6, 'the Enterprise should follow just behind the Defiant');
+    await bob.waitForSelector('.bcast--alert:has-text("Held in the Defiant\'s tractor beam")', { state: 'attached' });
+    step('the Defiant came alongside, locked a tractor beam on the Enterprise (whose Helm could not break away) and towed it at warp 3');
+
+    // Back to Starbase 12, let go, dock, and install a new warp core.
+    ezri.send({ type: 'helm', dest: { base: 'Starbase 12' }, warp: 3 });
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.near)) === 'Starbase 12' && ezri.nav()?.own.warp === 0, 30000);
+    tuvok.send({ type: 'tractor', ship: null });
+    await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /Released from the Defiant's tractor beam/.test(m.text)));
+    sulu.send(JSON.stringify({ type: 'dock' }));
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.docked)) === 'Starbase 12');
+    laforge.send({ type: 'grid', refit: true });
+    await waitFor(() => laforge.nav()?.own.grid.core === 'offline' && laforge.nav().own.grid.antimatter);
+    laforge.send({ type: 'grid', core: 'start' });
+    await waitFor(() => laforge.nav()?.own.grid.core === 'online', 20000);
+    step('towed back to Starbase 12 and released, the Enterprise docked and installed a new warp core, and started it');
+    ezri.close();
+    tuvok.close();
 
     // The Captain sets the self-destruct; everyone aboard sees the countdown; aborted.
     picard.on('dialog', (d) => d.accept());
@@ -1080,12 +1128,12 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // Containment fed from Bus B with Bus B cut off: the core breaches and the
     // Enterprise is destroyed, then rebuilt docked at a starbase.
-    laforge.send({ type: 'grid', containment: 'B' });
+    laforge.send({ type: 'grid', ties: { containment: ['B'], core: ['EPS'], battery: [] } });
     laforge.send({ type: 'grid', tap: { bus: 'B', on: false } });
     await bob.waitForSelector('.bcast--alert:has-text("containment failing")', { state: 'attached' });
     await waitFor(() => suluMsgs.some((m) => m.type === 'destroyed' && /breach/.test(m.cause)), 15000);
     const reborn = suluMsgs.find((m) => m.type === 'destroyed');
-    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last.own); return n.grid.docked === reborn.base && n.combat.hull === 100 && n.grid.containment === 'A'; });
+    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last.own); return n.grid.docked === reborn.base && n.combat.hull === 100 && n.grid.ties.containment.join() === 'A' && n.grid.containmentOk; });
     await bob.waitForSelector(`.bcast--alert:has-text("Rebuilt and docked at ${reborn.base}")`, { state: 'attached' });
     step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt docked at ${reborn.base}`);
     laforge.close();
