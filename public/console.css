@@ -1,0 +1,169 @@
+/* Shared pieces for the crew consoles and the ops console, on top of the
+   LCARS base theme in lcars.css: form controls, the call panel rendered by
+   voice.js, and the Comms modal built by comms.js. */
+
+[hidden] { display: none !important; }
+
+/* ---------- one screen, no page scrolling ----------
+   The frame is exactly the window; the sidebar switches screens
+   (screens.js); a long list scrolls inside its own panel. */
+html, body { height: 100%; overflow: hidden; }
+.lcars-app { height: 100vh; height: 100dvh; min-height: 0; grid-template-rows: auto minmax(0, 1fr) auto; }
+.lcars-sidebar { min-height: 0; overflow: hidden; }
+.lcars-sidebar .lcars-nav-button { flex: 0 1 64px; min-height: 34px; cursor: pointer; }
+button.lcars-nav-button { font: inherit; font-size: 17px; letter-spacing: inherit; border: 0; text-align: right; }
+.lcars-content { display: flex; flex-direction: column; gap: 18px; min-height: 0; overflow: hidden; padding-top: 4px; padding-bottom: 4px; }
+.lcars-panel__body { min-width: 0; }
+.screen { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 18px; }
+.screen > .lcars-panel, .screen-row > .lcars-panel { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.screen > .lcars-panel--auto { flex: 0 0 auto; }
+.screen .lcars-panel__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.screen-row { flex: 1 1 0; min-height: 0; display: flex; gap: 24px; }
+@media (max-width: 900px) { .screen-row { flex-direction: column; } }
+.lcars-log { max-height: none; }
+.lcars-footer__stardate { padding-left: 8px; }
+.ops-wide { grid-column: 1 / -1; }
+
+/* ---------- form controls ---------- */
+
+.ops-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; text-transform: uppercase; }
+.ops-form > span { color: var(--lcars-text); opacity: 0.8; }
+.ops-select, .ops-input {
+  min-height: 40px;
+  min-width: 140px;
+  max-width: 100%;
+  padding: 0 16px;
+  border: 3px solid var(--accent, var(--lcars-gold));
+  border-radius: 999px;
+  background: #000;
+  color: var(--accent, var(--lcars-gold));
+  font: inherit;
+  font-size: 18px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.ops-select:focus-visible, .ops-input:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.ops-select option { background: #000; color: var(--lcars-text); }
+.ops-input { text-transform: none; }
+.lcars-button:disabled { filter: grayscale(1) brightness(0.5); cursor: not-allowed; }
+.lcars-button--alert { --accent: var(--lcars-red); }
+.ops-hint { margin: 0; font-size: 14px; color: var(--lcars-tan); text-transform: uppercase; }
+.ops-subhead { margin: 4px 0 0; color: var(--accent); font-size: 16px; font-weight: 400; text-transform: uppercase; opacity: 0.85; }
+.ops-readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 28px; }
+
+/* Sidebar button that opens Comms: flashes on an incoming call, glows in a call. */
+.comms-button { cursor: pointer; border: 0; font: inherit; }
+.comms-button[data-state='ringing'] { animation: lcars-blink 0.8s steps(2) infinite; background: var(--lcars-red); }
+.comms-button[data-state='in-call'], .comms-button[data-state='calling'] { background: var(--lcars-sky); }
+
+/* ---------- call panel (voice.js) ---------- */
+
+.ops-call { display: flex; flex-direction: column; gap: 12px; text-transform: uppercase; }
+.ops-call:not(:has(> :not([hidden]))) { display: none; }
+.v-incoming, .v-waiting, .v-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.v-waiting { padding: 8px 0 8px 14px; border-left: 8px solid var(--lcars-gold); }
+.v-waiting-text { flex: 1 1 240px; color: var(--lcars-gold); font-size: 20px; animation: lcars-blink 1.2s steps(2) infinite; }
+.v-waiting-text b { font-weight: 400; color: var(--lcars-orange); }
+.v-ignore { --accent: var(--lcars-red); }
+.v-switch { --accent: var(--lcars-peach); }
+.v-join { --accent: var(--lcars-sky); }
+.v-incoming-text { flex: 1 1 240px; color: var(--lcars-gold); font-size: 22px; animation: lcars-blink 1.2s steps(2) infinite; }
+.v-incoming-text b { font-weight: 400; color: var(--lcars-orange); }
+.v-status { flex: 1 1 240px; color: var(--accent); font-size: 20px; }
+.v-decline, .v-hangup { --accent: var(--lcars-red); }
+.v-accept { --accent: var(--lcars-sky); }
+.v-chatlog { height: 180px; overflow-y: auto; border: 3px solid var(--accent); border-radius: 18px; padding: 8px 14px; text-transform: none; letter-spacing: 0.02em; }
+.v-chatlog div { margin: 2px 0; overflow-wrap: anywhere; color: var(--lcars-text); }
+.v-chatlog .sys { color: var(--lcars-tan); text-transform: uppercase; }
+.v-chatlog a { color: var(--lcars-sky); }
+.v-chat form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+.v-chat-text { flex: 1 1 200px; min-width: 0; min-height: 40px; padding: 0 16px; border: 3px solid var(--accent); border-radius: 999px; background: #000; color: var(--lcars-text); font: inherit; }
+.v-file, .lib-file { color: var(--lcars-tan); font: inherit; font-size: 14px; max-width: 100%; }
+.v-file::file-selector-button, .lib-file::file-selector-button { font: inherit; text-transform: uppercase; border: 0; border-radius: 999px; padding: 6px 14px; margin-right: 8px; background: var(--lcars-tan); color: #000; cursor: pointer; }
+
+/* ---------- Comms modal (comms.js) ---------- */
+
+.lcars-modal {
+  --accent: var(--lcars-orange);
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 0;
+  background: #000;
+  color: var(--lcars-text);
+  overflow: visible;
+}
+.lcars-modal::backdrop { background: rgba(0, 0, 0, 0.72); }
+.lcars-modal__frame {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 0 18px 20px 30px;
+  border-left: 18px solid var(--accent);
+  border-bottom: 10px solid var(--accent);
+  border-top-left-radius: 46px 40px;
+  border-bottom-left-radius: 46px 40px;
+}
+.lcars-modal__bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  min-height: 44px;
+  margin-left: -30px;
+  padding: 0 0 0 0;
+  background: #000;
+}
+.lcars-modal__bar::before { content: ''; align-self: stretch; width: 30px; background: var(--accent); }
+.lcars-modal__title { color: var(--accent); font-size: 30px; text-transform: uppercase; line-height: 1; padding: 0 8px; }
+.lcars-modal__fill { flex: 1; height: var(--bar); background: var(--lcars-peach); border-radius: 0 999px 999px 0; }
+.lcars-modal__net { color: var(--lcars-sky); text-transform: uppercase; font-size: 15px; }
+.lcars-modal .lcars-note:empty, .ops-notice:empty { display: none; }
+.ops-notice { margin: 0; color: var(--lcars-sky); text-transform: uppercase; }
+
+.comms-dir { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; text-transform: uppercase; }
+.comms-dir .comms-ship {
+  margin-top: 10px;
+  padding: 2px 14px;
+  border-radius: 999px 0 0 999px;
+  background: var(--lcars-lilac);
+  color: #000;
+  font-size: 14px;
+}
+.comms-dir .comms-ship--home { background: var(--lcars-gold); }
+.comms-dir .comms-entry { display: flex; align-items: center; gap: 12px; padding: 4px 0 4px 6px; border-bottom: 2px solid #1a1a1a; }
+.comms-dir .comms-entry span { flex: 1; color: var(--lcars-gold); font-size: 20px; }
+.comms-dir .comms-entry small { color: var(--lcars-tan); font-size: 15px; margin-left: 8px; }
+.comms-dir .comms-entry .lcars-button { min-height: 34px; }
+.comms-dir .empty { color: var(--lcars-tan); }
+
+@media (max-width: 700px) {
+  .lcars-modal__frame { padding: 0 10px 14px 16px; border-left-width: 10px; border-top-left-radius: 28px 24px; border-bottom-left-radius: 28px 24px; }
+  .lcars-modal__bar { margin-left: -16px; }
+  .lcars-modal__bar::before { width: 16px; }
+  .lcars-modal__title { font-size: 22px; }
+  .ops-select { min-width: 0; }
+}
+
+/* ---------- Library (library.js) ---------- */
+
+.lib-panel .lcars-panel__body { display: flex; flex-direction: column; gap: 12px; }
+.lib-upload-label { color: var(--lcars-text); opacity: 0.8; }
+.lib-folders { display: flex; flex-direction: column; gap: 14px; }
+.lib-folder-name { margin: 0; padding: 2px 14px; border-radius: 999px 0 0 999px; background: var(--lcars-lilac); color: #000; font-size: 14px; font-weight: 400; text-transform: uppercase; }
+.lib-folder-name.comms-ship--home { background: var(--lcars-gold); }
+.lib-files { list-style: none; margin: 6px 0 0; padding: 0; text-transform: none; }
+.lib-file-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 14px; padding: 4px 0 4px 6px; border-bottom: 2px solid #1a1a1a; }
+.lib-name { color: var(--lcars-gold); font-size: 20px; overflow-wrap: anywhere; }
+.lib-size, .lib-date { color: var(--lcars-tan); font-size: 15px; text-transform: uppercase; }
+.lib-file-row .lcars-button { min-height: 34px; }
+.lib-files .empty { color: var(--lcars-tan); text-transform: uppercase; padding: 4px 6px; }
+@media (max-width: 700px) {
+  .lib-file-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .lib-date { display: none; }
+  .lib-size { grid-row: 2; }
+}

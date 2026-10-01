@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ops: Communications</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='5' fill='%23ff9900'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&display=swap">
+  <link rel="stylesheet" href="lcars.css">
+  <link rel="stylesheet" href="console.css">
+  <style>
+    /* Ops-only pieces; shared console styles are in console.css. */
+    #login-form { flex-direction: row; align-items: center; justify-content: flex-start; }
+
+    /* Roster table */
+    .ops-roster { width: 100%; border-collapse: separate; border-spacing: 0 var(--gap); text-transform: uppercase; }
+    .ops-roster th { text-align: left; font-weight: 400; font-size: 14px; color: var(--lcars-ink); background: var(--accent); padding: 2px 12px; }
+    .ops-roster th:first-child { border-radius: 999px 0 0 999px; }
+    .ops-roster th:last-child { border-radius: 0 999px 999px 0; }
+    .ops-roster td { padding: 6px 12px; border-bottom: 2px solid #1a1a1a; vertical-align: middle; }
+    .ops-roster td:first-child { color: var(--lcars-gold); font-size: 22px; }
+    .ops-roster td:nth-child(2) { color: var(--lcars-tan); }
+    .ops-roster td:last-child { text-align: right; width: 1%; white-space: nowrap; }
+    .ops-roster .idle { color: var(--lcars-sky); }
+    .ops-roster .busy { color: var(--lcars-orange); }
+    .ops-roster .ringing { color: var(--lcars-gold); animation: lcars-blink 1s steps(2) infinite; }
+    .ops-roster .empty td { color: var(--lcars-tan); font-size: 16px; }
+
+    /* Command result line */
+    #status { min-height: 1.4em; margin: 0; text-transform: uppercase; color: var(--lcars-gold); font-size: 20px; }
+    #status .error { color: var(--lcars-red); animation: lcars-blink 0.6s steps(2) 3; }
+
+    /* Hail and data link queues */
+    .ops-hails { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+    .ops-hail { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 2px solid #1a1a1a; text-transform: uppercase; }
+    .ops-hail__text { flex: 1 1 220px; color: var(--accent); font-size: 20px; }
+    .ops-hail--incoming .ops-hail__text { animation: lcars-blink 1.2s steps(2) infinite; }
+    .ops-hails .empty { color: var(--lcars-tan); font-size: 16px; text-transform: uppercase; }
+    .ops-network { margin: 0; color: var(--lcars-sky); text-transform: uppercase; font-size: 18px; }
+
+    /* Phones: roster rows stack (name + buttons, then station and channel). */
+    @media (max-width: 700px) {
+      .ops-roster thead { display: none; }
+      .ops-roster, .ops-roster tbody { display: block; }
+      .ops-roster tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 6px 0; border-bottom: 2px solid #1a1a1a; }
+      .ops-roster td { border: 0; padding: 0 4px; width: auto; }
+      .ops-roster td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+      .ops-roster td:nth-child(3) { grid-column: 1 / -1; grid-row: 3; }
+      .ops-roster td:last-child { grid-column: 2; grid-row: 1; }
+      .ops-roster .lcars-button { min-height: 32px; padding: 0 12px; font-size: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="lcars-app">
+    <header class="lcars-header">
+      <div class="lcars-elbow lcars-elbow--top"><span>OPS</span></div>
+      <div class="lcars-bar">
+        <span class="lcars-bar__seg lcars-bar__seg--a"></span>
+        <span class="lcars-header__console" id="ship-name">Comm relay control</span>
+        <span class="lcars-bar__seg lcars-bar__seg--b"></span>
+        <h1 class="lcars-header__title">Operations</h1>
+      </div>
+    </header>
+
+    <nav class="lcars-sidebar" aria-label="Console">
+      <button type="button" class="lcars-nav-button comms-button" id="comms-button" style="--accent: var(--lcars-orange)" hidden><span>Comms</span></button>
+      <button type="button" class="lcars-nav-button" data-screen-tab="status" style="--accent: var(--lcars-gold)" hidden><span>Status</span></button>
+      <button type="button" class="lcars-nav-button" data-screen-tab="hail" style="--accent: var(--lcars-red)" hidden><span>Hail</span></button>
+      <button type="button" class="lcars-nav-button" data-screen-tab="link" style="--accent: var(--lcars-sky)" hidden><span>Data link</span></button>
+      <button type="button" class="lcars-nav-button" data-screen-tab="intercom" style="--accent: var(--lcars-peach)" hidden><span>Intercom</span></button>
+      <button type="button" class="lcars-nav-button" data-screen-tab="roster" style="--accent: var(--lcars-blue)" hidden><span>Crew roster</span></button>
+      <div class="lcars-sidebar__fill"></div>
+      <button type="button" class="lcars-nav-button" data-screen-tab="library" style="--accent: var(--lcars-violet)" hidden><span>Library</span></button>
+    </nav>
+
+    <main class="lcars-content" tabindex="-1">
+      <div class="screen" data-screen="login">
+        <section class="lcars-panel lcars-panel--auto" id="login" style="--accent: var(--lcars-red)">
+          <h2 class="lcars-panel__title"><span>Ops station sign-in</span></h2>
+          <form class="lcars-panel__body ops-form" id="login-form">
+            <input class="ops-input" id="op-name" placeholder="Your name" autocomplete="off" required>
+            <input class="ops-input" id="ship" placeholder="Ship" autocomplete="off" required>
+            <input class="ops-input" id="key" type="password" placeholder="Authorization code" autocomplete="off">
+            <input class="ops-input" id="relay" placeholder="Comm relay: wss://relay.example.com" autocomplete="off" aria-label="comm relay address">
+            <button class="lcars-button lcars-button--pill">Take station</button>
+          </form>
+        </section>
+        <p class="lcars-note" id="login-error"></p>
+      </div>
+
+      <div id="console" hidden style="display: contents">
+        <div class="screen" data-screen="status" hidden>
+          <section class="lcars-panel lcars-panel--auto" style="--accent: var(--lcars-gold)">
+            <h2 class="lcars-panel__title"><span>Channel status</span></h2>
+            <div class="lcars-panel__body">
+              <div class="ops-readouts">
+                <div class="lcars-readout"><span class="lcars-readout__label">Crew on net</span><span class="lcars-readout__value" id="count-online">0</span></div>
+                <div class="lcars-readout"><span class="lcars-readout__label">Open channels</span><span class="lcars-readout__value" id="count-channels">0</span></div>
+                <div class="lcars-readout"><span class="lcars-readout__label">Standing by</span><span class="lcars-readout__value" id="count-idle">0</span></div>
+                <div class="lcars-readout"><span class="lcars-readout__label">Ships in range</span><span class="lcars-readout__value" id="count-ships">0</span></div>
+                <div class="lcars-readout"><span class="lcars-readout__label">Shields</span><span class="lcars-readout__value" id="shield-state">Down</span></div>
+              </div>
+              <p id="status" role="status"></p>
+            </div>
+          </section>
+          <section class="lcars-panel" id="log-panel" style="--accent: var(--lcars-lilac)">
+            <h2 class="lcars-panel__title"><span>Comm log</span></h2>
+            <div class="lcars-panel__body">
+              <ul class="lcars-log" id="log"></ul>
+            </div>
+          </section>
+        </div>
+
+        <div class="screen" data-screen="hail" hidden>
+          <section class="lcars-panel" id="hail-panel" style="--accent: var(--lcars-red)">
+            <h2 class="lcars-panel__title"><span>Hail · ship to ship</span></h2>
+            <div class="lcars-panel__body">
+              <form class="ops-form" id="hail-form">
+                <span>Hail</span>
+                <select class="ops-select" id="hail-ship" aria-label="ship to hail"></select>
+                <span>for</span>
+                <select class="ops-select" id="hail-crew" aria-label="crew member placing the call"></select>
+                <button class="lcars-button lcars-button--pill">Open hailing frequencies</button>
+              </form>
+              <h3 class="ops-subhead">Incoming hails</h3>
+              <ul class="ops-hails" id="incoming"></ul>
+              <h3 class="ops-subhead">Outgoing hails</h3>
+              <ul class="ops-hails" id="outgoing"></ul>
+            </div>
+          </section>
+        </div>
+
+        <div class="screen" data-screen="link" hidden>
+          <section class="lcars-panel" id="link-panel" style="--accent: var(--lcars-sky)">
+            <h2 class="lcars-panel__title"><span>Data link</span></h2>
+            <div class="lcars-panel__body">
+              <p class="ops-network" id="network">Not linked</p>
+              <form class="ops-form" id="link-form">
+                <span>Request a data link with</span>
+                <select class="ops-select" id="link-ship" aria-label="ship to link with"></select>
+                <button class="lcars-button lcars-button--pill">Request link</button>
+              </form>
+              <p class="ops-hint">Both operators must agree. Everyone on linked ships sees and can call everyone on the data network, and sees each other's libraries.</p>
+              <h3 class="ops-subhead">Open links</h3>
+              <ul class="ops-hails" id="links"></ul>
+              <h3 class="ops-subhead">Link requests</h3>
+              <ul class="ops-hails" id="link-requests"></ul>
+            </div>
+          </section>
+        </div>
+
+        <div class="screen" data-screen="intercom" hidden>
+          <div class="screen-row">
+            <section class="lcars-panel" id="intercom-panel" style="--accent: var(--lcars-peach)">
+              <h2 class="lcars-panel__title"><span>Intercom · connect crew</span></h2>
+              <div class="lcars-panel__body">
+                <form class="ops-form" id="connect-form">
+                  <select class="ops-select" id="a" aria-label="first crew member"></select>
+                  <span>to</span>
+                  <select class="ops-select" id="b" aria-label="second crew member"></select>
+                  <button class="lcars-button lcars-button--pill">Open channel</button>
+                </form>
+                <p class="ops-hint">Overrides any active channel. Connects immediately, no hail tone.</p>
+              </div>
+            </section>
+            <section class="lcars-panel" id="conference-panel" style="--accent: var(--lcars-blue)">
+              <h2 class="lcars-panel__title"><span>Conference · patch in</span></h2>
+              <div class="lcars-panel__body">
+                <form class="ops-form" id="add-form">
+                  <select class="ops-select" id="newcomer" aria-label="crew member to patch in"></select>
+                  <span>into channel with</span>
+                  <select class="ops-select" id="host" aria-label="crew member on the channel"></select>
+                  <button class="lcars-button lcars-button--pill">Patch in</button>
+                </form>
+                <p class="ops-hint">Joins everyone on that channel, other ships included. Drops their current channel first.</p>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="screen" data-screen="roster" hidden>
+          <section class="lcars-panel" id="roster-panel" style="--accent: var(--lcars-blue)">
+            <h2 class="lcars-panel__title"><span>Crew roster</span></h2>
+            <div class="lcars-panel__body">
+              <table class="ops-roster">
+                <thead><tr><th>Crew</th><th>Station</th><th>Channel</th><th></th></tr></thead>
+                <tbody id="roster"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div class="screen" data-screen="library" id="library-view" hidden></div>
+      </div>
+    </main>
+
+    <footer class="lcars-footer">
+      <div class="lcars-elbow lcars-elbow--bottom"></div>
+      <div class="lcars-bar">
+        <span class="lcars-status" id="link" data-status="connecting">Subspace link</span>
+        <span class="lcars-bar__seg lcars-bar__seg--c"></span>
+        <span class="lcars-footer__stardate" id="stardate"></span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Ops-only addition to the Comms modal: hand off the call you are in. -->
+  <form class="ops-form" id="transfer-form" hidden>
+    <span>Transfer to</span>
+    <select class="ops-select" id="transfer-to" aria-label="transfer the call to"></select>
+    <button class="lcars-button lcars-button--pill">Transfer</button>
+  </form>
+
+  <script src="config.js"></script>
+  <script src="relay.js"></script>
+  <script src="screens.js"></script>
+  <script src="library.js"></script>
+  <script src="voice.js"></script>
+  <script src="comms.js"></script>
+  <script src="operator.js"></script>
+</body>
+</html>
