@@ -9,8 +9,12 @@ npm install
 npm start            # http://localhost:8080  (PORT=xxxx to change)
 ```
 
-1. **Start an ops station** for each ship at http://localhost:8080/operator.html: enter your name and the ship. A ship comes into existence when its ops station signs on.
-2. **Report aboard** at http://localhost:8080: enter a name, pick a ship from the list, pick a station (Captain, First Officer, Helm, Tactical, Security, Engineering, Medical, Science, Communications, Transporter, Crew). Names only need to be unique within a ship.
+Everyone uses the same page, http://localhost:8080:
+
+1. **Start an ops station** for each ship: enter your name, pick **Operations** as the station, and type the ship's name (a new name creates the ship). A ship comes into existence when its ops station signs on.
+2. **Report aboard:** enter a name, pick a ship from the list, pick a station (Captain, First Officer, Helm, Tactical, Security, Engineering, Medical, Science, Communications, Transporter, Crew). Names only need to be unique within a ship.
+
+`operator.html` still works as a link to the Operations sign-in.
 
 Ship libraries are stored under `data/<ship>/` next to `server.js`. Set `DATA_DIR` to put them elsewhere, and `MAX_UPLOAD_MB` to change the upload limit (default 200).
 
@@ -65,9 +69,9 @@ The **Library** screen, at the bottom of the left-hand menu on every console, is
 
 File names are cleaned up: folders, control characters and leading dots are removed, and a name that's already taken gets " (2)". Uploads and downloads go over HTTP with a per-session token handed out at sign-in.
 
-## Ops console
+## Ops console (Operations station)
 
-http://localhost:8080/operator.html, also as `?name=O'Brien&ship=Enterprise`. The page remembers the last sign-in. Ops is assumed to be on the bridge. The operator is aboard as crew at the **Operations** station and has the same Comms menu as everyone. It adds **Transfer to**: hand the call you're in to anyone aboard or on the data network, or to another ship by hail, and drop off the line. A call with several people is handed over whole.
+Pick **Operations** at sign-in, or open `?station=Operations&name=O'Brien&ship=Enterprise` (or the old `operator.html` link). The page remembers the last sign-in. Ops is assumed to be on the bridge. The operator is aboard as crew at the **Operations** station and has the same Comms menu as everyone. It adds **Transfer to**: hand the call you're in to anyone aboard or on the data network, or to another ship by hail, and drop off the line. A call with several people is handed over whole.
 
 - **Hail · ship to ship:** hail another ship on behalf of one of your crew, yourself included. That ship's operator routes the hail to someone aboard (it defaults to their Captain, and can be themselves), or declines. You can cancel while it's pending. For example: Picard on the Enterprise, via Enterprise ops, via K'Vatch ops, to Martok, Captain of the K'Vatch.
 - **Data link:** request a link with another ship. Their operator accepts or declines, and either side can close the link later. Linked ships form a data network (links chain, so three or more ships can share one network). Everyone on it sees everyone on every ship in the Comms directory and can call them directly.
@@ -78,7 +82,7 @@ http://localhost:8080/operator.html, also as `?name=O'Brien&ship=Enterprise`. Th
 
 The ops menu has Comms, Status (channel readouts and the comm log), Hail, Data link, Intercom (intercom and conference), Crew roster and, at the bottom, Library.
 
-By default anyone who opens operator.html can take a station. To require a key, start the server with `OPERATOR_KEY=yourkey npm start` and enter it as the authorization code.
+By default anyone can take an ops station. To require a key, start the server with `OPERATOR_KEY=yourkey npm start` and enter it as the authorization code.
 
 ### When ops drops out
 
@@ -110,7 +114,7 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 
 - `server.js` keeps everyone online by id (`name@ship`, lowercased), with their ship and station. It sends each person the crew list for their data network (just their ship when unlinked), relays call-control and signal messages to a user id, and adds `from` and `fromInfo`. A `call` to someone off your network is refused with `unavailable`. Each ship's ops consoles get a roster of that ship's crew, the ships in range, their links and network, and the open hails and link requests. Hails and link requests live on the server until answered or until a party goes away.
 - `public/relay.js` finds the comm relay (same server by default, or `config.js`, `?relay=`, or the sign-in field).
-- `public/voice.js` is the call engine and call panel. `public/comms.js` builds the Comms modal around it: the directory, plus optional extras like Transfer. `public/library.js` is the Library screen and `public/screens.js` switches screens. All of these are shared by the crew console (`public/client.js`, with the station displays in `public/stations.js`) and the ops console (`public/operator.js`). Shared console styles are in `public/console.css`.
+- `public/voice.js` is the call engine and call panel. `public/comms.js` builds the Comms modal around it: the directory, plus optional extras like Transfer. `public/library.js` is the Library screen and `public/screens.js` switches screens. All of these are shared by the crew console (`public/client.js`, with the station displays in `public/stations.js`) and, at the Operations station, the ops screens (`public/ops.js`), all on the one console page. Shared console styles are in `public/console.css`.
 - The library lives on disk. `GET /api/library/<ship>/<file>` downloads from any ship on your data network, and `POST /api/library` (headers `X-Token` and `X-Filename`, the file as the body) uploads to your own ship, and `DELETE /api/library/<ship>/<file>` deletes (ops only, own ship only). The `X-Token` comes from `registered` or `operator-ok`. After every change, the server sends `{type:"library", ships:[{name, own, files:[{name, size, modified}]}]}` to everyone on the data network.
 - A call can have several people: one `RTCPeerConnection` per other participant, a full mesh, all sharing one microphone stream. For a normal call, the caller sends `call` and the callee sees Accept/Decline; a callee already in a call auto-declines with `busy`. On accept, the callee creates its connection and sends `accept`, and the caller creates its connection and sends the SDP offer. When anyone leaves, the server sends `gone` to everyone, so calls end across ships.
 - Every call-control and signal message carries a call id (`cid`). A client ignores messages whose id doesn't match its current call, so leftovers from a replaced call can't disturb the new one.

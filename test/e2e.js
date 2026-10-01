@@ -29,14 +29,16 @@ async function openAs(browser, name, tag, ship = 'Enterprise', station = 'Crew')
   return page;
 }
 
-// Open an ops console for a ship. The operator is aboard as crew too.
+// Take a ship's ops station: the Operations station on the same console page.
+// The operator is aboard as crew too.
 async function openOps(browser, ship, tag, name = 'obrien') {
   const page = await (await browser.newContext()).newPage();
   page.on('console', (m) => console.log(`  [${tag}] ${m.text()}`));
-  await page.goto(URL + 'operator.html');
-  await page.fill('#op-name', name);
-  await page.fill('#ship', ship);
-  await page.click('#login-form button');
+  await page.goto(URL);
+  await page.fill('#name', name);
+  await page.selectOption('#station', 'Operations');
+  await page.fill('#ops-ship', ship);
+  await page.click('#register-form button');
   await page.waitForSelector('[data-screen="status"]:not([hidden])');
   return page;
 }
@@ -77,7 +79,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await early.waitForSelector('#ship option:has-text("no ships with ops on duty")', { state: 'attached' });
     // The station picker comes from the relay and includes every station.
     await early.waitForSelector('#station option[value="Transporter"]', { state: 'attached' });
-    assert.equal(await early.locator('#station option:not([disabled])').count(), 11);
+    assert.equal(await early.locator('#station option:not([disabled])').count(), 12); // 11 + Operations
     assert.equal(await early.isDisabled('#register-form button'), true);
     await early.close();
     step('without ops on duty there is no ship to report aboard');
@@ -309,7 +311,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await Promise.all([connected(alice), connected(bob)]);
     assert.deepEqual(await alice.evaluate(() => window.__voice.peerNames()), ['bob']);
     await op.waitForFunction(() => window.__voice.state === 'idle');
-    await op.waitForSelector('#log li:has-text("transferred alice to bob")', { state: 'attached' });
+    await op.waitForSelector('#ops-log li:has-text("transferred alice to bob")', { state: 'attached' });
     await closeComms(op);
     step('ops transferred alice to bob and dropped off the call');
     await bob.click('.v-hangup');
@@ -368,7 +370,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await martok.press('.v-chat-text', 'Enter');
     await alice.waitForSelector('.v-chatlog div:has-text("martok: this is the captain")');
     await op.waitForSelector('#roster td:has-text("in call with martok (Captain, K\'Vatch)")', { state: 'attached' });
-    await op.waitForSelector('#log li:has-text("answered")', { state: 'attached' });
+    await op.waitForSelector('#ops-log li:has-text("answered")', { state: 'attached' });
     await kops.waitForSelector('#roster td:has-text("in call with alice (Crew, Enterprise)")', { state: 'attached' });
     step('Enterprise ops hailed the K\'Vatch for alice; K\'Vatch ops routed it to the captain; they talk');
 
@@ -378,7 +380,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     const hail2 = await kops.waitForSelector('#incoming li.ops-hail:has-text("bob")');
     await hail2.$eval('button.lcars-button--alert', (b) => b.click()); // Decline
     await bob.waitForSelector('#notice:has-text("did not answer")', { state: 'attached' });
-    await op.waitForSelector('#log li:has-text("declined the hail")', { state: 'attached' });
+    await op.waitForSelector('#ops-log li:has-text("declined the hail")', { state: 'attached' });
     await op.waitForFunction(() => window.__operator.outgoing.length === 0);
     step('declined hail reported to the caller and the hailing ship');
 
@@ -387,7 +389,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await kops.waitForFunction(() => window.__operator.incoming.length === 1);
     await op.click('#outgoing li.ops-hail button');
     await kops.waitForFunction(() => window.__operator.incoming.length === 0);
-    await kops.waitForSelector('#log li:has-text("cancelled their hail")', { state: 'attached' });
+    await kops.waitForSelector('#ops-log li:has-text("cancelled their hail")', { state: 'attached' });
     step('cancelled hail cleared on the other ship');
 
     // Off-ship transfer: carol calls ops, ops transfers her to the K'Vatch,

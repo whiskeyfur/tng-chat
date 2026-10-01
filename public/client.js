@@ -1,14 +1,18 @@
-// Crew console (LCARS): report aboard a ship at a station, then get that
+// The LCARS console, for every station including Operations. Crew report
+// aboard a ship at a station and get that
 // station's displays (stations.js), one screen at a time (screens.js), with
 // Comms at the top of the left-hand menu and Library at the bottom. Comms
 // opens the shared modal (comms.js): everyone you can call (your ship, plus
 // every ship on its data network, ops included) and the call itself
 // (voice.js). Library (library.js) is the ship's computer. Other ships are
 // reached through ops, or by the transporter room (Transporter station), unless
-// shields are up (Tactical station). The relay (server.js) is found by relay.js.
+// shields are up (Tactical station). Signing in at Operations takes the ship's
+// ops station instead (any ship name; a new name creates the ship) and shows
+// the ops screens from ops.js. The relay (server.js) is found by relay.js.
 let ws, me = null;  // me: { id, name, ship, station } once registered
 let token = null;   // proves who we are to the library's HTTP endpoints
 let stationView = null;
+let ops = null;     // the ops screens, when signed in at Operations
 let ships = [];     // [{ name, ops, shields }]
 let stations = STATION_NAMES; // what the relay accepts (from its hello); all we know until then
 
@@ -23,8 +27,13 @@ function log(text, level) {
 }
 const send = (msg) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
 
-const comms = createComms({ send, me: () => me, log, button: $('comms-button') });
-const library = createLibrary($('library-view'), { token: () => token, base: relay.http, log });
+const comms = createComms({
+  send, me: () => me, log,
+  button: $('comms-button'),
+  extras: $('transfer-form'), // ops only: hand off the call you're in
+  onChange: () => ops?.render(),
+});
+const library = createLibrary($('library-view'), { token: () => token, base: relay.http, log, canDelete: (s) => s.own && !!ops });
 
 function setLink(status, text) {
   $('link').dataset.status = status;
@@ -65,6 +74,10 @@ function signedOut(reason) {
   me = null;
   token = null;
   stationView = null;
+  ops = null;
+  $('ops-view').hidden = true;
+  $('transfer-form').hidden = true;
+  for (const t of document.querySelectorAll('.ops-tab')) t.hidden = true;
   $('home').hidden = true;
   $('comms-button').hidden = true;
   $('log-tab').hidden = true;
@@ -95,7 +108,19 @@ function renderShips(ships) {
   sel.replaceChildren(placeholder, ...ships.map((s) => new Option(s.ops ? s.name : `${s.name} (ops offline)`, s.name)));
   const match = ships.find((s) => s.name.toLowerCase() === keep.toLowerCase());
   sel.value = match?.name || '';
-  $('register-form').querySelector('button').disabled = !ships.length;
+  updateSignInMode();
+}
+
+// Operations takes the ship's ops station: any ship name (a new one creates
+// the ship), plus the authorization code if the relay asks for one.
+const opsSelected = () => $('station').value === 'Operations';
+function updateSignInMode() {
+  const isOps = opsSelected();
+  $('ship').hidden = isOps;
+  $('ops-ship').hidden = !isOps;
+  $('key').hidden = !isOps;
+  $('register-form').querySelector('button').disabled = !isOps && $('ship').options.length <= 1;
+  $('register-form').querySelector('button').textContent = isOps ? 'Take ops station' : 'Report aboard';
 }
 
 // Station displays, and a sidebar tab for each one.
@@ -168,7 +193,23 @@ function renderShipState() {
   }
 }
 
+// Ops screens instead of station displays.
+function showOps() {
+  stationView = null;
+  $('station-view').replaceChildren();
+  $('sections').replaceChildren();
+  setHeader('OPS', `${me.name} · ${me.ship}`, 'Operations');
+  document.querySelector('.lcars-elbow--top').style.removeProperty('--elbow');
+  for (const t of document.querySelectorAll('.ops-tab')) t.hidden = false;
+  $('reassign-tab').hidden = true;
+  $('ops-view').hidden = false;
+  ops = createOps({ send, comms, me: () => me });
+  showScreen('status');
+}
+
 async function onMessage(msg) {
+  if (msg.type === 'users') queueMicrotask(() => ops?.render()); // transfer targets
+  if (ops?.handle(msg)) return;
   if (msg.type === 'notice' && msg.text.startsWith('Transporter:')) {
     const st = document.getElementById('beam-status');
     if (st) st.textContent = msg.text;
@@ -196,6 +237,24 @@ async function onMessage(msg) {
       break;
     case 'register-failed':
       $('register-error').textContent = msg.reason;
+      $('register-form').querySelector('button').disabled = false;
+      break;
+    case 'operator-ok':
+      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station };
+      token = msg.token;
+      document.title = `LCARS: Ops · ${me.ship}`;
+      $('home').hidden = false;
+      $('comms-button').hidden = false;
+      $('log-tab').hidden = false;
+      $('library-tab').hidden = false;
+      log(`${me.name} took the ops station aboard the ${me.ship}`);
+      showOps();
+      try {
+        localStorage.setItem('voice-reg', JSON.stringify({ name: me.name, ship: me.ship, station: 'Operations' }));
+      } catch {}
+      break;
+    case 'operator-failed':
+      $('register-error').textContent = `Access denied: ${msg.reason}`;
       $('register-form').querySelector('button').disabled = false;
       break;
     case 'hello': {
@@ -234,17 +293,23 @@ setInterval(tick, 1000);
 
 // Station picker, then pre-fill the last registration on this browser
 // (the ship once the list arrives).
+// Also from the URL: ?station=Operations&name=O'Brien&ship=Enterprise
+const urlParams = new URLSearchParams(location.search);
 let savedReg = null;
 try { savedReg = JSON.parse(localStorage.getItem('voice-reg') || 'null'); } catch {}
-if (savedReg) $('name').value = savedReg.name;
+$('name').value = urlParams.get('name') || savedReg?.name || '';
+$('ops-ship').value = urlParams.get('ship') || (savedReg?.station === 'Operations' ? savedReg.ship : '');
+$('station').onchange = updateSignInMode;
 
 function fillStations() {
   const sel = $('station');
-  const keep = sel.value || savedReg?.station || '';
+  const keep = sel.value || urlParams.get('station') || savedReg?.station || '';
   const placeholder = new Option('Station', '');
   placeholder.disabled = true;
-  sel.replaceChildren(placeholder, ...stations.map((n) => new Option(n, n)));
-  sel.value = stations.includes(keep) ? keep : '';
+  const all = ['Operations', ...stations];
+  sel.replaceChildren(placeholder, ...all.map((n) => new Option(n, n)));
+  sel.value = all.includes(keep) ? keep : '';
+  updateSignInMode();
   if (me) $('new-station').replaceChildren(...stations.filter((n) => n !== me.station).map((n) => new Option(n, n)));
 }
 fillStations();
@@ -254,7 +319,13 @@ $('register-form').onsubmit = (e) => {
   if (ws?.readyState !== WebSocket.OPEN) return;
   $('register-error').textContent = '';
   $('register-form').querySelector('button').disabled = true;
-  send({ type: 'register', name: $('name').value.trim(), ship: $('ship').value, station: $('station').value });
+  if (opsSelected() && !$('ops-ship').value.trim()) {
+    $('register-error').textContent = 'Enter the ship for this ops station';
+    $('register-form').querySelector('button').disabled = false;
+    return;
+  }
+  if (opsSelected()) send({ type: 'operator', name: $('name').value.trim(), ship: $('ops-ship').value.trim(), key: $('key').value });
+  else send({ type: 'register', name: $('name').value.trim(), ship: $('ship').value, station: $('station').value });
 };
 $('reassign-form').onsubmit = (e) => {
   e.preventDefault();
@@ -276,6 +347,7 @@ connect();
 
 // Exposed for the headless test.
 window.__comms = comms;
+window.__operator = new Proxy({}, { get: (_, k) => ops?.[k] });
 window.__voice = Object.create(comms.voice, {
   myName: { get: () => me?.name },
   me: { get: () => me },

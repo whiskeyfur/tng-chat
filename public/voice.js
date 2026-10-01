@@ -1,5 +1,5 @@
 // Call engine shared by the crew page (client.js) and the ops console
-// (operator.js). It handles every call message from the server, owns the
+// (ops screens in ops.js). It handles every call message from the server, owns the
 // WebRTC connections, and renders a call panel (incoming call, call bar with
 // mute/hang-up, chat and file sharing) into a container the page provides.
 //
