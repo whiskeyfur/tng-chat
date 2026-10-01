@@ -94,7 +94,7 @@ Pick **Operations** at sign-in, or open `?station=Operations&name=O'Brien&ship=E
 
 The ops menu has Comms, Status (channel readouts and the comm log), Hail, Data link, Intercom (intercom and conference), Crew roster and, at the bottom, Library.
 
-**Authorization code:** by default anyone can take an ops station, and the code field doesn't appear. Start the relay with `OPERATOR_KEY=yourkey npm start` and taking an ops station (at sign-in or on the Station screen) asks for that code, as does running a ship's computer (`--key`). Ops can force-connect people, disconnect them, transfer calls, open data links and all-hands broadcasts and delete library files, so the code keeps crew from making themselves ops. To require a key, start the server with `OPERATOR_KEY=yourkey npm start` and enter it as the authorization code.
+**Authorization code:** by default anyone can take an ops station, and the code field doesn't appear. Start the relay with `OPERATOR_KEY=yourkey npm start` and taking an ops station (at sign-in or on the Station screen) asks for that code, as does running a ship's computer (`--key`). Ops can force-connect people, disconnect them, transfer calls, open data links and all-hands broadcasts and delete library files, so the code keeps crew from making themselves ops.
 
 ### When ops drops out
 
