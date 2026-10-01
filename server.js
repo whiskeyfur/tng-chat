@@ -744,21 +744,28 @@ function coreSignOff(ws) {
 
 // Ranges at full sensor power; sensor power scales all three (Engineering).
 const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
-const SYSTEMS = ['engines', 'injectors', 'shields', 'sensors', 'transporter', 'weapons', 'atmosphere', 'thermal', 'gravity', 'replicators', 'recreation'];
+const SYSTEMS = ['engines', 'injectors', 'deflector', 'shields', 'sensors', 'lateral', 'transporter', 'weapons', 'sif', 'idf', 'atmosphere', 'thermal', 'gravity', 'lighting', 'replicators', 'recreation'];
+// Sensors: the long-range sensors (EPS) set sensor and subspace range; the
+// lateral arrays (a low bus) see close in and give the transporter its range.
+// The navigational deflector (EPS) needs the long-range sensors; warp needs it.
+// The structural integrity field and inertial dampers (EPS) hold the ship
+// together: the dampers need the SIF at 50%, the warp core needs the SIF at 50%
+// to start, impulse needs SIF 60% and dampers 80%, and warp both at 90%.
+const HULL = { idfNeedsSif: 50, coreSif: 50, impulse: { sif: 60, idf: 80 }, warp: { sif: 90, idf: 90 }, deflector: 90 };
 // Life support is three systems: atmospheric processors, thermal regulation
 // and gravity generators. Small ones: solar (25) runs the first two, with a
 // little over to charge batteries, but not gravity as well.
-const LIFE_SUPPORT = ['atmosphere', 'thermal', 'gravity'];
+const LIFE_SUPPORT = ['atmosphere', 'thermal', 'gravity', 'lighting'];
 // What a system draws at 100% (most: 100).
-const RATING = { atmosphere: 10, thermal: 8, gravity: 20 };
+const RATING = { atmosphere: 10, thermal: 8, gravity: 20, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
 const ratingOf = (s) => RATING[s] ?? 100;
 // Each system's power setting is a limit, 0-150: past 100 (its rating) is
 // emergency overdrive, which slowly damages it, faster the further over it runs.
 const POWER_MAX = 150;
 const OVERDRIVE_DAMAGE = 0.02; // damage per second for each point drawn over 100
-const REACTOR = 450; // total power to share, in percent of one system at full
+const REACTOR = 300; // power drawn for a full sensor signature (a warm ship idling draws a little less)
 const MIN_SHIELD_POWER = 20;
-const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, replicators: 40, recreation: 10 };
+const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lighting: 100, lateral: 100, deflector: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
 // actually gets from the power grid (see "the power grid" below): damage caps
 // a system, unarmed weapons draw nothing, and a bus short of power browns out.
@@ -768,27 +775,43 @@ function powerOf(k) {
   const f = flow(k);
   const p = Object.fromEntries(SYSTEMS.map((s) => [s, Math.floor(f.delivered[s] + 1e-9)]));
   p.lifeSupport = Math.min(p.atmosphere, p.thermal); // what keeps the crew alive (gravity is a comfort)
+  if (p.sif < HULL.idfNeedsSif) p.idf = 0; // the dampers work inside the SIF
+  if (p.sensors <= 0) p.deflector = 0; // the deflector aims by the long-range sensors
   return p;
 }
 // How visible a ship is to other ships' sensors: the more power it uses (all
 // of it: systems, consoles, the warp core's containment), the further off it
-// shows up. 450 units drawn or more: seen at full sensor range; power down to run quiet.
+// shows up. 250 units drawn or more: seen at full sensor range; power down to run quiet.
 const signatureOf = (k) => (isBase(k) ? 1 : Math.max(0.1, Math.min(1, flow(k).drawn / REACTOR)));
+// The lateral arrays alone see a quarter as far as the long-range sensors.
 function rangesOf(k) {
-  const f = Math.max(0, Math.min(POWER_MAX, powerOf(k).sensors)) / 100;
-  return { comms: COMMS_RANGE * f, sensors: SENSOR_RANGE * f, transporter: TRANSPORTER_RANGE * f };
+  const p = powerOf(k), pct = (x) => Math.max(0, Math.min(POWER_MAX, x)) / 100;
+  const f = Math.max(pct(p.sensors), pct(p.lateral) / 4);
+  return { comms: COMMS_RANGE * f, sensors: SENSOR_RANGE * f, transporter: TRANSPORTER_RANGE * pct(p.lateral) };
 }
 // Top speeds: warp (1-9) needs the warp core online and engine power; impulse
 // (below 1) comes from the running impulse drives, half impulse (0.125) each. maxWarp: the top of whichever the ship has.
 function speedLimits(k) {
   const e = eng.get(k);
-  // Warp needs both the engines and their plasma injectors: the weaker sets the top speed.
-  const warpPower = Math.min(100, powerOf(k).engines, powerOf(k).injectors);
+  // Warp needs both the engines and their plasma injectors: the weaker sets the
+  // top speed, by what they may draw; at warp, by what they actually get (a bus short browns them out).
+  const cap = capacityOf(k), now = navState.get(k)?.warp || 0, got = powerOf(k);
+  const short = now >= 1 && ['engines', 'injectors'].some((x) => got[x] < flow(k).demand[x] - 1);
+  const warpPower = Math.min(100, cap.engines, cap.injectors, ...(short ? [got.engines, got.injectors].map((x) => Math.max(x, 0)) : []));
   const eng9 = warpPower <= 0 ? 0 : Math.round((warpPower / 100) * 9 * 10) / 10;
   if (!e || isBase(k)) return { warp: eng9 >= 1 ? eng9 : 0, impulse: 0.25 };
-  let warp = e.core === 'online' && eng9 >= 1 ? eng9 : 0;
+  const p = powerOf(k);
+  // Why not (for Helm): the hull fields and the deflector gate warp and impulse.
+  const why = {
+    warp: e.core !== 'online' ? 'the warp core is offline' : eng9 < 1 ? 'no power to the engines'
+      : p.sif < HULL.warp.sif || p.idf < HULL.warp.idf ? `warp needs the structural integrity field and inertial dampers at ${HULL.warp.sif}% (SIF ${p.sif}%, dampers ${p.idf}%)`
+      : p.sensors <= 0 ? 'the navigational deflector needs the long-range sensors' : cap.deflector < HULL.deflector ? `warp needs the navigational deflector at ${HULL.deflector}% (its limit is ${Math.floor(cap.deflector)}%)` : '',
+    impulse: !flow(k).thrusting ? 'start an impulse drive (Engineering)'
+      : p.sif < HULL.impulse.sif || p.idf < HULL.impulse.idf ? `impulse needs the SIF at ${HULL.impulse.sif}% and dampers at ${HULL.impulse.idf}% (SIF ${p.sif}%, dampers ${p.idf}%)` : '',
+  };
+  let warp = why.warp ? 0 : eng9;
   if (e.towing) warp = Math.min(warp, TRACTOR.maxWarp); // towing holds a ship back
-  return { warp, impulse: 0.125 * flow(k).thrusting };
+  return { warp, impulse: why.impulse ? 0 : 0.125 * flow(k).thrusting, why };
 }
 const maxWarp = (k) => { const l = speedLimits(k); return l.warp || l.impulse; };
 // Is this speed within what the ship has? (impulse and warp are separate)
@@ -821,7 +844,7 @@ function navMessage(key) {
   const seen = [...navState.keys()].filter((k) => cores.has(k) && !isBase(k) && sensorOk(key, k));
   return {
     type: 'nav',
-    own: own ? { name: shipName(key), ...own, power: powerOf(key), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
+    own: own ? { name: shipName(key), ...own, power: powerOf(key), capacity: Object.fromEntries(Object.entries(capacityOf(key)).map(([x, v]) => [x, Math.floor(v)])), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
       autopilot: autopilots.get(key)?.target || null, transporter: transporterView(key),
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
@@ -1049,10 +1072,10 @@ function navCommand(ws, msg) {
       order.warp = Math.max(0, Math.min(9, msg.warp));
       const lim = speedLimits(key);
       if (order.warp > 0 && order.warp < 1) {
-        if (!lim.impulse) return note('Helm: no impulse: start an impulse drive (Engineering)');
+        if (!lim.impulse) return note(`Helm: no impulse: ${lim.why?.impulse || 'start an impulse drive (Engineering)'}`);
         order.warp = Math.min(order.warp, lim.impulse); // impulse: what there is
       } else if (order.warp >= 1 && order.warp > lim.warp) {
-        return note(lim.warp ? `Helm: engines only give warp ${lim.warp} at this power` : engOf(key).core !== 'online' ? 'Helm: no warp: the warp core is offline' : 'Helm: no power to the engines');
+        return note(lim.warp ? `Helm: engines only give warp ${lim.warp} at this power` : lim.why?.warp === 'the warp core is offline' ? 'Helm: no warp: the warp core is offline' : lim.why?.warp === 'no power to the engines' ? 'Helm: no power to the engines' : `Helm: no warp: ${lim.why?.warp}`);
       }
     }
     if (order.warp === 0) navTargets.delete(key);
@@ -1140,7 +1163,7 @@ function crewCommand(ws, msg) {
       const level = ALERTS.includes(msg.level) ? msg.level : 'green';
       if (!setShip({ alert: level })) return;
       // Red alert: shields up, if there's the power for them.
-      if (level === 'red' && !shields.has(key) && powerOf(key).shields >= MIN_SHIELD_POWER && combatOf(key).shield >= MIN_SHIELD_STRENGTH) { shields.add(key); broadcastShips(); }
+      if (level === 'red' && !shields.has(key) && capacityOf(key).shields >= MIN_SHIELD_POWER && combatOf(key).shield >= MIN_SHIELD_STRENGTH) { shields.add(key); flowCache.delete(key); broadcastShips(); }
       opLog(key, `${ws.name}: ${level} alert`);
       for (const u of crewOf(key)) send(u, { type: 'notice', text: `${level === 'green' ? 'Condition green' : `${level[0].toUpperCase()}${level.slice(1)} alert`}: ${ws.name}` });
       return;
@@ -1306,15 +1329,15 @@ const PORTS = ['port', 'starboard']; // docking ports (starbases take any number
 // The port a ship is docked to us at (or null), and the ships docked with us (both sides agreeing).
 const portFor = (k, other) => PORTS.find((p) => engOf(k).shipDocks[p] === other) || null;
 const shipsDocked = (k) => PORTS.map((p) => [p, engOf(k).shipDocks[p]]).filter(([, o]) => o && portFor(o, k));
-const SYSTEM_BUS = { atmosphere: 'A', thermal: 'A', gravity: 'A', sensors: 'A', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
+const SYSTEM_BUS = { atmosphere: 'A', thermal: 'A', gravity: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
-const STATION_SYSTEMS = { Helm: ['engines'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors'], Engineering: ['lifeSupport'] /* a parent row: its systems carry the ties */, Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
+const STATION_SYSTEMS = { Helm: ['engines', 'deflector'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors', 'lateral'], Engineering: ['sif', 'idf', 'lifeSupport'] /* a parent row: its systems carry the ties */, Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
 const LOAD_NODES = {
-  atmosphere: AB, thermal: AB, gravity: AB, sensors: AB, replicators: AB, recreation: AB, // low power
+  atmosphere: AB, thermal: AB, gravity: AB, lighting: AB, lateral: AB, replicators: AB, recreation: AB, // low power
   transporter: AB,
-  engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], tractor: ['EPS'], // high power: EPS only
+  engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], tractor: ['EPS'], sensors: ['EPS'], deflector: ['EPS'], sif: ['EPS'], idf: ['EPS'], // high power: EPS only
 };
-const SYSTEM_PRIORITY = ['atmosphere', 'thermal', 'gravity', 'sensors', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
+const SYSTEM_PRIORITY = ['sif', 'idf', 'atmosphere', 'thermal', 'lighting', 'gravity', 'sensors', 'lateral', 'deflector', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
 // Systems shown under another system in the grid table (Helm > Engines > Plasma injectors).
 const SYSTEM_CHILDREN = { engines: ['injectors'], lifeSupport: LIFE_SUPPORT };
 // Rows with no ties of their own, only their systems' (Engineering > Life support > ...).
@@ -1471,6 +1494,27 @@ const towedBy = (k) => [...eng].find(([, e]) => e.towing === k)?.[0] || null;
 const SUB_FAIL_DAMAGE = 50;
 
 // Where each ship's power goes, worked out fresh (cached briefly: it's asked a lot).
+// What a system is using right now, in % of its rating (the limiter caps it):
+// the transporter by what it's doing; weapons while armed (all they're allowed
+// while the banks charge, a trickle to hold them full); shields while up or
+// recharging; the warp drive and its injectors by the warp they're making;
+// the deflector while moving; sensors sweep as far as they're allowed; the
+// rest (life support, hull fields, replicators, recreation) run steadily at their rating.
+function usageOf(k, s, c) {
+  const w = navState.get(k)?.warp || 0;
+  switch (s) {
+    case 'transporter': return transporterDraw(k);
+    case 'weapons': return !c.armed ? 0 : c.phaserCharge < 100 ? POWER_MAX : 10;
+    case 'shields': return shields.has(k) || c.shield < 100 ? POWER_MAX : 0;
+    case 'engines': case 'injectors': return w >= 1 ? (w / 9) * 100 : 0;
+    case 'deflector': return w >= 1 ? 100 : w > 0 ? 50 : 0;
+    case 'sensors': case 'lateral': return POWER_MAX;
+    default: return 100;
+  }
+}
+// What a system could draw if it needed to (its limiter, less damage), for
+// the checks made before it's in use: raising shields, going to warp.
+const capacityOf = (k) => flow(k).capacity;
 const flowCache = new Map();
 function flow(k) {
   const cached = flowCache.get(k);
@@ -1478,8 +1522,10 @@ function flow(k) {
   const e = engOf(k), c = combatOf(k), a = allocOf(k);
   const demand = {};
   // Damage takes the same share off what a system can draw, overdrive included.
-  for (const s of SYSTEMS) demand[s] = s === 'weapons' && !c.armed ? 0 : Math.min(a[s], Math.max(0, (POWER_MAX * (100 - c.damage[s])) / 100));
-  demand.transporter = Math.min(demand.transporter, transporterDraw(k));
+  // A system draws what it's using right now (usageOf), capped by its limiter
+  // and by damage: at 0 it draws nothing, idle it draws little or nothing.
+  const capacity = {};
+  for (const s of SYSTEMS) { capacity[s] = Math.min(a[s], Math.max(0, (POWER_MAX * (100 - c.damage[s])) / 100)); demand[s] = Math.min(capacity[s], usageOf(k, s, c)); }
   // A ship docked with us: each side offers power (feed); whoever offers more
   // sends the difference, drawn from (or, received, fed into) the docked-ship ties.
   // Each connection on its own: per port, whoever offers more sends the difference.
@@ -1653,7 +1699,7 @@ function flow(k) {
     return [n, { used: Math.round(have), available: Math.round(Math.min(maxOf(n), have + direct + Math.min(epsLeft, tapRoom(n)))), max: Math.round(maxOf(n)), fullMax: BUS_MAX[n], condition: cond, tied: Math.round(tied[n]), tap: e.taps[n], pool: pool(n).join('') }];
   }));
   const f = {
-    cells, totals, buses, consoleOk, demand, delivered, containmentOk, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
+    cells, totals, buses, consoleOk, demand, capacity, delivered, containmentOk, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
     batteryUsed: Math.max(0, used), coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps,
   };
   flowCache.set(k, { at: Date.now(), f });
@@ -1767,6 +1813,7 @@ function gridCommand(ws, msg) {
   }
   if (msg.core === 'start' && e.core === 'offline') {
     if (e.antimatter <= 0 || e.deuterium <= 0) return note(`the warp core needs antimatter and deuterium (aboard: ${Math.floor(e.antimatter)} antimatter, ${Math.floor(e.deuterium)} deuterium)`);
+    if (powerOf(key).sif < HULL.coreSif) return note(`the warp core needs the structural integrity field at ${HULL.coreSif}% to start (it's at ${powerOf(key).sif}%)`);
     e.core = 'starting'; e.start = 0; flowCache.delete(key);
     if (!flow(key).coreSubsOk) { e.core = 'offline'; flowCache.delete(key); return note(`the warp core's constriction (${GRID.constriction.start} to start), deuterium pump and antimatter injector need power: tie them to a bus that has it`); }
     said.push('warp core startup');
@@ -2109,7 +2156,7 @@ const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 50
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
-const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
+const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
   corePump: "warp core's deuterium pump", injector: 'antimatter injector', portPump: "port impulse drive's deuterium pump", starboardPump: "starboard impulse drive's deuterium pump",
   conduits: 'power transfer conduits', rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
 // What a hit can damage: the systems, and the subsystems that fail when badly damaged.
@@ -2482,9 +2529,10 @@ function checkRemotes() {
 function shieldsCommand(ws, msg) {
   if (ws.station !== 'Tactical') return send(ws, { type: 'notice', text: 'Only Tactical can raise or lower shields' });
   if (consoleDark(ws)) return darkNote(ws);
-  if (msg.up && powerOf(ws.shipKey).shields < MIN_SHIELD_POWER) return send(ws, { type: 'notice', text: `Tactical: not enough power to raise shields (needs ${MIN_SHIELD_POWER}%; ask Engineering)` });
+  if (msg.up && capacityOf(ws.shipKey).shields < MIN_SHIELD_POWER) return send(ws, { type: 'notice', text: `Tactical: not enough power to raise shields (needs ${MIN_SHIELD_POWER}%; ask Engineering)` });
   if (msg.up && combatOf(ws.shipKey).shield < MIN_SHIELD_STRENGTH) return send(ws, { type: 'notice', text: `Tactical: the shield generators are recharging (${Math.floor(combatOf(ws.shipKey).shield)}%; they hold from ${MIN_SHIELD_STRENGTH}%)` });
   if (msg.up) shields.add(ws.shipKey); else shields.delete(ws.shipKey);
+  flowCache.delete(ws.shipKey); // they draw while up
   opLog(ws.shipKey, `${ws.name}: shields ${msg.up ? 'up' : 'down'}`);
   broadcastShips();
   return;

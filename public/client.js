@@ -307,7 +307,7 @@ const ownShip = () => ships.find((s) => me && s.name.toLowerCase() === me.ship.t
 
 // Shields (footer, displays, Tactical's control) and the transporter controls.
 // Power as Engineering has routed it (from the ship's computer, via 'nav').
-const POWER = [['engines', 'Engines'], ['injectors', 'Plasma injectors'], ['shields', 'Shields'], ['sensors', 'Sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['atmosphere', 'Atmospheric processors'], ['thermal', 'Thermal regulation'], ['gravity', 'Gravity generators'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
+const POWER = [['engines', 'Engines'], ['injectors', 'Plasma injectors'], ['deflector', 'Navigational deflector'], ['shields', 'Shields'], ['sensors', 'Long-range sensors'], ['lateral', 'Lateral sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['sif', 'Structural integrity field'], ['idf', 'Inertial dampers'], ['atmosphere', 'Atmospheric processors'], ['thermal', 'Thermal regulation'], ['gravity', 'Gravity generators'], ['lighting', 'Emergency lighting'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
 const ownPower = () => lastNav?.own?.power || null;
 
 // Shields (footer, displays, Tactical's control), the transporter controls and
@@ -331,7 +331,7 @@ function renderShipState() {
   // Where each target is, for the transporter's reach (updates as ships move).
   const where = (name) => lastNav?.ships?.find((x) => x.name === name)?.distance ?? lastNav?.bases?.find((b) => b.name === name)?.distance;
   const trState = lastNav?.own?.transporter || {};
-  const sig = JSON.stringify([up, p?.shields, p?.transporter, lastNav?.own?.allocated?.transporter, trState.lock, !!trState.energizing, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields, Math.round(where(t.name) ?? -1)]), strength]);
+  const sig = JSON.stringify([up, p?.shields, lastNav?.own?.capacity?.shields, p?.transporter, lastNav?.own?.allocated?.transporter, trState.lock, !!trState.energizing, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields, Math.round(where(t.name) ?? -1)]), strength]);
   if (sig === shipStateSig) return;
   shipStateSig = sig;
   stationView.setShields(up);
@@ -340,7 +340,8 @@ function renderShipState() {
 
   const shieldCtl = document.querySelector('[data-shield-control]');
   if (shieldCtl) {
-    const weak = (p && p.shields < 20) || strength < 10;
+    // Raising them needs the power to be there (what they may draw: down, they draw nothing).
+    const weak = ((lastNav?.own?.capacity?.shields ?? p?.shields) < 20) || strength < 10;
     const btn = el('button', {
       type: 'button',
       className: `lcars-button lcars-button--pill${up ? '' : ' lcars-button--alert'}`,
@@ -1109,7 +1110,7 @@ function renderPower() {
   if (!root || !p) return;
   const draft = powerDraft || { ...p };
   const total = POWER.reduce((n, [k]) => n + draft[k], 0);
-  const f = draft.sensors / 100;
+  const f = Math.max(draft.sensors, draft.lateral / 4) / 100;
   const warp = draft.engines <= 0 ? 0 : Math.max(0.25, Math.round((draft.engines / 100) * 90) / 10);
   if (!root.firstChild) {
     root.append(
@@ -1150,7 +1151,7 @@ function renderPower() {
   root.querySelector('.pw-total').toggleAttribute('data-over', short.length > 0);
   root.querySelector('.pw-effects').replaceChildren(...[
     `Top speed: ${warp <= 0 ? 'none (no engine power)' : warp < 1 ? 'impulse' : `warp ${warp}`}`,
-    `Sensors ${Math.round(600 * f)} · subspace ${Math.round(400 * f)} · transporter ${Math.round(20 * f)} units`,
+    `Sensors ${Math.round(600 * f)} · subspace ${Math.round(400 * f)} · transporter ${Math.round((20 * draft.lateral) / 100)} units`,
     draft.shields < 20 ? 'Shields: too little power to hold them' : 'Shields: can be raised',
     draft.transporter <= 0 ? 'Transporter: no power' : 'Transporter: ready',
     Math.min(draft.atmosphere, draft.thermal) < 50 ? `Life support: ${Math.min(draft.atmosphere, draft.thermal)}%, crew warned` : 'Life support: nominal',

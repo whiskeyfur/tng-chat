@@ -90,7 +90,7 @@ const unitsPerSecond = (warp) => (warp <= 0 ? 0 : warp < 1 ? 2 * warp : 2 * warp
 
 // Power: the reactor's output (450%) split across systems, each 0..100%.
 // Engineering sets it; engines set the top speed.
-const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, replicators: 40, recreation: 10 };
+const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lighting: 100, lateral: 100, deflector: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
 const maxWarp = (power) => { const w = Math.min(100, power.engines, power.injectors ?? 100); return w <= 0 ? 0 : Math.max(0.25, Math.round((w / 100) * 9 * 10) / 10); };
 
 for (const store of stores.values()) {
@@ -105,7 +105,7 @@ for (const store of stores.values()) {
   }
   // (Older saves had one life support setting: it goes to its three systems.)
   const was = store.nav.power || {};
-  store.nav.power = { ...DEFAULT_POWER, ...(was.lifeSupport != null ? { atmosphere: was.lifeSupport, thermal: was.lifeSupport, gravity: was.lifeSupport } : {}), ...was };
+  store.nav.power = { ...DEFAULT_POWER, ...(was.lifeSupport != null ? { atmosphere: was.lifeSupport, thermal: was.lifeSupport, gravity: was.lifeSupport, lighting: was.lifeSupport } : {}), ...was };
   delete store.nav.power.lifeSupport;
   store.primary = false;
   store.saveNav = () => fs.writeFileSync(store.navFile, JSON.stringify(store.nav));
