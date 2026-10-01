@@ -191,7 +191,8 @@ node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-
 
 - **Forcing a data link:** a ship with nobody aboard (only its ship's computer) has no one to accept or refuse a data link, so ops' link request opens it at once ("forced"). Crewless ships are listed for ops to link to.
 - **Remote control:** like controls like. Over a working data link, a console can run the **same station** aboard another vessel (a ship or a starbase) while that station there is unmanned, whoever else is aboard. Each station screen shows vessel buttons at the top right: one per vessel this console can run, and our own ship at the far right. Tap a vessel and the console shows and controls that vessel's station (a yellow bar says so); tap our own ship to come back. It snaps back by itself, with a notice, if the link drops, someone takes that station there, or that vessel's ops block it.
-- **Blocking it:** ops' Status screen has a **Remote control: allowed / blocked** toggle for their own vessel (off by default). With nobody at ops, nobody can block it.
+- **Blocking it:** ops' Status screen has a **Remote control: allowed / blocked** toggle for their own vessel. Ships start allowed, and with nobody at their ops nobody can block it. Starbases start blocked, and their block holds with nobody at their ops; someone at a starbase's ops can allow it (the relay keeps starbases' setting in `data/starbases.json`).
+- **Ops too:** an ops console gets the same vessel buttons, to run another vessel's unmanned ops.
 
 ## Ops console (Operations station)
 

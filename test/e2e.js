@@ -1353,6 +1353,24 @@ const audioBytes = (page) => page.evaluate(async () => {
     data.send({ type: 'control', ship: null });
     await waitFor(() => !data.nav()?.remote?.controlling && data.nav().own?.name === 'Enterprise');
     step("the Enterprise forced a data link onto the crewless Reliant; its Helm console ran the Reliant's Helm by remote control, then switched back");
+    // Ops runs the Reliant's (unmanned) ops the same way.
+    await op.waitForSelector('#vessel-bar button[data-vessel="Reliant"]', { state: 'attached' });
+    await op.click('#vessel-bar button[data-vessel="Reliant"]');
+    await op.waitForFunction(() => window.__operator.roster && document.querySelector('#vessel-bar button[data-vessel="Reliant"][aria-pressed="true"]'));
+    await op.click('#vessel-bar button[data-vessel=""]'); // our own ship
+    await op.waitForSelector('#vessel-bar button[data-vessel=""][aria-pressed="true"]', { state: 'attached' });
+    step("Enterprise ops ran the Reliant's unmanned ops by remote control, then switched back");
+    // A starbase blocks remote control by default, even with nobody at its ops.
+    await screen(op, 'link');
+    if (!(await op.evaluate((b) => window.__operator.network.includes(b), reborn.base))) { // (linked earlier, still open)
+      await op.selectOption('#link-ship', reborn.base);
+      await op.click('#link-form button');
+      await op.waitForFunction((b) => window.__operator.network.includes(b), reborn.base, { timeout: 10000 });
+    }
+    await new Promise((r) => setTimeout(r, 1200));
+    assert.ok(!(data.nav()?.remote?.vessels || []).includes(reborn.base), 'a starbase should start with remote control blocked');
+    await op.click(`#links li:has-text("${reborn.base}") button`);
+    step(`${reborn.base}, linked, offered no remote control (starbases start blocked)`);
     // The link closes: remote control snaps back.
     data.send({ type: 'control', ship: 'Reliant' });
     await waitFor(() => data.nav()?.remote?.controlling === 'Reliant');

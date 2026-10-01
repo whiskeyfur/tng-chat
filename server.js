@@ -156,7 +156,7 @@ function broadcastOps(key) {
   scheduleTraffic();
   const ops = opsOf(key);
   const comms = crewOf(key).filter((u) => u.station === 'Communications' && !u.operator);
-  if (!ops.length && !comms.length) return;
+  if (!ops.length && !comms.length && ![...users.values()].some((u) => u.operator && u.controlling === key)) return;
   const roster = crewOf(key)
     .map((u) => ({ ...info(u), state: u.state, peers: u.peers.map(peerInfo) }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -185,7 +185,9 @@ function broadcastOps(key) {
     broadcasts: [...broadcasts.values()].filter((b) => b.ships.has(key) || users.get(b.speaker)?.shipKey === key)
       .map((b) => ({ id: b.bid, speaker: peerInfo(b.speaker), label: b.label, since: b.since })),
   };
-  for (const op of ops) send(op, msg);
+  for (const op of ops) if (!op.controlling) send(op, msg); // (one running another vessel's ops sees that one's)
+  // An ops console remote-controlling this vessel's ops gets its picture too.
+  for (const u of users.values()) if (u.operator && u.controlling === key) send(u, msg);
   // Communications runs data links too: it gets the link picture.
   const links = { type: 'comm-links', ships: otherShips, links: msg.links, network: msg.network, linkIncoming: msg.linkIncoming, linkOutgoing: msg.linkOutgoing };
   for (const u of comms) send(u, links);
@@ -439,6 +441,7 @@ function operatorMessage(op, msg) {
       // Ops can refuse remote control of this vessel's stations from other ships.
       engOf(op.shipKey).remoteBlock = !!msg.on;
       engOf(op.shipKey).dirty = true;
+      if (isBase(op.shipKey)) saveBaseSettings();
       opLog(op.shipKey, `${op.name}: remote control by other vessels ${msg.on ? 'blocked' : 'allowed'}`);
       scheduleNav();
       broadcastOps(op.shipKey);
@@ -1396,7 +1399,19 @@ function freshEng(saved, { cold = false } = {}) {
     breach: 0, selfDestruct: null, towing: null, dirty: false,
   };
 }
-const engOf = (k) => { if (!eng.has(k)) eng.set(k, freshEng()); return eng.get(k); };
+const engOf = (k) => {
+  if (!eng.has(k)) eng.set(k, { ...freshEng(), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
+  return eng.get(k);
+};
+// Starbases have no ship's computer to keep their settings: the relay keeps
+// them (remote control starts blocked at a starbase).
+const BASE_SETTINGS_FILE = path.join(__dirname, 'data', 'starbases.json');
+let baseSettings = {};
+try { baseSettings = JSON.parse(fs.readFileSync(BASE_SETTINGS_FILE, 'utf8')); } catch {}
+function saveBaseSettings() {
+  for (const k of BASE_KEYS) baseSettings[shipName(k)] = { remoteBlock: !!engOf(k).remoteBlock };
+  try { fs.mkdirSync(path.dirname(BASE_SETTINGS_FILE), { recursive: true }); fs.writeFileSync(BASE_SETTINGS_FILE, JSON.stringify(baseSettings, null, 2)); } catch (err) { console.warn(`could not save starbase settings: ${err.message}`); }
+}
 const savedEng = (k) => {
   const e = engOf(k);
   return {
@@ -2267,10 +2282,11 @@ function stationCommand(ws, msg) {
 // unmanned (whoever else is aboard), unless that vessel's ops have blocked it.
 function remoteOk(ws, t) {
   if (!t || t === ws.shipKey || !present(t) || !links.has(linkKey(ws.shipKey, t))) return false;
-  if (ws.operator || ws.station === 'Crew') return false;
-  if (crewOf(t).some((u) => u.station === ws.station)) return false; // manned there
+  if (ws.station === 'Crew') return false;
+  if (crewOf(t).some((u) => u.station === ws.station)) return false; // manned there (ops included)
   if ([...users.values()].some((u) => u !== ws && u.controlling === t && u.station === ws.station)) return false; // someone else has it
-  return !(engOf(t).remoteBlock && opsOf(t).length);
+  // Blocked by that vessel's ops; a starbase's block holds even with nobody at its ops.
+  return !(engOf(t).remoteBlock && (opsOf(t).length || isBase(t)));
 }
 const remoteVessels = (ws) => linkedTo(ws.shipKey).filter((t) => remoteOk(ws, t) || ws.controlling === t);
 // A stand-in for the console, aboard the vessel it controls.
@@ -2286,9 +2302,11 @@ function controlCommand(ws, msg) {
   if (!t || t === ws.shipKey) {
     if (ws.controlling) { opLog(ws.controlling, `${ws.name} (${ws.ship}) released remote control of ${ws.station}`); send(ws, { type: 'notice', text: `Remote control of the ${shipName(ws.controlling)} ended` }); }
     ws.controlling = null;
+    if (ws.operator) broadcastOps(ws.shipKey);
   } else {
     if (!remoteOk(ws, t)) return send(ws, { type: 'notice', text: `Remote control: can't run the ${shipName(t)}'s ${ws.station} (needs a data link, the station unmanned there, and its ops not blocking)` });
     ws.controlling = t;
+    if (ws.operator) broadcastOps(t);
     opLog(t, `${ws.name} of the ${ws.ship} took remote control of ${ws.station} over the data link`);
     send(ws, { type: 'notice', text: `Remote control: running the ${shipName(t)}'s ${ws.station}` });
   }
@@ -2302,6 +2320,7 @@ function checkRemotes() {
     const why = !links.has(linkKey(u.shipKey, t)) ? 'the data link dropped' : crewOf(t).some((x) => x.station === u.station) ? `someone took ${u.station} there` : engOf(t).remoteBlock ? 'its ops blocked remote control' : 'it is no longer available';
     u.controlling = null;
     send(u, { type: 'notice', text: `Remote control of the ${shipName(t)} ended: ${why}` });
+    if (u.operator) broadcastOps(u.shipKey);
   }
 }
 
@@ -2621,7 +2640,8 @@ wss.on('connection', (ws) => {
       joinBroadcasts(ws);
       return;
     }
-    if (ws.operator && OP_COMMANDS.has(msg.type)) return operatorMessage(ws, msg);
+    // Ops commands act on the vessel this ops console is controlling (else its own ship).
+    if (ws.operator && OP_COMMANDS.has(msg.type)) return operatorMessage(ws.controlling ? actorFor(ws) : ws, msg);
     // Communications sets up and closes data links, as ops do.
     if (ws.id && ws.station === 'Communications' && ['link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close'].includes(msg.type)) return consoleDark(ws) ? darkNote(ws) : operatorMessage(ws, msg);
 
