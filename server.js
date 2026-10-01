@@ -51,7 +51,7 @@ const OPS_STATION = 'Operations';   // operators only
 const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew'];
 // Operator commands (everything else from an operator is handled as crew).
 const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-hail', 'cancel-hail', 'transfer',
-  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end']);
+  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block']);
 // Message types one user may send to another; the server adds `from` and forwards.
 const RELAYED = new Set(['call', 'accept', 'decline', 'hangup', 'signal']);
 const STATES = new Set(['idle', 'calling', 'ringing', 'in-call']);
@@ -807,7 +807,8 @@ const rangeText = (a, b) => (Number.isFinite(distance(a, b)) ? `${Math.round(dis
 
 function navMessage(key) {
   const own = navState.get(key);
-  const seen = [...navState.keys()].filter((k) => cores.has(k) && sensorOk(key, k));
+  // Ships only: a starbase (even one a ship's computer holds the library for) is in `bases`.
+  const seen = [...navState.keys()].filter((k) => cores.has(k) && !isBase(k) && sensorOk(key, k));
   return {
     type: 'nav',
     own: own ? { name: shipName(key), ...own, power: powerOf(key), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),

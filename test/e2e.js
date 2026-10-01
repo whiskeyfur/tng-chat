@@ -1387,8 +1387,17 @@ const audioBytes = (page) => page.evaluate(async () => {
     }
     await new Promise((r) => setTimeout(r, 1200));
     assert.ok(!(data.nav()?.remote?.vessels || []).includes(reborn.base), 'a starbase should start with remote control blocked');
+    // Someone at the starbase's ops allows it: the Enterprise's Helm gets its button.
+    const sbOps = await openOps(browser, reborn.base, 'starbase ops', 'quark');
+    await sbOps.waitForSelector('#remote-block:has-text("blocked")'); // starbases start blocked
+    await sbOps.click('#remote-block');
+    await sbOps.waitForSelector('#remote-block:has-text("allowed")');
+    await waitFor(() => (data.nav()?.remote?.vessels || []).includes(reborn.base));
+    await sbOps.click('#remote-block'); // blocked again
+    await waitFor(() => !(data.nav()?.remote?.vessels || []).includes(reborn.base));
+    await sbOps.close();
     await op.click(`#links li:has-text("${reborn.base}") button`);
-    step(`${reborn.base}, linked, offered no remote control (starbases start blocked)`);
+    step(`${reborn.base}, linked, offered no remote control (starbases start blocked); its ops allowed it (the Enterprise's Helm got its button), then blocked it again`);
     // The link closes: remote control snaps back.
     data.send({ type: 'control', ship: 'Reliant' });
     await waitFor(() => data.nav()?.remote?.controlling === 'Reliant');
@@ -1410,10 +1419,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     const sbCore = startComputer('sb', 'Starbase 74');
     await new Promise((r) => setTimeout(r, 3000));
     assert.deepEqual([odo.nav().own.x, odo.nav().own.y], [880, 820]);
+    // Listed once: as a starbase, never also as a ship contact.
+    assert.equal(odo.nav().ships.filter((x) => x.name === 'Starbase 74').length, 0, 'the starbase also showed as a ship');
+    assert.equal(odo.nav().bases.filter((b) => b.name === 'Starbase 74').length, 1);
     assert.ok(!odo.msgs.some((m) => m.type === 'destroyed'), 'the starbase was destroyed');
     await stopComputer(sbCore);
     odo.close();
-    step("Starbase 74 offered no docking with itself, and a ship's computer run for it left the station in place and unharmed");
+    step("Starbase 74 offered no docking with itself, and a ship's computer run for it left the station in place, unharmed, and listed once");
     for (const page of [worf, riker, picard]) await page.close();
 
     sulu.close();
