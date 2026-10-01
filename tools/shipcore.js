@@ -86,6 +86,11 @@ const stores = new Map(opts.ships.map((s) => [s.toLowerCase(), new ShipStore(s)]
 const SECTOR = 1000;
 const unitsPerSecond = (warp) => (warp <= 0 ? 0 : warp < 1 ? 0.5 : 2 * warp ** 1.8);
 
+// Power: the reactor's output (450%) split across systems, each 0..100%.
+// Engineering sets it; engines set the top speed.
+const DEFAULT_POWER = { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100 };
+const maxWarp = (power) => (power.engines <= 0 ? 0 : Math.max(0.25, Math.round((power.engines / 100) * 9 * 10) / 10));
+
 for (const store of stores.values()) {
   store.navFile = path.join(store.dir, '.nav.json');
   try { store.nav = JSON.parse(fs.readFileSync(store.navFile, 'utf8')); } catch {}
@@ -94,6 +99,7 @@ for (const store of stores.values()) {
     const p = opts.position || { x: 400 + Math.random() * 200, y: 400 + Math.random() * 200 };
     store.nav = { x: p.x, y: p.y, heading: Math.floor(Math.random() * 360), warp: 0, dest: null };
   }
+  store.nav.power = { ...DEFAULT_POWER, ...(store.nav.power || {}) };
   store.primary = false;
   store.saveNav = () => fs.writeFileSync(store.navFile, JSON.stringify(store.nav));
   store.saveNav();
@@ -184,6 +190,18 @@ function onMessage(raw, isBinary) {
       if (store.primary) sendNav(store);
       break;
     }
+    case 'core-power': {
+      // Engineering's power distribution (the relay has checked it).
+      const store = storeFor(msg.ship);
+      if (!store || !store.primary || !msg.power) return;
+      const n = store.nav;
+      n.power = { ...n.power, ...msg.power };
+      if (n.warp > maxWarp(n.power)) n.warp = maxWarp(n.power); // less power to engines: slow down
+      log(`${store.ship}: power ${Object.entries(n.power).map(([k, v]) => `${k} ${v}%`).join(', ')}`);
+      store.saveNav();
+      sendNav(store);
+      break;
+    }
     case 'core-nav-sync': {
       // A copy of the ship's position from the computer that's flying it.
       const store = storeFor(msg.ship);
@@ -197,7 +215,7 @@ function onMessage(raw, isBinary) {
       const n = store.nav;
       if (msg.dest !== undefined) n.dest = msg.dest;
       if (typeof msg.heading === 'number') { n.heading = ((msg.heading % 360) + 360) % 360; n.dest = msg.dest ?? null; }
-      if (typeof msg.warp === 'number') n.warp = Math.max(0, Math.min(9, msg.warp));
+      if (typeof msg.warp === 'number') n.warp = Math.max(0, Math.min(maxWarp(n.power), msg.warp));
       delete n.arrived;
       store.saveNav();
       sendNav(store);

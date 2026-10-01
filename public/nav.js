@@ -155,6 +155,14 @@
       }
       const others = nav.ships.filter((s) => s.name !== own?.name);
       if (mode === 'helm') {
+        // Engine power caps the speed (Engineering).
+        const top = nav.maxWarp ?? 9;
+        for (const o of speedSel.options) {
+          const over = Number(o.value) > top;
+          o.disabled = over;
+          o.textContent = SPEEDS.find(([v]) => v === o.value)[1] + (over ? ' (no power)' : '');
+        }
+        if (speedSel.selectedOptions[0]?.disabled) speedSel.value = [...speedSel.options].filter((o) => !o.disabled).pop().value;
         // Show what Helm picked, or else where the ship is actually heading.
         const keep = selected ? `ship:${selected}` : waypoint ? 'waypoint' : own?.dest?.name ? `ship:${own.dest.name}` : '';
         destSel.replaceChildren(new Option('Hold current heading', ''),

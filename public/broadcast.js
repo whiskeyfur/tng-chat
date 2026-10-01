@@ -25,6 +25,7 @@
     let speaking = null;            // { bid, label, stream, ready, pcs: Map(listener id -> pc) }
     const listening = new Map();    // bid -> { bid, from, label, pc, audio, muted }
     let radio = null;               // { name, url, by, audio, muted }
+    let alert = null;               // a ship-wide warning, e.g. life support low
 
     const sig = (to, bid, data) => send({ type: 'bsignal', to, bid, data });
 
@@ -144,6 +145,7 @@
       bar.replaceChildren();
       const pill = (cls, text, ...buttons) => bar.append(el('div', { className: `bcast ${cls}` }, el('span', { className: 'bcast-text', textContent: text }), ...buttons));
       const button = (text, onclick, alert) => { const b = el('button', { type: 'button', className: `lcars-button lcars-button--pill${alert ? ' lcars-button--alert' : ''}`, textContent: text }); b.onclick = onclick; return b; };
+      if (alert) pill('bcast--alert', alert);
       if (speaking) {
         pill('bcast--speaking', `On air: ${speaking.label}`, button('End broadcast', () => send({ type: 'bcast-end', bid: speaking.bid }), true));
       }
@@ -173,6 +175,8 @@
     return {
       handle,
       reset,
+      // A warning shown to everyone aboard (null clears it).
+      setAlert(text) { if (text !== alert) { alert = text; render(); } },
       get speaking() { return speaking ? { bid: speaking.bid, label: speaking.label, listeners: speaking.pcs.size } : null; },
       get listening() { return [...listening.values()].map((l) => ({ bid: l.bid, from: l.from.name, connected: l.pc?.connectionState === 'connected', pc: l.pc })); },
       get shipRadio() { return radio ? { name: radio.name, url: radio.url, playing: !radio.audio.paused } : null; },

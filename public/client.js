@@ -151,6 +151,9 @@ function showStation() {
   const navRoot = document.querySelector('[data-helm], [data-sensors]');
   navPanel = navRoot ? createNavPanel(navRoot, { mode: navRoot.hasAttribute('data-helm') ? 'helm' : 'science', send }) : null;
   if (lastNav) { navPanel?.update(lastNav); stationView.setNav(lastNav.own); }
+  shipStateSig = '';
+  powerDraft = null;
+  renderPower();
   renderShipState();
   fillReassign();
   renderTraffic();
@@ -194,50 +197,114 @@ setInterval(renderTraffic, 1000);
 const ownShip = () => ships.find((s) => me && s.name.toLowerCase() === me.ship.toLowerCase());
 
 // Shields (footer, displays, Tactical's control) and the transporter controls.
+// Power as Engineering has routed it (from the ship's computer, via 'nav').
+const POWER = [['engines', 'Engines'], ['shields', 'Shields'], ['sensors', 'Sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['lifeSupport', 'Life support']];
+const ownPower = () => lastNav?.own?.power || null;
+
+// Shields (footer, displays, Tactical's control), the transporter controls and
+// the life support warning. Rebuilt only when something they show changes, so
+// buttons don't move under the pointer.
+let shipStateSig = '';
 function renderShipState() {
-  if (!me || !stationView) return;
+  if (!me) return;
+  const p = ownPower();
+  bc.setAlert(p && p.lifeSupport < 50 ? `Life support at ${p.lifeSupport}%` : null);
+  if (!stationView) return;
   const up = !!ownShip()?.shields;
+  const crew = comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station !== 'Operations');
+  const targets = ships.filter((s) => s.computer && s.name.toLowerCase() !== me.ship.toLowerCase());
+  const range = lastNav?.ranges?.transporter;
+  const sig = JSON.stringify([up, p?.shields, p?.transporter, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields])]);
+  if (sig === shipStateSig) return;
+  shipStateSig = sig;
   stationView.setShields(up);
   document.body.toggleAttribute('data-shields-up', up);
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 
   const shieldCtl = document.querySelector('[data-shield-control]');
   if (shieldCtl) {
-    const btn = Object.assign(document.createElement('button'), {
+    const weak = p && p.shields < 20;
+    const btn = el('button', {
       type: 'button',
       className: `lcars-button lcars-button--pill${up ? '' : ' lcars-button--alert'}`,
       textContent: up ? 'Lower shields' : 'Raise shields',
+      disabled: !up && weak,
       onclick: () => send({ type: 'shields', up: !up }),
     });
-    const state = Object.assign(document.createElement('p'), { className: 'st-state', textContent: up ? 'Shields up · transporters blocked' : 'Shields down' });
+    const state = el('p', { className: 'st-state', textContent: up ? 'Shields up · transporters blocked' : weak ? 'Shields down · not enough power' : 'Shields down' });
     state.toggleAttribute('data-up', up);
-    const box = Object.assign(document.createElement('div'), { className: 'st-control' });
-    box.append(state, btn);
-    shieldCtl.replaceChildren(box);
+    const power = el('p', { className: 'ops-hint', textContent: p ? `Shield power ${p.shields}% (20% needed to hold them)` : '' });
+    shieldCtl.replaceChildren(el('div', { className: 'st-control' }, state, btn, power));
   }
 
   const tr = document.querySelector('[data-transporter]');
   if (tr) {
     const keep = { who: tr.querySelector('#beam-who')?.value, ship: tr.querySelector('#beam-ship')?.value };
-    const crew = comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station !== 'Operations');
-    const targets = ships.filter((s) => s.computer && s.name.toLowerCase() !== me.ship.toLowerCase());
-    const who = Object.assign(document.createElement('select'), { className: 'ops-select', id: 'beam-who', ariaLabel: 'who to beam' });
-    who.append(...crew.map((u) => new Option(u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`, u.id)));
-    const dest = Object.assign(document.createElement('select'), { className: 'ops-select', id: 'beam-ship', ariaLabel: 'destination ship' });
-    dest.append(...targets.map((s) => new Option(s.shields ? `${s.name} (shields up)` : s.name, s.name)));
+    const who = el('select', { className: 'ops-select', id: 'beam-who', ariaLabel: 'who to beam' }, ...crew.map((u) => new Option(u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`, u.id)));
+    const dest = el('select', { className: 'ops-select', id: 'beam-ship', ariaLabel: 'destination ship' }, ...targets.map((s) => new Option(s.shields ? `${s.name} (shields up)` : s.name, s.name)));
     if (keep.who && crew.some((u) => u.id === keep.who)) who.value = keep.who;
     if (keep.ship && targets.some((s) => s.name === keep.ship)) dest.value = keep.ship;
-    const blocked = up ? `Shields are up aboard the ${me.ship}` : '';
-    const energize = Object.assign(document.createElement('button'), {
+    const noPower = p && p.transporter <= 0;
+    const blocked = noPower ? 'No power to the transporter: ask Engineering' : up ? `Shields are up aboard the ${me.ship}` : '';
+    const energize = el('button', {
       type: 'button', className: 'lcars-button lcars-button--pill', id: 'beam-go', textContent: 'Energize',
-      disabled: !crew.length || !targets.length,
+      disabled: !crew.length || !targets.length || noPower,
       onclick: () => { stationView.energize(); send({ type: 'beam', who: who.value, ship: dest.value }); },
     });
-    const form = Object.assign(document.createElement('div'), { className: 'ops-form' });
-    form.append(Object.assign(document.createElement('span'), { textContent: 'Beam' }), who,
-      Object.assign(document.createElement('span'), { textContent: 'to the' }), dest, energize);
-    const status = Object.assign(document.createElement('p'), { className: 'ops-notice', id: 'beam-status', textContent: blocked || tr.querySelector('#beam-status')?.textContent || '' });
-    tr.replaceChildren(form, status);
+    const form = el('div', { className: 'ops-form' }, el('span', { textContent: 'Beam' }), who, el('span', { textContent: 'to the' }), dest, energize);
+    const status = el('p', { className: 'ops-notice', id: 'beam-status', textContent: blocked || tr.querySelector('#beam-status')?.textContent || '' });
+    const reach = el('p', { className: 'ops-hint', id: 'beam-range', textContent: range != null ? `Transporter range ${Math.round(range)} units (sensor power ${p?.sensors ?? 100}%)` : '' });
+    tr.replaceChildren(form, status, reach);
   }
+}
+
+// Engineering: route the reactor's output. Sliders per system (0-100%), the
+// total against the reactor, and what the settings mean for the ship.
+let powerDraft = null; // Engineering's unsent changes
+function renderPower() {
+  const root = document.querySelector('[data-power]');
+  const p = ownPower();
+  if (!root || !p) return;
+  const reactor = lastNav.own.reactor || 450;
+  const draft = powerDraft || { ...p };
+  const total = POWER.reduce((n, [k]) => n + draft[k], 0);
+  const f = draft.sensors / 100;
+  const warp = draft.engines <= 0 ? 0 : Math.max(0.25, Math.round((draft.engines / 100) * 90) / 10);
+  if (!root.firstChild) {
+    root.append(
+      ...POWER.map(([k, label]) => {
+        const row = document.createElement('label');
+        row.className = 'pw-row';
+        row.innerHTML = `<span class="pw-label">${label}</span><input type="range" min="0" max="100" step="5" class="pw-slider" data-system="${k}" aria-label="${label} power"><b class="pw-value"></b>`;
+        row.querySelector('input').oninput = (e) => { powerDraft = { ...(powerDraft || ownPower()), [k]: Number(e.target.value) }; renderPower(); };
+        return row;
+      }),
+      Object.assign(document.createElement('p'), { className: 'pw-total' }),
+      Object.assign(document.createElement('ul'), { className: 'pw-effects' }),
+      Object.assign(document.createElement('div'), { className: 'ops-form pw-actions' }));
+    const apply = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill', id: 'power-apply', textContent: 'Route power' });
+    const reset = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill lcars-button--alert', id: 'power-reset', textContent: 'Undo' });
+    apply.onclick = () => { if (powerDraft) send({ type: 'power', power: powerDraft }); powerDraft = null; };
+    reset.onclick = () => { powerDraft = null; renderPower(); };
+    root.querySelector('.pw-actions').append(apply, reset);
+  }
+  for (const [k] of POWER) {
+    const input = root.querySelector(`[data-system="${k}"]`);
+    if (document.activeElement !== input) input.value = draft[k];
+    input.parentElement.querySelector('.pw-value').textContent = `${draft[k]}%`;
+  }
+  const over = total > reactor;
+  root.querySelector('.pw-total').textContent = `Reactor ${total}% of ${reactor}%${over ? ': over capacity' : ''}${powerDraft ? ' · not routed yet' : ''}`;
+  root.querySelector('.pw-total').toggleAttribute('data-over', over);
+  root.querySelector('.pw-effects').replaceChildren(...[
+    `Top speed: ${warp <= 0 ? 'none (no engine power)' : warp < 1 ? 'impulse' : `warp ${warp}`}`,
+    `Sensors ${Math.round(600 * f)} · subspace ${Math.round(400 * f)} · transporter ${Math.round(20 * f)} units`,
+    draft.shields < 20 ? 'Shields: too little power to hold them' : 'Shields: can be raised',
+    draft.transporter <= 0 ? 'Transporter: no power' : 'Transporter: ready',
+    draft.lifeSupport < 50 ? `Life support: ${draft.lifeSupport}%, crew warned` : 'Life support: nominal',
+  ].map((t) => Object.assign(document.createElement('li'), { textContent: t })));
+  root.querySelector('#power-apply').disabled = !powerDraft || over;
+  root.querySelector('#power-reset').disabled = !powerDraft;
 }
 
 // Ops screens instead of station displays.
@@ -270,6 +337,7 @@ async function onMessage(msg) {
   if (ops?.handle(msg)) return;
   if (await bc.handle(msg)) return;
   if (msg.type === 'notice' && /^(Helm|Sensors|Science|Course plotted|No ship's computer is flying)/.test(msg.text)) navPanel?.status(msg.text);
+  if (msg.type === 'notice' && /^(Engineering|Tactical)/.test(msg.text)) log(msg.text, 'warn');
   if (msg.type === 'notice' && msg.text.startsWith('Transporter:')) {
     const st = document.getElementById('beam-status');
     if (st) st.textContent = msg.text;
@@ -331,6 +399,8 @@ async function onMessage(msg) {
       lastNav = msg;
       navPanel?.update(msg);
       stationView?.setNav(msg.own);
+      renderShipState();
+      renderPower();
       break;
     case 'course-plotted':
       log(`${msg.by.name} plotted a course to ${msg.label}`);

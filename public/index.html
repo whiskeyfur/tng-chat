@@ -112,6 +112,15 @@
     .nav-scan-list li { display: flex; justify-content: space-between; gap: 10px; border-bottom: 2px dotted #333; color: var(--lcars-tan); }
     .nav-scan-list b { color: var(--lcars-sky); font-weight: 400; text-align: right; }
     @media (max-width: 900px) { .nav-panel { flex-direction: column; } .nav-side { flex: 0 0 auto; } }
+    /* Engineering power routing */
+    .pw { display: flex; flex-direction: column; gap: 8px; text-transform: uppercase; }
+    .pw-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 60px; align-items: center; gap: 12px; }
+    .pw-label { color: var(--lcars-gold); font-size: 18px; }
+    .pw-slider { width: 100%; accent-color: var(--lcars-gold); height: 26px; }
+    .pw-value { color: var(--lcars-sky); font-weight: 400; font-size: 20px; text-align: right; font-variant-numeric: tabular-nums; }
+    .pw-total { margin: 4px 0 0; color: var(--lcars-sky); font-size: 20px; }
+    .pw-total[data-over] { color: var(--lcars-red); }
+    .pw-effects { list-style: none; margin: 0; padding: 0; color: var(--lcars-tan); display: grid; gap: 2px; }
     .st-depts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px 20px; text-transform: uppercase; }
     .st-depts li { display: flex; align-items: center; gap: 10px; }
     .st-dept-label { flex: 0 0 150px; padding: 3px 12px; border-radius: 999px 0 0 999px; color: #000; text-align: right; background: var(--lcars-red); }

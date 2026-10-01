@@ -369,8 +369,8 @@
           live(gauge('Core output', 'sky', (v) => `${(v * 100).toFixed(1)}%`), core),
           live(readout('Matter/antimatter ratio', 'gold'), () => '1:1'),
           live(readout('Containment field', 'sky', '%'), drift(100, 99, 100, 0.2), (v) => v.toFixed(1))),
-        panel('st-power', 'Power distribution', 'gold', false, spectrum(110, ['gold', 'orange', 'peach'], 18, 'EPS grid load'),
-          ...['Shields', 'Weapons', 'Life support', 'Replicators'].map((n) => live(gauge(n, 'gold'), drift(rand(0.4, 0.8), 0.3, 0.95, 0.04)))),
+        // Real power routing (client.js fills it in): every station feels it.
+        panel('st-power', 'Power distribution', 'gold', true, h('div', { class: 'pw', 'data-power': '' })),
       ] };
     },
     Medical: () => ({ code: 'MED 07', color: 'blue', panels: [

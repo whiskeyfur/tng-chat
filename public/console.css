@@ -191,4 +191,5 @@ button.lcars-nav-button { font: inherit; font-size: 17px; letter-spacing: inheri
 .bcast--speaking { --accent: var(--lcars-red); animation: lcars-blink 1.6s steps(2) infinite; }
 .bcast--listening { --accent: var(--lcars-gold); }
 .bcast--radio { --accent: var(--lcars-violet); }
+.bcast--alert { --accent: var(--lcars-red); animation: lcars-blink 1s steps(2) infinite; }
 .radio-ship-ctl { display: flex; justify-content: flex-end; }

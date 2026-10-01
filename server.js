@@ -160,7 +160,7 @@ function broadcastOps(key) {
     .sort((a, b) => a.name.localeCompare(b.name));
   // Ships in range: ops on duty, within subspace (comms) range.
   const otherShips = [...new Set([...operators].map((op) => op.shipKey))]
-    .filter((k) => k !== key && inRange(key, k, COMMS_RANGE)).map(shipName).sort();
+    .filter((k) => k !== key && commsOk(key, k)).map(shipName).sort();
   const describe = (h) => ({ id: h.id, fromShip: shipName(h.fromShip), toShip: shipName(h.toShip), caller: peerInfo(h.caller) });
   const all = [...hails.values()];
   const requests = [...linkRequests.values()].map((r) => ({ id: r.id, fromShip: shipName(r.fromShip), toShip: shipName(r.toShip), from: r.fromShip, to: r.toShip }));
@@ -286,7 +286,7 @@ function operatorMessage(op, msg) {
         if (target === op.shipKey) return fail('that is this ship');
         if (target === caller.shipKey) return fail(`${caller.name} is from the ${shipName(target)}`);
         if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship)}: no operator on duty`);
-        if (!inRange(op.shipKey, target, COMMS_RANGE)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
+        if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
         if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
         const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now() };
         hails.set(h.id, h);
@@ -318,7 +318,7 @@ function operatorMessage(op, msg) {
       if (!caller) return fail('pick a crew member to put the hail through for');
       if (target === op.shipKey) return fail('that is this ship');
       if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
-      if (!inRange(op.shipKey, target, COMMS_RANGE)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
+      if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
       if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
       const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now() };
       hails.set(h.id, h);
@@ -360,7 +360,7 @@ function operatorMessage(op, msg) {
       const target = shipKey(clean(msg.ship));
       if (target === op.shipKey) return fail('that is this ship');
       if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
-      if (!inRange(op.shipKey, target, COMMS_RANGE)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
+      if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
       if (links.has(linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already open`);
       if ([...linkRequests.values()].some((r) => linkKey(r.fromShip, r.toShip) === linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already being negotiated`);
       const req = { id: newId('l-'), fromShip: op.shipKey, toShip: target };
@@ -379,7 +379,7 @@ function operatorMessage(op, msg) {
       const other = msg.type === 'link-cancel' ? req.toShip : req.fromShip;
       if (msg.type === 'link-accept') {
         if (!opsOf(other).length) { broadcastOps(op.shipKey); return fail(`no operator on duty aboard the ${shipName(other)}`); }
-        if (!inRange(op.shipKey, other, COMMS_RANGE)) { broadcastOps(op.shipKey); return fail(`the ${shipName(other)} is out of subspace range (${rangeText(op.shipKey, other)})`); }
+        if (!commsOk(op.shipKey, other)) { broadcastOps(op.shipKey); return fail(`the ${shipName(other)} is out of subspace range (${rangeText(op.shipKey, other)})`); }
         links.add(linkKey(req.fromShip, req.toShip));
         opLog(other, `the ${shipName(op.shipKey)} accepted: data link open`);
         refreshNetworks([op.shipKey]);
@@ -671,7 +671,22 @@ function coreSignOff(ws) {
 // matters: hails, data links and transfers off ship need subspace (comms)
 // range, sensors only see so far, and beaming needs transporter range.
 
+// Ranges at full sensor power; sensor power scales all three (Engineering).
 const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
+const SYSTEMS = ['engines', 'shields', 'sensors', 'transporter', 'weapons', 'lifeSupport'];
+const REACTOR = 450; // total power to share, in percent of one system at full
+const MIN_SHIELD_POWER = 20;
+const DEFAULT_POWER = { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100 };
+const powerOf = (k) => ({ ...DEFAULT_POWER, ...(navState.get(k)?.power || {}) });
+function rangesOf(k) {
+  const f = Math.max(0, Math.min(100, powerOf(k).sensors)) / 100;
+  return { comms: COMMS_RANGE * f, sensors: SENSOR_RANGE * f, transporter: TRANSPORTER_RANGE * f };
+}
+const maxWarp = (k) => (powerOf(k).engines <= 0 ? 0 : Math.max(0.25, Math.round((powerOf(k).engines / 100) * 9 * 10) / 10));
+// Both ships' sensors have to reach for subspace comms (hails, data links).
+const commsOk = (a, b) => a === b || distance(a, b) <= Math.min(rangesOf(a).comms, rangesOf(b).comms);
+const sensorOk = (a, b) => a === b || distance(a, b) <= rangesOf(a).sensors;
+const transporterOk = (a, b) => a === b || distance(a, b) <= rangesOf(a).transporter;
 const navState = new Map();   // ship key -> { x, y, heading, warp, dest }
 const primaryCore = new Map(); // ship key -> computer socket flying it
 const navTargets = new Map();  // ship key -> ship key it's heading for (intercept)
@@ -681,17 +696,17 @@ function distance(a, b) {
   if (!p || !q || !cores.has(a) || !cores.has(b)) return Infinity;
   return Math.hypot(p.x - q.x, p.y - q.y);
 }
-const inRange = (a, b, range) => a === b || distance(a, b) <= range;
 const rangeText = (a, b) => (Number.isFinite(distance(a, b)) ? `${Math.round(distance(a, b))} units away` : 'position unknown');
 
 function navMessage(key) {
   const own = navState.get(key);
-  const seen = [...navState.keys()].filter((k) => cores.has(k) && (k === key || distance(key, k) <= SENSOR_RANGE));
+  const seen = [...navState.keys()].filter((k) => cores.has(k) && sensorOk(key, k));
   return {
     type: 'nav',
-    own: own ? { name: shipName(key), ...own } : null,
+    own: own ? { name: shipName(key), ...own, power: powerOf(key), reactor: REACTOR } : null,
     ships: seen.map((k) => ({ name: shipName(k), ...navState.get(k), ops: opsOf(k).length > 0, shields: shields.has(k), distance: k === key ? 0 : distance(key, k) })),
-    ranges: { comms: COMMS_RANGE, sensors: SENSOR_RANGE, transporter: TRANSPORTER_RANGE },
+    ranges: rangesOf(key),
+    maxWarp: maxWarp(key),
   };
 }
 
@@ -710,7 +725,7 @@ function scheduleNav() {
     }
     for (const l of [...links]) {
       const [a, b] = l.split('|');
-      if (distance(a, b) > COMMS_RANGE && cores.has(a) && cores.has(b)) {
+      if (!commsOk(a, b) && cores.has(a) && cores.has(b)) {
         links.delete(l);
         for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} lost: out of subspace range`);
         refreshNetworks([a, b]);
@@ -719,7 +734,7 @@ function scheduleNav() {
     }
     // Ops consoles list the ships in hailing range: refresh them when that changes.
     const keys = [...cores.keys()].sort();
-    const sig = keys.flatMap((a, i) => keys.slice(i + 1).filter((b) => distance(a, b) <= COMMS_RANGE).map((b) => `${a}|${b}`)).join(',');
+    const sig = keys.flatMap((a, i) => keys.slice(i + 1).filter((b) => commsOk(a, b)).map((b) => `${a}|${b}`)).join(',');
     if (sig !== lastRangeSig) { lastRangeSig = sig; broadcastAllOps(); }
     const byShip = new Map();
     for (const u of users.values()) {
@@ -733,6 +748,7 @@ function scheduleNav() {
 function coreNav(c, key, nav) {
   if (!nav || typeof nav.x !== 'number' || typeof nav.y !== 'number') return;
   const clean = { x: nav.x, y: nav.y, heading: Number(nav.heading) || 0, warp: Number(nav.warp) || 0, dest: nav.dest || null };
+  if (nav.power && typeof nav.power === 'object') clean.power = Object.fromEntries(SYSTEMS.map((s) => [s, Math.max(0, Math.min(100, Number(nav.power[s]) || 0))]));
   const current = primaryCore.get(key);
   if (!current) {
     primaryCore.set(key, c);
@@ -740,6 +756,12 @@ function coreNav(c, key, nav) {
     send(c, { type: 'core-primary', ship: shipName(key), primary: true, nav: navState.get(key) });
   } else if (current === c) {
     navState.set(key, clean);
+    // Shields can't stay up without enough power.
+    if (shields.has(key) && powerOf(key).shields < MIN_SHIELD_POWER) {
+      shields.delete(key);
+      opLog(key, 'shields down: not enough power');
+      broadcastShips();
+    }
     for (const o of coresOf(key)) if (o !== c) send(o, { type: 'core-nav-sync', ship: shipName(key), nav: clean });
   } else {
     send(c, { type: 'core-primary', ship: shipName(key), primary: false, nav: navState.get(key) });
@@ -768,7 +790,7 @@ function navCommand(ws, msg) {
     if (!dest) return null;
     if (typeof dest.ship === 'string') {
       const t = shipKey(clean(dest.ship));
-      if (t === key || !navState.has(t) || distance(key, t) > SENSOR_RANGE) return { error: `the ${clean(dest.ship)} is not on sensors` };
+      if (t === key || !navState.has(t) || !sensorOk(key, t)) return { error: `the ${clean(dest.ship)} is not on sensors` };
       return { x: navState.get(t).x, y: navState.get(t).y, name: shipName(t), key: t };
     }
     if (Number.isFinite(dest.x) && Number.isFinite(dest.y)) return { x: Math.min(1000, Math.max(0, dest.x)), y: Math.min(1000, Math.max(0, dest.y)) };
@@ -789,7 +811,10 @@ function navCommand(ws, msg) {
       order.heading = msg.heading;
       navTargets.delete(key);
     }
-    if (typeof msg.warp === 'number') order.warp = Math.max(0, Math.min(9, msg.warp));
+    if (typeof msg.warp === 'number') {
+      order.warp = Math.max(0, Math.min(9, msg.warp));
+      if (order.warp > maxWarp(key)) return note(maxWarp(key) ? `Helm: engines only give ${maxWarp(key) < 1 ? 'impulse' : `warp ${maxWarp(key)}`} at this power` : 'Helm: no power to the engines');
+    }
     if (order.warp === 0) navTargets.delete(key);
     send(core, order);
     const what = order.warp === 0 ? 'all stop' : `${order.dest ? `course for ${order.dest.name ? `the ${order.dest.name}` : `${Math.round(order.dest.x)}, ${Math.round(order.dest.y)}`}` : typeof order.heading === 'number' ? `heading ${Math.round(order.heading)}` : 'speed'}${order.warp ? `, ${order.warp < 1 ? 'impulse' : `warp ${order.warp}`}` : ''}`;
@@ -797,10 +822,23 @@ function navCommand(ws, msg) {
     return;
   }
 
+  if (msg.type === 'power') {
+    if (ws.station !== 'Engineering') return note('Only Engineering can route power');
+    const core = primaryCore.get(key);
+    if (!core) return note("Engineering: no ship's computer is running the ship");
+    const p = powerOf(key);
+    for (const s of SYSTEMS) if (msg.power && Number.isFinite(msg.power[s])) p[s] = Math.max(0, Math.min(100, Math.round(msg.power[s])));
+    const total = SYSTEMS.reduce((n, s) => n + p[s], 0);
+    if (total > REACTOR) return note(`Engineering: that needs ${total}% but the reactor gives ${REACTOR}%`);
+    send(core, { type: 'core-power', ship: ws.ship, power: p });
+    opLog(key, `Engineering (${ws.name}): power ${SYSTEMS.map((s) => `${s} ${p[s]}%`).join(', ')}`);
+    return;
+  }
+
   if (msg.type === 'scan') {
     if (ws.station !== 'Science') return note('Only Science can run sensor scans');
     const t = shipKey(clean(msg.ship));
-    if (!navState.has(t) || (t !== key && distance(key, t) > SENSOR_RANGE)) return note(`Sensors: the ${clean(msg.ship)} is out of sensor range`);
+    if (!navState.has(t) || !sensorOk(key, t)) return note(`Sensors: the ${clean(msg.ship)} is out of sensor range`);
     const crew = crewOf(t);
     const stations = {};
     for (const u of crew) stations[u.station] = (stations[u.station] || 0) + 1;
@@ -808,7 +846,7 @@ function navCommand(ws, msg) {
     return send(ws, { type: 'scan-result', ship: shipName(t), at: Date.now(), data: {
       distance: t === key ? 0 : Math.round(distance(key, t)), x: n.x, y: n.y, heading: n.heading, warp: n.warp,
       shields: shields.has(t), ops: opsOf(t).length > 0, crew: crew.length, stations,
-      inCommsRange: inRange(key, t, COMMS_RANGE), inTransporterRange: inRange(key, t, TRANSPORTER_RANGE),
+      inCommsRange: commsOk(key, t), inTransporterRange: transporterOk(key, t),
     } });
   }
 
@@ -1149,6 +1187,7 @@ wss.on('connection', (ws) => {
     // Tactical raises or lowers the ship's shields.
     if (msg.type === 'shields' && ws.id) {
       if (ws.station !== 'Tactical') return send(ws, { type: 'notice', text: 'Only Tactical can raise or lower shields' });
+      if (msg.up && powerOf(ws.shipKey).shields < MIN_SHIELD_POWER) return send(ws, { type: 'notice', text: `Tactical: not enough power to raise shields (needs ${MIN_SHIELD_POWER}%; ask Engineering)` });
       if (msg.up) shields.add(ws.shipKey); else shields.delete(ws.shipKey);
       opLog(ws.shipKey, `${ws.name}: shields ${msg.up ? 'up' : 'down'}`);
       broadcastShips();
@@ -1163,7 +1202,8 @@ wss.on('connection', (ws) => {
       const toKey = shipKey(clean(msg.ship));
       if (!u || u.shipKey !== ws.shipKey) return fail('that person is not aboard');
       if (u.operator) return fail('the ops station cannot be beamed');
-      if (toKey !== ws.shipKey && cores.has(toKey) && !inRange(ws.shipKey, toKey, TRANSPORTER_RANGE)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(ws.shipKey, toKey)}; get within ${TRANSPORTER_RANGE})`);
+      if (powerOf(ws.shipKey).transporter <= 0) return fail('no power to the transporter: ask Engineering');
+      if (toKey !== ws.shipKey && cores.has(toKey) && !transporterOk(ws.shipKey, toKey)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(ws.shipKey, toKey)}; get within ${Math.round(rangesOf(ws.shipKey).transporter)})`);
       if (!cores.has(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
       if (toKey === ws.shipKey) return fail(`${u.name} is already aboard`);
       for (const k of [ws.shipKey, toKey]) if (shields.has(k)) return fail(`cannot beam through the shields of the ${shipName(k)}`);
@@ -1207,7 +1247,7 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if ((msg.type === 'helm' || msg.type === 'scan' || msg.type === 'plot-course') && ws.id) return navCommand(ws, msg);
+    if ((msg.type === 'helm' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return navCommand(ws, msg);
 
     // Call waiting, "join": bring the person calling us into the call we're in.
     // Everyone in it is told, and the caller connects to each of them.

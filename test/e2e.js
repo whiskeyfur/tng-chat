@@ -850,22 +850,66 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // Helm takes the Enterprise out of subspace range: the data link drops,
     // and the Defiant is no longer in range to hail.
-    helm({ dest: { x: 950, y: 950 }, warp: 9 });
+    helm({ dest: { x: 950, y: 950 }, warp: 7 }); // default engine power (80%) gives warp 7.2 at most
     await op.waitForFunction(() => !window.__operator.network.includes('Defiant'), null, { timeout: 20000 });
     await op.waitForFunction(() => !window.__operator.ships.includes('Defiant'));
     await op.waitForSelector('#ops-log li:has-text("out of subspace range")', { state: 'attached' });
     assert.ok((await spock.evaluate(() => window.__nav.last.own.warp)) > 0 || (await spock.evaluate(() => window.__nav.last.own.x)) > 800);
     beamSelf();
     await waitFor(() => randMsgs.some((m) => m.type === 'notice' && /out of transporter range/.test(m.text)));
-    step('Helm flew the Enterprise out of subspace range at warp 9: the data link dropped, the Defiant left hailing range, and beaming over is out of range');
+    step('Helm flew the Enterprise out of subspace range at warp 7: the data link dropped, the Defiant left hailing range, and beaming over is out of range');
 
     // And back: intercept the Defiant, arriving within transporter range.
-    helm({ dest: { ship: 'Defiant' }, warp: 9 });
+    helm({ dest: { ship: 'Defiant' }, warp: 7 });
     await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); const d = n?.ships.find((s) => s.name === 'Defiant'); return n?.own.warp === 0 && d && d.distance <= 20; }, 30000);
     await op.waitForFunction(() => window.__operator.ships.includes('Defiant'));
     beamSelf();
     await waitFor(() => randMsgs.some((m) => m.type === 'registered' && m.ship === 'Defiant'));
     step('Helm intercepted the Defiant: back in hailing range, and the transporter beamed across');
+    // Engineering routes power, and every station feels it.
+    const scotty = await openAs(browser, 'scotty', 'scotty', 'Enterprise', 'Engineering');
+    await screen(scotty, 'st-power');
+    await scotty.waitForSelector('[data-system="sensors"]');
+    const route = async (levels) => {
+      for (const [k, v] of Object.entries(levels)) {
+        await scotty.$eval(`[data-system="${k}"]`, (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+      }
+      await scotty.click('#power-apply');
+    };
+    // Over capacity can't be routed.
+    await scotty.$eval('[data-system="weapons"]', (el) => { el.value = 100; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await scotty.$eval('[data-system="engines"]', (el) => { el.value = 100; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    assert.match(await scotty.textContent('.pw-total'), /over capacity/);
+    assert.equal(await scotty.isDisabled('#power-apply'), true);
+    await scotty.click('#power-reset');
+    // Sensors at 20%: every range drops to a fifth, so the transporter (4 units) can't reach.
+    await route({ sensors: 20 });
+    await spock.waitForFunction(() => Math.round(window.__nav.last.ranges.transporter) === 4 && Math.round(window.__nav.last.ranges.comms) === 80);
+    const odell = new WebSocket(`ws://localhost:${process.env.PORT}`);
+    const odellMsgs = [];
+    odell.on('message', (m) => { try { odellMsgs.push(JSON.parse(m)); } catch {} });
+    await new Promise((r) => odell.on('open', r));
+    odell.send(JSON.stringify({ type: 'register', name: 'odell', ship: 'Enterprise', station: 'Transporter' }));
+    await new Promise((r) => setTimeout(r, 300));
+    odell.send(JSON.stringify({ type: 'beam', who: id('odell'), ship: 'Defiant' }));
+    await waitFor(() => odellMsgs.some((m) => m.type === 'notice' && /out of transporter range/.test(m.text) && /within 4/.test(m.text)));
+    step('Engineering cut sensors to 20%: sensor, subspace and transporter range all fell to a fifth, and beaming fell short');
+
+    // No engine power: no warp. No shield power: Tactical can't raise shields. Low life support: everyone is warned.
+    await route({ sensors: 100, engines: 0, shields: 0, lifeSupport: 40 });
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.maxWarp)) === 0);
+    helm({ dest: { ship: 'Defiant' }, warp: 5 });
+    await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /no power to the engines/.test(m.text)));
+    await closeComms(carol);
+    await screen(carol, 'st-shieldctl');
+    await carol.waitForSelector('[data-shield-control] button:has-text("Raise shields"):disabled');
+    await bob.waitForSelector('.bcast--alert:has-text("Life support at 40%")', { state: 'attached' });
+    step('no engine power refused warp, no shield power disabled Raise shields, and low life support warned the crew');
+    await route({ engines: 80, shields: 60, lifeSupport: 100 });
+    await bob.waitForFunction(() => !document.querySelector('.bcast--alert'));
+    odell.close();
+    await scotty.close();
+
     sulu.close();
     rand.close();
     await spock.close();

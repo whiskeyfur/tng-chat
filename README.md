@@ -43,7 +43,7 @@ Each crew member gets an LCARS console for their station, styled with `public/lc
 | Helm | **navigation**: the sector map, course (a ship, or click the map for a waypoint) and speed (impulse, warp 1-9), Engage / All stop, courses plotted by Science; forward view starfield at the ship's real speed; helm systems |
 | Tactical | shield grid, weapons, **shield control** (raise/lower the ship's shields), targeting scan |
 | Security | internal sensors deck grid, force fields, security log |
-| Engineering | side view of the ship with the warp core, warp field harmonics, power distribution |
+| Engineering | side view of the ship with the warp core, warp field harmonics, **power distribution** (route the reactor between engines, shields, sensors, transporter, weapons and life support) |
 | Medical | patient monitor with ECG and vitals, neural activity, sickbay, cellular analysis |
 | Science | **long range sensors**: the sector map and every contact on sensors with distance and speed, **Scan** (distance, position, heading and speed, shields, ops, life signs by station) and **Plot course** for Helm; spectral analysis, anomaly readings, science log |
 | Communications | **comm traffic** (every call in progress or ringing, every hail waiting for an answer, and every all-hands broadcast, on the ship and its data network: who, and for how long; no listening in), subspace bands, carrier signal, message traffic |
@@ -75,6 +75,17 @@ Ships have a real position in a 1000 × 1000 sector, flown by their ship's compu
 - **Transporter range (20):** beaming needs the ships close: have Helm intercept the other ship first.
 
 When several computers run one ship, the relay picks one to fly it; the others keep a copy of its position and the next one takes over if it stops. Positions are saved in `<data>/<ship>/.nav.json`.
+
+## Power (Engineering)
+
+The reactor gives **450%** to share between six systems, each 0–100%, so not everything can run flat out (default: engines 80, shields 60, sensors 100, transporter 60, weapons 50, life support 100). Engineering sets the sliders and presses **Route power**; the panel shows the total and what the setting means before it's routed. Every station feels it:
+
+- **Engines** set the top speed: 100% is warp 9, 80% warp 7.2, 0% no movement at all. Helm's faster speeds show "(no power)"; cutting engine power slows a ship that's already going faster.
+- **Sensors** scale all three ranges: sensor range (600), subspace range for hails and data links (400) and transporter range (20) at 100%; at 50%, half of each. Hails and data links need *both* ships' ranges to reach, so the weaker one decides; a link drops if a power cut takes the ships out of range.
+- **Shields** need at least 20% to be raised, and drop if their power falls below that.
+- **Transporter** at 0% can't beam at all.
+- **Life support** under 50% puts a flashing warning on every console aboard.
+- **Weapons** wait for phase 3.
 
 ## Ship's computers and the library
 
@@ -120,6 +131,7 @@ npm test
 Starts the server and drives headless Chromium pages with a fake microphone through crew consoles and ops consoles:
 
 - **Crew calls:** decline; accept with audio both ways; chat; a 300 KB file arrives byte-for-byte; hang-up; a peer going offline.
+- **Power:** over capacity can't be routed; sensors at 20% shrink every range so beaming falls short; no engine power refuses warp; no shield power disables Raise shields; low life support warns the crew.
 - **Navigation:** Science scanning the Defiant and plotting a course for Helm; Helm flying out of subspace range at warp 9 (the data link drops, the Defiant leaves hailing range, beaming is out of range), then intercepting the Defiant (back in range, beaming works).
 - **Broadcasts:** Communications seeing a hail before it's answered; all hands to the ship (heard, receive-only, other ships don't hear it); all hands to the fleet over a data link, ended by ops; the fleet radio playing on crew consoles and switching off.
 - **Subspace radio:** a local test station (a tone) tuned by URL and patched into a call (the outgoing track switches to the mix, the other side sees the note, the call stays up), unpatched back to the mic; a station without CORS plays locally with Patch disabled.
@@ -158,6 +170,7 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 | `{type:"change-station", station, key?}` | move to another station aboard your ship; reply `registered`, or `operator-ok` for Operations (`station-failed` if the key is wrong) |
 | `{type:"shields", up}` | Tactical only: raise or lower the ship's shields |
 | `{type:"helm", dest?, heading?, warp}` | Helm only: `dest` `{ship}` or `{x, y}`, speed `0` (all stop), `0.25` (impulse) or 1-9 |
+| `{type:"power", power}` | Engineering only: `{engines, shields, sensors, transporter, weapons, lifeSupport}` in percent, totalling at most 450 |
 | `{type:"scan", ship}` / `{type:"plot-course", dest}` | Science only: scan a ship on sensors (reply `scan-result`) / send Helm a course (`course-plotted`) |
 | `{type:"ship-radio", url, name, scope}` | Communications or ops: put a stream on the ship's (`ship`) or fleet's (`network`) radio; `url: null` switches it off |
 | `{type:"bsignal", to, bid, data}` / `{type:"bcast-end", bid}` | all hands: offer/answer/ICE between speaker and listener; the speaker ending it |
@@ -176,7 +189,7 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 | `{type:"bcast-speak", bid, label}` / `{type:"bcast-add", bid, listener}` | you're the all-hands speaker / connect (send-only) to this listener |
 | `{type:"bcast-listen", bid, from, label}` / `{type:"bcast-ended", bid}` | an all-hands broadcast you'll receive (receive-only) / it ended |
 | `{type:"ship-radio", radio}` | the ship's radio: `{name, url, by}` or `null` |
-| `{type:"nav", own, ships, ranges}` | twice a second: your ship's position and course, every ship on your sensors, and the ranges |
+| `{type:"nav", own, ships, ranges, maxWarp}` | twice a second: your ship's position, course and power, every ship on your sensors, your current ranges and top speed |
 | `{type:"notice", text}` | hail progress, for example "Ops is hailing the K'Vatch for you" |
 
 | Message (operator → server) | Meaning |
