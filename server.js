@@ -462,7 +462,7 @@ function signOut(ws) {
 
 // Beam a crew member to another ship: their call ends, they leave this ship's
 // comm net and report aboard the other one, keeping their name and station.
-function beam(u, toKey, station) {
+function beam(u, toKey, station, how = 'beamed') {
   const from = u.ship;
   // Site to site: within the ship, to another station's console.
   // Beaming drops you out of any call you're in (the others stay connected).
@@ -477,19 +477,19 @@ function beam(u, toKey, station) {
     return;
   }
   if (station) u.station = station;
-  send(u, { type: 'force-hangup', reason: `beamed to the ${shipName(toKey)}` });
+  send(u, { type: 'force-hangup', reason: `${how} to the ${shipName(toKey)}` });
   signOut(u);
   Object.assign(u, { id: userId(u.name, shipName(toKey)), shipKey: toKey, ship: shipName(toKey), state: 'idle', peers: [], cid: null });
   users.set(u.id, u);
-  send(u, { type: 'registered', ...info(u), token: u.token, beamedFrom: from });
+  send(u, { type: 'registered', ...info(u), token: u.token, [how === 'walked' ? 'walkedFrom' : 'beamedFrom']: from });
   sendShipRadio(u);
   joinBroadcasts(u);
   broadcastCrew(toKey);
   broadcastShips();
-  opLog(toKey, `${u.name} (${u.station}) beamed aboard from the ${from}`);
-  // Security is told whenever someone beams aboard.
-  for (const s of crewOf(toKey)) if (s.station === 'Security' && s !== u) send(s, { type: 'security-alert', text: `${u.name} (${u.station}) beamed aboard from the ${from}`, at: Date.now() });
-  console.log(`${u.name} beamed from the ${from} to the ${u.ship}`);
+  opLog(toKey, `${u.name} (${u.station}) ${how === 'walked' ? 'came aboard across the dock' : 'beamed aboard'} from the ${from}`);
+  // Security is told whenever someone beams aboard (walking in across the dock is expected).
+  if (how === 'beamed') for (const s of crewOf(toKey)) if (s.station === 'Security' && s !== u) send(s, { type: 'security-alert', text: `${u.name} (${u.station}) beamed aboard from the ${from}`, at: Date.now() });
+  console.log(`${u.name} ${how} from the ${from} to the ${u.ship}`);
 }
 
 // --- ship's computers and the library ----------------------------------------------
@@ -1441,7 +1441,7 @@ function gridView(k) {
     core: e.core, antimatter: Math.floor(e.antimatter), deuterium: Math.floor(e.deuterium), fuelCaps: { antimatter: FUEL.antimatter, deuterium: FUEL.deuterium },
     drives: Object.fromEntries(DRIVES.map((d) => [d, { state: e.drives[d].state, start: e.drives[d].start, thrusters: !!(e.ties[`sub:${d}Thrusters`] || []).length }])), impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
     transfer: e.transfer ? { ...e.transfer, left: Math.ceil(e.transfer.left), with: e.transfer.with === 'station' ? e.docked : shipName(e.transfer.with) } : null,
-    dockedShip: e.dockedShip ? shipName(e.dockedShip) : null, nearShip: nearShip(k),
+    dockedShip: e.dockedShip ? shipName(e.dockedShip) : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName),
     feed: e.feed, fed: Math.round(e.fed), shipIn: Math.round(Object.values(f.cells.ship).reduce((a, b) => a + b, 0)), partnerFeed: e.dockedShip ? engOf(e.dockedShip).feed : 0, feedMax: SHIP_FEED_MAX,
     cells: Object.fromEntries(Object.entries(f.cells).map(([n, c]) => [n, r(c)])), totals: f.totals,
     coreUsed: Math.round(f.coreUsed), impulseUsed: Math.round(f.impulseUsed), coreSubsOk: f.coreSubsOk, subOk: f.subOk,
@@ -1588,6 +1588,16 @@ function dockCommand(ws, msg) {
   opLog(key, `Helm (${ws.name}): docked at ${base.name}`);
   for (const u of crewOf(key)) send(u, { type: 'notice', text: `Helm: docked at ${base.name}` });
   gridChanged(key);
+}
+
+// The vessels docked with this one: its starbase and the ship docked with it
+// (for a starbase, every ship docked there).
+function dockedWith(k) {
+  const e = engOf(k), out = [];
+  if (e.docked) out.push(shipKey(e.docked));
+  if (e.dockedShip && engOf(e.dockedShip).dockedShip === k) out.push(e.dockedShip);
+  if (isBase(k)) for (const [o, oe] of eng) if (oe.docked && shipKey(oe.docked) === k && cores.has(o)) out.push(o);
+  return [...new Set(out)];
 }
 
 function undockShips(k, why) {
@@ -2322,6 +2332,17 @@ wss.on('connection', (ws) => {
     // an operator moving elsewhere leaves it.
     if (msg.type === 'change-station' && ws.id) {
       if (msg.station !== OPS_STATION && !STATIONS.includes(msg.station)) return send(ws, { type: 'notice', text: 'No such station' });
+      // Across the dock: walk over to a station aboard a vessel docked with this one.
+      const there = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey;
+      if (there !== ws.shipKey) {
+        if (!dockedWith(ws.shipKey).includes(there)) return send(ws, { type: 'station-failed', reason: `not docked with the ${clean(msg.ship)}` });
+        if (msg.station === OPS_STATION) return send(ws, { type: 'station-failed', reason: 'walk over first, then take the ops station there' });
+        if (users.has(userId(ws.name, shipName(there)))) return send(ws, { type: 'station-failed', reason: `someone called ${ws.name} is already aboard the ${shipName(there)}` });
+        if (ws.operator) leaveOps(ws);
+        opLog(ws.shipKey, `${ws.name} (${ws.station}) went across the dock to the ${shipName(there)}`);
+        beam(ws, there, msg.station, 'walked');
+        return;
+      }
       if (msg.station === ws.station) return;
       const was = ws.station;
       if (msg.station === OPS_STATION) {

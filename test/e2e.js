@@ -625,8 +625,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Changing station aboard the same ship.
     await closeComms(carol);
     await screen(carol, 'reassign');
-    await carol.selectOption('#new-station', 'Tactical');
-    await carol.click('#reassign-form button');
+    await carol.click('#station-taps button[data-station="Tactical"]');
     await carol.waitForFunction(() => window.__voice.me.station === 'Tactical');
     await op.waitForFunction(() => window.__operator.roster.find((u) => u.name === 'carol')?.station === 'Tactical');
     assert.equal(await carol.locator('[data-shield-control] button').count(), 1, 'tactical console has shield control');
@@ -676,9 +675,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await chief.evaluate(() => window.__voice.me.station), 'Transporter');
     await closeComms(chief);
     await screen(chief, 'reassign');
-    assert.ok((await chief.$$eval('#new-station option', (o) => o.map((x) => x.value))).includes('Helm'));
-    await chief.selectOption('#new-station', 'Helm');
-    await chief.click('#reassign-form button');
+    assert.equal(await chief.locator('#station-taps button[data-station="Helm"]').count(), 1);
+    await chief.click('#station-taps button[data-station="Helm"]');
     await chief.waitForFunction(() => window.__voice.me.station === 'Helm');
     assert.equal(await chief.locator('#st-view canvas').count(), 1, 'helm console after changing station');
     assert.equal(await chief.locator('[data-transporter]').count(), 0);
@@ -688,8 +686,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Moving to Operations: chief becomes a second Enterprise operator, and
     // either operator can manage data links.
     await screen(chief, 'reassign');
-    await chief.selectOption('#new-station', 'Operations');
-    await chief.click('#reassign-form button');
+    await chief.click('#station-taps button[data-station="Operations"]');
     await chief.waitForSelector('[data-screen="status"]:not([hidden])');
     await op.waitForFunction(() => window.__operator.roster.find((u) => u.name === 'chief')?.station === 'Operations');
     await screen(chief, 'link');
@@ -706,9 +703,8 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // And back from Operations to a crew station.
     await screen(chief, 'reassign');
-    assert.equal(await chief.locator('#new-station option[value="Operations"]').count(), 0);
-    await chief.selectOption('#new-station', 'Crew');
-    await chief.click('#reassign-form button');
+    assert.equal(await chief.locator('#station-taps button[data-station="Operations"]').count(), 0);
+    await chief.click('#station-taps button[data-station="Crew"]');
     await chief.waitForFunction(() => window.__voice.me.station === 'Crew' && !window.__operator.roster);
     assert.equal(await chief.locator('.ops-tab:not([hidden])').count(), 0);
     await op.waitForFunction(() => window.__operator.roster.find((u) => u.name === 'chief')?.station === 'Crew');
@@ -1182,6 +1178,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     rom.send({ type: 'grid', ties: { ship: ['B'] }, feed: 100 });
     laforge.send({ type: 'grid', ties: { ship: ['A'] }, feed: 30 });
     await waitFor(() => laforge.nav()?.own.grid.shipIn === 70 && rom.nav()?.own.grid.fed === 70); // (the Enterprise's A and B are crosslinked: it lands on either)
+    // Across the dock: the Station screen offers the Defiant's stations, and
+    // the Defiant's engineer walks over to the Enterprise's Science console.
+    await screen(spock, 'reassign');
+    await spock.waitForSelector('#dock-stations [data-vessel="Defiant"] button[data-station="Helm"]');
+    rom.send({ type: 'change-station', station: 'Science', ship: 'Enterprise' });
+    await waitFor(() => rom.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && m.station === 'Science'));
+    step('docked together, the Station screen offered the Defiant\'s stations, and the Defiant\'s engineer walked across to the Enterprise\'s Science console');
     ezri.send({ type: 'dock', undock: true });
     await waitFor(() => !laforge.nav()?.own.grid.dockedShip);
     rom.close();
@@ -1335,6 +1338,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     step(`over its 300 max, Bus B's breaker tripped loads off (${barclay.msgs.filter((m) => m.type === 'notice' && /breaker tripped/.test(m.text)).map((m) => m.text.split(': ').pop()).join('; ')})`);
 
     // A low-power system tied to two buses splits its load evenly between them.
+    barclay.send({ type: 'power', power: { engines: 40, shields: 40, transporter: 40, replicators: 20, recreation: 10 } }); // plenty to go round
     barclay.send({ type: 'grid', ties: { 'system:lifeSupport': ['A', 'C'] }, tap: { bus: 'C', amount: 300 } });
     await waitFor(() => { const c = barclay.nav()?.own.grid.cells['system:lifeSupport']; return c && c.A === 50 && c.C === 50; });
     step('life support tied to Bus A and Bus C drew half its load from each');

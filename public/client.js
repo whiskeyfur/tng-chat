@@ -165,12 +165,37 @@ function showStation() {
 }
 
 // The Station screen: any other station, Operations included.
+// Every station is a tap; Operations asks for the code first if the relay
+// wants one. Docked, the vessels across the dock get their own taps.
+let dockSig = '';
 function fillReassign() {
+  if (!me) return;
   $('assignment').textContent = `${me.name}: ${me.station}, the ${me.ship}`;
-  $('new-station').replaceChildren(...['Operations', ...stations].filter((n) => n !== me.station).map((n) => new Option(n, n)));
-  $('reassign-error').textContent = '';
+  const tap = (name, ship) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: name });
+    b.dataset.station = name;
+    if (ship) b.dataset.ship = ship;
+    b.onclick = () => {
+      $('reassign-error').textContent = '';
+      if (!ship && name === 'Operations' && opsKeyRequired) { $('reassign-form').hidden = false; $('reassign-key').focus(); return; }
+      send({ type: 'change-station', station: name, ...(ship ? { ship } : {}) });
+    };
+    return b;
+  };
+  $('station-taps').replaceChildren(...['Operations', ...stations].filter((n) => n !== me.station).map((n) => tap(n)));
+  const across = lastNav?.own?.grid?.dockedWith || [];
+  dockSig = JSON.stringify(across);
+  $('dock-stations').replaceChildren(...across.map((v) => {
+    const box = document.createElement('div');
+    box.className = 'dock-stations';
+    box.dataset.vessel = v;
+    box.append(Object.assign(document.createElement('h3'), { className: 'ops-subhead', textContent: `Across the dock: ${/^(Starbase|Deep Space) /.test(v) ? v : `the ${v}`}` }),
+      Object.assign(document.createElement('div'), { className: 'tr-taps' }));
+    box.lastChild.append(...stations.map((n) => tap(n, v)));
+    return box;
+  }));
+  $('reassign-form').hidden = true;
   $('reassign-key').value = '';
-  $('reassign-key').hidden = $('new-station').value !== 'Operations' || !opsKeyRequired;
 }
 
 // Communications: every call in progress on our data network, who's in it
@@ -872,13 +897,14 @@ async function onMessage(msg) {
       if (ops) hideOps();
       queueMicrotask(() => comms.radio?.render());
       if (msg.beamedFrom) log(`beamed from the ${msg.beamedFrom} to the ${me.ship}`);
+      if (msg.walkedFrom) log(`crossed the dock from the ${msg.walkedFrom} to the ${me.ship}`);
       document.title = `LCARS: ${me.station} · ${me.ship}`;
       $('home').hidden = false;
       $('comms-button').hidden = false;
       $('log-tab').hidden = false;
       $('reassign-tab').hidden = false;
       $('library-tab').hidden = false;
-      log(msg.beamedFrom ? `${me.name} now aboard the ${me.ship}: ${me.station}` : `${me.name} reporting for duty aboard the ${me.ship}: ${me.station}`);
+      log(msg.beamedFrom || msg.walkedFrom ? `${me.name} now aboard the ${me.ship}: ${me.station}` : `${me.name} reporting for duty aboard the ${me.ship}: ${me.station}`);
       showStation();
       try { localStorage.setItem('voice-reg', JSON.stringify({ name: me.name, ship: me.ship, station: me.station })); } catch {}
       break;
@@ -921,6 +947,7 @@ async function onMessage(msg) {
       renderCrewPanels();
       renderCombat();
       renderServices();
+      if (JSON.stringify(msg.own?.grid?.dockedWith || []) !== dockSig) fillReassign();
       break;
     case 'course-plotted':
       log(`${msg.by.name} plotted a course to ${msg.label}`);
@@ -1001,7 +1028,7 @@ function fillStations() {
   sel.replaceChildren(placeholder, ...all.map((n) => new Option(n, n)));
   sel.value = all.includes(keep) ? keep : '';
   updateSignInMode();
-  if (me) $('new-station').replaceChildren(...stations.filter((n) => n !== me.station).map((n) => new Option(n, n)));
+  fillReassign();
 }
 fillStations();
 
@@ -1013,11 +1040,10 @@ $('register-form').onsubmit = (e) => {
   if (opsSelected()) send({ type: 'operator', name: $('name').value.trim(), ship: $('ship').value, key: $('key').value });
   else send({ type: 'register', name: $('name').value.trim(), ship: $('ship').value, station: $('station').value });
 };
-$('new-station').onchange = () => { $('reassign-key').hidden = $('new-station').value !== 'Operations' || !opsKeyRequired; };
 $('reassign-form').onsubmit = (e) => {
   e.preventDefault();
   $('reassign-error').textContent = '';
-  send({ type: 'change-station', station: $('new-station').value, key: $('reassign-key').value });
+  send({ type: 'change-station', station: 'Operations', key: $('reassign-key').value });
 };
 
 // Comm relay: shown on the sign-in screen; changing it reconnects.

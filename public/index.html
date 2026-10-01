@@ -403,14 +403,14 @@
           <h2 class="lcars-panel__title"><span>Duty assignment</span></h2>
           <div class="lcars-panel__body">
             <p class="ops-network" id="assignment"></p>
-            <form class="ops-form" id="reassign-form">
-              <span>Report to</span>
-              <select class="ops-select" id="new-station" aria-label="new station"></select>
-              <input class="ops-input" id="reassign-key" type="password" placeholder="Authorization code (if required)" autocomplete="off" aria-label="operator authorization code" hidden>
-              <button class="lcars-button lcars-button--pill">Change station</button>
+            <div class="tr-taps" id="station-taps" role="group" aria-label="stations aboard"></div>
+            <form class="ops-form" id="reassign-form" hidden>
+              <input class="ops-input" id="reassign-key" type="password" placeholder="Authorization code" autocomplete="off" aria-label="operator authorization code">
+              <button class="lcars-button lcars-button--pill" id="reassign-ops">Take the ops station</button>
             </form>
+            <div id="dock-stations"></div>
             <p class="lcars-note" id="reassign-error"></p>
-            <p class="ops-hint">Moves you to another station aboard this ship, Operations included. Calls in progress carry on. To change ships, ask the transporter room.</p>
+            <p class="ops-hint">Tap a station to move there, Operations included; calls in progress carry on. Docked with a starbase or another ship, you can also walk across to a station aboard it (that ends your call). Otherwise, ask the transporter room.</p>
           </div>
         </section>
       </div>
