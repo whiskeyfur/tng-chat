@@ -1144,6 +1144,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     ezri.send({ type: 'dock', undock: true });
     await waitFor(() => !laforge.nav()?.own.grid.dockedShip);
     rom.close();
+    // A full tank: refuelling is refused, and a transfer can always be stopped (#1).
+    laforge.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 500 } });
+    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /antimatter tank is already full/.test(m.text)) || laforge.nav()?.own.grid.transfer);
+    laforge.send({ type: 'grid', transfer: { resource: 'deuterium', dir: 'in', amount: 500 } });
+    await waitFor(() => laforge.nav()?.own.grid.transfer);
+    laforge.send({ type: 'grid', transfer: null });
+    await waitFor(() => !laforge.nav()?.own.grid.transfer && laforge.msgs.some((m) => m.type === 'notice' && /transfer stopped/.test(m.text)));
     step('the Enterprise offloaded deuterium at Starbase 12; the Defiant docked with it, sent it 100 deuterium, and (offering 100 power to its 30) fed it the difference, 70; then undocked');
     ezri.close();
     tuvok.close();

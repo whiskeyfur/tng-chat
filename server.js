@@ -1335,6 +1335,8 @@ function gridCommand(ws, msg) {
       if (inbound && t.resource === 'antimatter' && !e.ties.containment.length) return note('set a containment feed before taking on antimatter');
       if (inbound && t.resource === 'antimatter' && e.core === 'ejected') return note('no warp core to hold antimatter: install one first');
       if (!inbound && partner !== 'station' && t.resource === 'antimatter' && !engOf(partner).ties.containment.length) return note(`the ${shipName(partner)} has no containment feed set: it can't take antimatter`);
+      const room = inbound ? FUEL[t.resource] - e[t.resource] : partner === 'station' ? e[t.resource] : Math.min(e[t.resource], FUEL[t.resource] - engOf(partner)[t.resource]);
+      if (room < 1) return note(inbound ? `the ${t.resource} tank is already full` : partner === 'station' ? `no ${t.resource} aboard to offload` : `nothing to send: our ${t.resource} is empty or the ${shipName(partner)}'s tank is full`);
       e.transfer = { resource: t.resource, dir: inbound ? 'in' : 'out', left: amount, with: partner };
       said.push(`${inbound ? 'taking on' : partner === 'station' ? 'offloading' : `sending the ${shipName(partner)}`} ${amount} ${t.resource}${partner === 'station' ? ` (${e.docked})` : ''}`);
     }
@@ -1734,8 +1736,10 @@ setInterval(() => {
       let n = Math.min(FUEL.transferRate, t.left);
       if (t.dir === 'in') n = Math.min(n, FUEL[t.resource] - e[t.resource]);
       else n = Math.min(n, e[t.resource], other ? FUEL[t.resource] - other[t.resource] : Infinity);
+      // Within a unit of full (or empty) is done: a running core keeps
+      // nibbling at a full tank, which would keep a transfer going forever.
       if (!stillDocked) { e.transfer = null; tellStations(k, ['Engineering'], 'Engineering: transfer stopped, no longer docked'); }
-      else if (n <= 0) { e.transfer = null; tellStations(k, ['Engineering'], `Engineering: ${t.resource} transfer done`); }
+      else if (n < 1) { e.transfer = null; tellStations(k, ['Engineering'], `Engineering: ${t.resource} transfer done (${t.dir === 'in' || other ? 'tank full' : 'tank empty'})`); }
       else {
         e[t.resource] += t.dir === 'in' ? n : -n;
         if (other) { other[t.resource] += n; other.dirty = true; flowCache.delete(t.with); }
