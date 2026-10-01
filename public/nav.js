@@ -231,7 +231,7 @@
               ['Distance', `${d.distance} units${d.inTransporterRange ? ' (transporter range)' : d.inCommsRange ? ' (comms range)' : ''}`],
               ['Position', `${Math.round(d.x)}, ${Math.round(d.y)}`],
               ['Heading · speed', `${String(Math.round(d.heading)).padStart(3, '0')} · ${speedName(d.warp)}`],
-              ['Shields', `${d.shields ? 'Up' : 'Down'}${d.shieldStrength != null ? ` · ${d.shieldStrength}% strength` : ''}`],
+              ['Shields', d.shields ? `Up${d.shieldStrength != null ? ` · ${d.shieldStrength}%` : ''}` : 'Down'], // strength only means something while they're up
               ...(d.hull != null ? [['Hull', `${d.hull}%${d.disabled ? ' · disabled' : ''}${d.damaged.length ? ` · damaged: ${d.damaged.join(', ')}` : ''}`]] : []),
               ...(d.signature != null ? [['Power signature', `${d.signature}%${d.signature < 60 ? ' (running quiet)' : ''}`]] : []),
               ['Ops', d.ops ? 'On duty' : 'None on duty'],

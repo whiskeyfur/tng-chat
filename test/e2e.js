@@ -849,6 +849,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await spock.waitForSelector('.nav-scan:has-text("Scan: the Defiant")');
     assert.match(await spock.textContent('.nav-scan'), /Distance\s*10 units \(transporter range\)/);
     assert.match(await spock.textContent('.nav-scan'), /Ops\s*On duty/);
+    assert.match(await spock.textContent('.nav-scan'), /Shields\s*Down(?!\s*·)/); // not "Down · 100%"
     await spock.click('.nav-contacts li[data-ship="Defiant"] button:has-text("Plot course")');
     await waitFor(() => suluMsgs.some((m) => m.type === 'course-plotted' && m.label === 'the Defiant'));
     step('Science scanned the Defiant (distance, ops, life signs) and plotted a course for Helm');
