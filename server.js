@@ -155,14 +155,16 @@ const refreshNetworks = (keys) => new Set(keys.flatMap((k) => [...network(k)])).
 function broadcastOps(key) {
   scheduleTraffic();
   const ops = opsOf(key);
-  if (!ops.length) return;
+  const comms = crewOf(key).filter((u) => u.station === 'Communications' && !u.operator);
+  if (!ops.length && !comms.length) return;
   const roster = crewOf(key)
     .map((u) => ({ ...info(u), state: u.state, peers: u.peers.map(peerInfo) }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  // Ships in range: ops on duty, within subspace (comms) range.
+  // Ships in range: ops or Communications on duty, within subspace (comms) range.
   // (crewless ships too: a data link can be forced onto them)
   const crewless = [...cores.keys()].filter((k2) => !isBase(k2) && !crewOf(k2).length);
-  const otherShips = [...new Set([...[...operators].map((op) => op.shipKey), ...BASE_KEYS, ...crewless])]
+  const commsShips = [...users.values()].filter((u) => u.station === 'Communications').map((u) => u.shipKey);
+  const otherShips = [...new Set([...[...operators].map((op) => op.shipKey), ...commsShips, ...BASE_KEYS, ...crewless])]
     .filter((k) => k !== key && (commsOk(key, k) || hardLine(key, k))).map(shipName).sort();
   const describe = (h) => ({ id: h.id, fromShip: shipName(h.fromShip), toShip: shipName(h.toShip), caller: peerInfo(h.caller) });
   const all = [...hails.values()];
@@ -184,6 +186,9 @@ function broadcastOps(key) {
       .map((b) => ({ id: b.bid, speaker: peerInfo(b.speaker), label: b.label, since: b.since })),
   };
   for (const op of ops) send(op, msg);
+  // Communications runs data links too: it gets the link picture.
+  const links = { type: 'comm-links', ships: otherShips, links: msg.links, network: msg.network, linkIncoming: msg.linkIncoming, linkOutgoing: msg.linkOutgoing };
+  for (const u of comms) send(u, links);
 }
 
 // The whole picture for the ops data link map: every ship, its crew count and
@@ -381,7 +386,8 @@ function operatorMessage(op, msg) {
       if (target === op.shipKey) return fail('that is this ship');
       // Nobody aboard at all (only its computer): the link is forced, nobody's there to refuse it.
       const crewless = present(target) && !isBase(target) && !crewOf(target).length;
-      if (!opsOf(target).length && !isBase(target) && !crewless) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
+      const answers = opsOf(target).length || crewOf(target).some((u) => u.station === 'Communications');
+      if (!answers && !isBase(target) && !crewless) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no ops or Communications on duty`);
       if (!hardLine(op.shipKey, target)) {
         if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
         if (!commsUp(op.shipKey, 'subspace')) return fail('our subspace relay has no power: data links need it');
@@ -389,7 +395,7 @@ function operatorMessage(op, msg) {
       }
       if (links.has(linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already open`);
       if ([...linkRequests.values()].some((r) => linkKey(r.fromShip, r.toShip) === linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already being negotiated`);
-      if (crewless && !opsOf(target).length) {
+      if (crewless && !answers) {
         links.add(linkKey(op.shipKey, target));
         opLog(target, `the ${shipName(op.shipKey)} forced a data link (nobody aboard)`);
         opLog(op.shipKey, `data link with the ${shipName(target)} forced: nobody aboard to refuse it`);
@@ -415,7 +421,7 @@ function operatorMessage(op, msg) {
       linkRequests.delete(req.id);
       const other = msg.type === 'link-cancel' ? req.toShip : req.fromShip;
       if (msg.type === 'link-accept') {
-        if (!opsOf(other).length) { broadcastOps(op.shipKey); return fail(`no operator on duty aboard the ${shipName(other)}`); }
+        if (!opsOf(other).length && !crewOf(other).some((u) => u.station === 'Communications')) { broadcastOps(op.shipKey); return fail(`no ops or Communications on duty aboard the ${shipName(other)}`); }
         if (!hardLine(op.shipKey, other) && !commsOk(op.shipKey, other)) { broadcastOps(op.shipKey); return fail(`the ${shipName(other)} is out of subspace range (${rangeText(op.shipKey, other)})`); }
         if (!hardLine(op.shipKey, other) && (!commsUp(op.shipKey, 'subspace') || !commsUp(other, 'subspace'))) { broadcastOps(op.shipKey); return fail('a subspace relay is down: no data link'); }
         links.add(linkKey(req.fromShip, req.toShip));
@@ -1311,7 +1317,7 @@ function autoAcceptLink(id) {
   if (!req) return; // answered already
   linkRequests.delete(id);
   const base = shipName(req.toShip);
-  if (!opsOf(req.fromShip).length || (!hardLine(req.fromShip, req.toShip) && (!commsOk(req.fromShip, req.toShip) || !commsUp(req.fromShip, 'subspace')))) { opLog(req.fromShip, `${base} could not open the data link`); broadcastAllOps(); return; }
+  if ((!opsOf(req.fromShip).length && !crewOf(req.fromShip).some((u) => u.station === 'Communications')) || (!hardLine(req.fromShip, req.toShip) && (!commsOk(req.fromShip, req.toShip) || !commsUp(req.fromShip, 'subspace')))) { opLog(req.fromShip, `${base} could not open the data link`); broadcastAllOps(); return; }
   links.add(linkKey(req.fromShip, req.toShip));
   opLog(req.fromShip, `${base} (automated) accepted: data link open`);
   opLog(req.toShip, `data link with the ${shipName(req.fromShip)} open (automated)`);
@@ -2345,7 +2351,7 @@ function beamCommand(ws, msg) {
 
 // POST   /api/library            upload to your own ship (X-Token, X-Filename)
 // GET    /api/library/<ship>/<f> download, from any ship on your data network
-// DELETE /api/library/<ship>/<f> ops only, own ship only
+// DELETE /api/library/<ship>/<f> ops or Communications, own ship only
 async function libraryRequest(req, res, urlPath) {
   const ws = tokens.get(req.headers['x-token']);
   if (!ws?.id) return res.writeHead(401).end('Sign in first');
@@ -2388,8 +2394,8 @@ async function libraryRequest(req, res, urlPath) {
   try { key = shipKey(decodeURIComponent(m[1])); name = safeName(decodeURIComponent(m[2])); } catch { return res.writeHead(400).end('Bad request'); }
 
   if (req.method === 'DELETE') {
-    if (!ws.operator) return res.writeHead(403).end('Only ops can delete library files');
-    if (key !== ws.shipKey) return res.writeHead(403).end("Ops can only delete from their own ship's library");
+    if (!ws.operator && ws.station !== 'Communications') return res.writeHead(403).end('Only ops or Communications can delete library files');
+    if (key !== ws.shipKey) return res.writeHead(403).end("Library files can only be deleted from your own ship's library");
     const entry = name && mergedIndex(key).get(name);
     if (!entry || entry.deleted) return res.writeHead(404).end('No such file');
     if (!coresOf(key).length) return res.writeHead(503).end('The ship\'s computer is offline');
@@ -2616,6 +2622,8 @@ wss.on('connection', (ws) => {
       return;
     }
     if (ws.operator && OP_COMMANDS.has(msg.type)) return operatorMessage(ws, msg);
+    // Communications sets up and closes data links, as ops do.
+    if (ws.id && ws.station === 'Communications' && ['link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close'].includes(msg.type)) return consoleDark(ws) ? darkNote(ws) : operatorMessage(ws, msg);
 
     if (msg.type === 'status' && ws.id && STATES.has(msg.state)) {
       const cid = typeof msg.cid === 'string' ? msg.cid : null;

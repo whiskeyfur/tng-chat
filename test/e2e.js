@@ -845,6 +845,19 @@ const audioBytes = (page) => page.evaluate(async () => {
     await bob.waitForFunction(() => !window.__broadcast.shipRadio);
     step("ship's radio: Communications put a station on every console in the fleet, then switched it off");
 
+    // Communications runs data links too: uhura closes the link with the
+    // Defiant, then asks for it again; the Defiant's ops accept.
+    await closeComms(uhura2);
+    await screen(uhura2, 'st-links');
+    await uhura2.click('#links-open li[data-ship="Defiant"] button');
+    await op.waitForFunction(() => !window.__operator.network.includes('Defiant'));
+    await uhura2.click('#links-request button[data-ship="Defiant"]');
+    await screen(dops, 'link');
+    await dops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
+    await op.waitForFunction(() => window.__operator.network.includes('Defiant'));
+    await uhura2.waitForSelector('#links-open li[data-ship="Defiant"]', { state: 'attached' });
+    step("Communications closed the data link with the Defiant and asked for it again; the Defiant's ops accepted");
+
     // Navigation: Science scans and plots; Helm flies. Distance matters.
     const WebSocket = require('ws');
     const sulu = new WebSocket(`ws://localhost:${process.env.PORT}`);

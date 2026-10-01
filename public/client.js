@@ -40,7 +40,7 @@ const comms = createComms({
   onChange: () => ops?.render(),
 });
 const bc = createBroadcast({ send, me: () => me, log });
-const library = createLibrary($('library-view'), { token: () => token, base: relay.http, log, canDelete: (s) => s.own && !!ops });
+const library = createLibrary($('library-view'), { token: () => token, base: relay.http, log, canDelete: (s) => s.own && (!!ops || me?.station === 'Communications') });
 
 function setLink(status, text) {
   $('link').dataset.status = status;
@@ -162,6 +162,7 @@ function showStation() {
   renderServices();
   fillReassign();
   renderTraffic();
+  renderCommLinks();
   showScreen(stationView.sections[0].id);
 }
 
@@ -202,6 +203,27 @@ function fillReassign() {
   }));
   $('reassign-form').hidden = true;
   $('reassign-key').value = '';
+}
+
+// Communications runs data links too: request one with a ship in range,
+// answer requests, close open links.
+let commLinks = null;
+function renderCommLinks() {
+  const box = document.querySelector('[data-links]');
+  if (!box || !commLinks) return;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const btn = (text, onclick, alert) => el('button', { type: 'button', className: `lcars-button lcars-button--pill tr-tap${alert ? ' lcars-button--alert' : ''}`, textContent: text, onclick });
+  const status = box.querySelector('#links-status')?.textContent || '';
+  const linked = new Set(commLinks.links), pending = new Set([...commLinks.linkOutgoing.map((r) => r.toShip), ...commLinks.linkIncoming.map((r) => r.fromShip)]);
+  const free = commLinks.ships.filter((n) => !linked.has(n) && !pending.has(n));
+  box.replaceChildren(
+    el('h3', { className: 'ops-subhead', textContent: 'Request a link' }),
+    el('div', { className: 'tr-taps', id: 'links-request' }, ...(free.length ? free.map((n) => { const b = btn(n, () => send({ type: 'link-request', ship: n })); b.dataset.ship = n; return b; }) : [el('span', { className: 'ops-hint', textContent: 'No ships in range to link with' })])),
+    ...(commLinks.linkIncoming.length ? [el('h3', { className: 'ops-subhead', textContent: 'Requests to us' }), el('ul', { className: 'st-list', id: 'links-incoming' }, ...commLinks.linkIncoming.map((r) => el('li', {}, `The ${r.fromShip}`, el('span', {}, btn('Accept', () => send({ type: 'link-accept', request: r.id })), btn('Decline', () => send({ type: 'link-decline', request: r.id }), true)))))] : []),
+    ...(commLinks.linkOutgoing.length ? [el('h3', { className: 'ops-subhead', textContent: 'Our requests' }), el('ul', { className: 'st-list' }, ...commLinks.linkOutgoing.map((r) => el('li', {}, `The ${r.toShip}`, el('span', {}, btn('Cancel', () => send({ type: 'link-cancel', request: r.id }), true)))))] : []),
+    el('h3', { className: 'ops-subhead', textContent: 'Open links' }),
+    el('ul', { className: 'st-list', id: 'links-open' }, ...(commLinks.links.length ? commLinks.links.map((n) => { const li = el('li', {}, n, el('span', {}, btn('Close', () => send({ type: 'link-close', ship: n }), true))); li.dataset.ship = n; return li; }) : [el('li', { className: 'empty', textContent: 'No open links' })])),
+    el('p', { className: 'ops-notice', id: 'links-status', textContent: status }));
 }
 
 // Communications: every call in progress on our data network, who's in it
@@ -1042,6 +1064,18 @@ async function onMessage(msg) {
     case 'station-failed':
       $('reassign-error').textContent = `Access denied: ${msg.reason}`;
       break;
+    case 'comm-links':
+      commLinks = msg;
+      renderCommLinks();
+      break;
+    case 'op-ok':
+    case 'op-error': {
+      // Ops answers, for Communications running data links.
+      const st = document.getElementById('links-status');
+      if (st) st.textContent = msg.type === 'op-ok' ? msg.text : `Unable to comply: ${msg.reason}`;
+      log(msg.type === 'op-ok' ? msg.text : `unable to comply: ${msg.reason}`, msg.type === 'op-error' ? 'warn' : undefined);
+      break;
+    }
     case 'traffic':
       traffic = msg.calls;
       renderTraffic();

@@ -408,6 +408,8 @@
     ] }),
     Communications: (ship) => ({ code: 'COM 09', color: 'peach', panels: [
       panel('st-traffic', 'Comm traffic', 'sky', true, h('div', { 'data-traffic': '' })),
+      // Data links, run from here as well as from ops (client.js fills it in).
+      panel('st-links', 'Data links', 'peach', true, h('div', { 'data-links': '' })),
       panel('st-bands', 'Subspace bands', 'peach', true, spectrum(140, ['peach', 'orange', 'gold'], 48, 'Subspace band activity')),
       panel('st-signal', 'Carrier signal', 'sky', false, trace(110, 'sky', (t) => 0.7 * Math.sin(t * 14) * (0.7 + 0.3 * Math.sin(t * 0.7)) + rand(-0.04, 0.04), 160, 'Carrier signal'),
         live(gauge('Signal strength', 'sky'), drift(0.86, 0.7, 0.98, 0.03)),
