@@ -38,6 +38,7 @@
     .traffic { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; text-transform: uppercase; }
     .traffic li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 4px 0; border-bottom: 2px solid #1a1a1a; }
     .traffic .traffic-state { padding: 2px 12px; border-radius: 999px; background: var(--lcars-sky); color: #000; font-size: 13px; }
+    .traffic .traffic-state--broadcast { background: var(--lcars-red); }
     .traffic .traffic-state--ringing { background: var(--lcars-gold); animation: lcars-blink 1.2s steps(2) infinite; }
     .traffic .traffic-who { color: var(--lcars-gold); font-size: 19px; overflow-wrap: anywhere; }
     .traffic .traffic-time { color: var(--lcars-tan); font-variant-numeric: tabular-nums; }
@@ -225,6 +226,22 @@
         </div>
 
         <div class="screen" data-screen="intercom" hidden>
+          <section class="lcars-panel lcars-panel--auto" id="allhands-panel" style="--accent: var(--lcars-red)">
+            <h2 class="lcars-panel__title"><span>All hands · broadcast</span></h2>
+            <div class="lcars-panel__body">
+              <form class="ops-form" id="allhands-form">
+                <select class="ops-select" id="ah-speaker" aria-label="who speaks"></select>
+                <span>to</span>
+                <select class="ops-select" id="ah-scope" aria-label="who hears">
+                  <option value="ship">this ship</option>
+                  <option value="network">the data network</option>
+                </select>
+                <button class="lcars-button lcars-button--pill lcars-button--alert">Open all-hands channel</button>
+              </form>
+              <ul class="ops-hails" id="broadcasts"></ul>
+              <p class="ops-hint">One way: everyone hears the speaker, nobody can answer. It plays over calls in progress.</p>
+            </div>
+          </section>
           <div class="screen-row">
             <section class="lcars-panel" id="intercom-panel" style="--accent: var(--lcars-peach)">
               <h2 class="lcars-panel__title"><span>Intercom · connect crew</span></h2>
@@ -315,6 +332,7 @@
   <script src="screens.js"></script>
   <script src="library.js"></script>
   <script src="voice.js"></script>
+  <script src="broadcast.js"></script>
   <script src="radio.js"></script>
   <script src="comms.js"></script>
   <script src="stations.js"></script>

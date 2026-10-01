@@ -28,6 +28,10 @@
 // Tactical station raises and lowers the ship's shields.
 // The pages can also be hosted elsewhere (e.g. GitHub Pages) and point at
 // this server as their relay, so the library endpoints allow cross-origin use.
+// Ops can open an all-hands broadcast for someone aboard, to the whole ship
+// or the whole data network: one way, their voice to everyone, no return.
+// Communications and ops can also put a radio station on the ship's radio,
+// played by every console aboard (or across the data network).
 // Set OPERATOR_KEY to require a key for operator consoles.
 const http = require('http');
 const fs = require('fs');
@@ -47,7 +51,7 @@ const OPS_STATION = 'Operations';   // operators only
 const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew'];
 // Operator commands (everything else from an operator is handled as crew).
 const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-hail', 'cancel-hail', 'transfer',
-  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close']);
+  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end']);
 // Message types one user may send to another; the server adds `from` and forwards.
 const RELAYED = new Set(['call', 'accept', 'decline', 'hangup', 'signal']);
 const STATES = new Set(['idle', 'calling', 'ringing', 'in-call']);
@@ -127,7 +131,7 @@ const sameNetwork = (a, b) => network(a).has(b);
 // Crew see everyone aboard ships on their data network (just their own ship
 // when unlinked). `ops` says whether their own ship has ops on duty.
 function broadcastCrew(key) {
-  queueMicrotask(broadcastTraffic);
+  scheduleTraffic();
   const net = network(key);
   const list = [...net].flatMap(crewOf).map(info)
     .sort((a, b) => a.ship.localeCompare(b.ship) || a.name.localeCompare(b.name));
@@ -147,6 +151,7 @@ const refreshNetworks = (keys) => new Set(keys.flatMap((k) => [...network(k)])).
 // Each operator sees their own crew with call status, the other ships that
 // have an operator on duty, and the hails to and from their ship.
 function broadcastOps(key) {
+  scheduleTraffic();
   const ops = opsOf(key);
   if (!ops.length) return;
   const roster = crewOf(key)
@@ -169,6 +174,8 @@ function broadcastOps(key) {
     linkIncoming: requests.filter((r) => r.to === key).map(({ id, fromShip }) => ({ id, fromShip })),
     linkOutgoing: requests.filter((r) => r.from === key).map(({ id, toShip }) => ({ id, toShip })),
     graph: networkGraph(),
+    broadcasts: [...broadcasts.values()].filter((b) => b.ships.has(key) || users.get(b.speaker)?.shipKey === key)
+      .map((b) => ({ id: b.bid, speaker: peerInfo(b.speaker), label: b.label, since: b.since })),
   };
   for (const op of ops) send(op, msg);
 }
@@ -273,7 +280,7 @@ function operatorMessage(op, msg) {
         if (target === caller.shipKey) return fail(`${caller.name} is from the ${shipName(target)}`);
         if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship)}: no operator on duty`);
         if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
-        const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id };
+        const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now() };
         hails.set(h.id, h);
         send(op, { type: 'force-hangup', reason: `transferred ${caller.name} to the ${shipName(target)}` });
         send(caller, { type: 'notice', text: `Ops is transferring you to the ${shipName(target)}: hailing now` });
@@ -304,7 +311,7 @@ function operatorMessage(op, msg) {
       if (target === op.shipKey) return fail('that is this ship');
       if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
       if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
-      const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id };
+      const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now() };
       hails.set(h.id, h);
       send(caller, { type: 'notice', text: `Ops is hailing the ${shipName(target)} for you` });
       opLog(target, `incoming hail from the ${shipName(op.shipKey)}: ${caller.name}, ${caller.station}`);
@@ -325,6 +332,20 @@ function operatorMessage(op, msg) {
       broadcastOps(h.fromShip);
       broadcastOps(op.shipKey);
       return ok(`routed the hail from the ${shipName(h.fromShip)} (${caller.name}) to ${callee.name}`);
+    }
+    case 'all-hands': {
+      // Open an all-hands broadcast for someone aboard (yourself included).
+      const speaker = mine(msg.speaker);
+      if (!speaker) return fail('pick someone aboard to speak');
+      if ([...broadcasts.values()].some((b) => b.speaker === speaker.id)) return fail(`${speaker.name} is already broadcasting`);
+      const b = startAllHands(speaker, msg.scope === 'network' ? 'network' : 'ship');
+      return ok(`${speaker.name}: ${b.label}`);
+    }
+    case 'all-hands-end': {
+      const b = broadcasts.get(msg.id);
+      if (!b || !(b.ships.has(op.shipKey) || users.get(b.speaker)?.shipKey === op.shipKey)) return fail('that broadcast has already ended');
+      endBroadcast(b, `ended by ${op.name}`);
+      return ok('all-hands broadcast ended');
     }
     case 'link-request': {
       const target = shipKey(clean(msg.ship));
@@ -406,6 +427,7 @@ function dropHails(test, reason) {
 // Calls with them end on every ship.
 function signOut(ws) {
   users.delete(ws.id);
+  leaveBroadcasts(ws);
   dropHails((h) => h.caller === ws.id, `${ws.name} left the comm net`);
   for (const u of users.values()) send(u, { type: 'gone', id: ws.id });
   broadcastCrew(ws.shipKey);
@@ -423,6 +445,8 @@ function beam(u, toKey) {
   Object.assign(u, { id: userId(u.name, shipName(toKey)), shipKey: toKey, ship: shipName(toKey), state: 'idle', peers: [], cid: null });
   users.set(u.id, u);
   send(u, { type: 'registered', ...info(u), token: u.token, beamedFrom: from });
+  sendShipRadio(u);
+  joinBroadcasts(u);
   broadcastCrew(toKey);
   broadcastShips();
   opLog(toKey, `${u.name} (${u.station}) beamed aboard from the ${from}`);
@@ -593,12 +617,88 @@ function trafficFor(key) {
     c.since = Math.min(c.since, u.callSince || Date.now());
     calls.set(u.cid, c);
   }
-  return [...calls.values()].map((c) => ({ state: c.state, since: c.since, members: [...c.members.values()] }))
-    .sort((a, b) => a.since - b.since);
+  const out = [...calls.values()].map((c) => ({ state: c.state, since: c.since, members: [...c.members.values()] }));
+  // Hails waiting for the other ship's ops to answer.
+  for (const h of hails.values()) {
+    if (!net.has(h.fromShip) && !net.has(h.toShip)) continue;
+    const caller = users.get(h.caller);
+    if (caller) out.push({ state: 'hailing', since: h.since, members: [info(caller)], to: shipName(h.toShip) });
+  }
+  // All-hands broadcasts heard on this network.
+  for (const b of broadcasts.values()) {
+    if (![...b.ships].some((k) => net.has(k))) continue;
+    const sp = users.get(b.speaker);
+    if (sp) out.push({ state: 'broadcast', since: b.since, members: [info(sp)], to: b.label });
+  }
+  return out.sort((a, b) => a.since - b.since);
+}
+
+// Traffic changes with calls, hails and broadcasts; send it once per tick.
+let trafficQueued = false;
+function scheduleTraffic() {
+  if (trafficQueued) return;
+  trafficQueued = true;
+  queueMicrotask(() => { trafficQueued = false; broadcastTraffic(); });
 }
 
 function broadcastTraffic() {
   for (const u of users.values()) if (u.station === 'Communications') send(u, { type: 'traffic', calls: trafficFor(u.shipKey) });
+}
+
+// --- all hands: one-way broadcasts --------------------------------------------------
+
+// bid -> { bid, speaker (user id), ships (keys), audience (user ids), label, since }
+const broadcasts = new Map();
+
+// The speaker's browser sends their mic to each listener over its own
+// one-way connection; listeners only receive. The server relays the setup.
+function startAllHands(speaker, scope) {
+  const ships = scope === 'network' ? network(speaker.shipKey) : new Set([speaker.shipKey]);
+  const label = scope === 'network' && ships.size > 1 ? `all hands, data network (${[...ships].map(shipName).join(', ')})` : `all hands aboard the ${speaker.ship}`;
+  const b = { bid: newId('b-'), speaker: speaker.id, ships, audience: new Set(), label, since: Date.now() };
+  broadcasts.set(b.bid, b);
+  send(speaker, { type: 'bcast-speak', bid: b.bid, label });
+  for (const k of ships) for (const u of crewOf(k)) if (u !== speaker) addListener(b, u);
+  for (const k of new Set([...ships, speaker.shipKey])) { opLog(k, `${speaker.name} (${speaker.station}): ${label}`); broadcastOps(k); }
+  return b;
+}
+
+function addListener(b, u) {
+  if (u.id === b.speaker || b.audience.has(u.id)) return;
+  const speaker = users.get(b.speaker);
+  if (!speaker) return;
+  b.audience.add(u.id);
+  // Listener first, so it's ready before the speaker's offer arrives.
+  send(u, { type: 'bcast-listen', bid: b.bid, from: info(speaker), label: b.label });
+  send(speaker, { type: 'bcast-add', bid: b.bid, listener: info(u) });
+}
+
+function endBroadcast(b, reason) {
+  if (!broadcasts.delete(b.bid)) return;
+  for (const id of [b.speaker, ...b.audience]) { const u = users.get(id); if (u) send(u, { type: 'bcast-ended', bid: b.bid, reason }); }
+  const sp = users.get(b.speaker);
+  for (const k of new Set([...b.ships, ...(sp ? [sp.shipKey] : [])])) { opLog(k, `all-hands broadcast ended${reason ? `: ${reason}` : ''}`); broadcastOps(k); }
+}
+
+// Someone arrives aboard (signs in, beams over): they hear broadcasts to their ship.
+function joinBroadcasts(u) {
+  for (const b of broadcasts.values()) if (b.ships.has(u.shipKey)) addListener(b, u);
+}
+
+// Someone leaves (signs out, beams away): drop them, or end what they were saying.
+function leaveBroadcasts(u, oldId = u.id) {
+  for (const b of [...broadcasts.values()]) {
+    if (b.speaker === oldId) endBroadcast(b, `${u.name} left`);
+    else b.audience.delete(oldId);
+  }
+}
+
+// --- ship's radio ----------------------------------------------------------------
+
+const shipRadio = new Map(); // ship key -> { name, url, by: info }
+
+function sendShipRadio(u) {
+  send(u, { type: 'ship-radio', radio: shipRadio.get(u.shipKey) || null });
 }
 
 // --- connections -------------------------------------------------------------
@@ -632,6 +732,8 @@ wss.on('connection', (ws) => {
       tokens.set(ws.token, ws);
       console.log(`${name} took the ops station on the ${ws.ship}`);
       joinOps(ws);
+      sendShipRadio(ws);
+      joinBroadcasts(ws);
       return;
     }
     if (ws.operator && OP_COMMANDS.has(msg.type)) return operatorMessage(ws, msg);
@@ -669,6 +771,8 @@ wss.on('connection', (ws) => {
       broadcastCrew(ws.shipKey);
       broadcastShips();
       console.log(`${name} (${ws.station}) reported aboard the ${ws.ship}`);
+      sendShipRadio(ws);
+      joinBroadcasts(ws);
       return;
     }
 
@@ -719,6 +823,39 @@ wss.on('connection', (ws) => {
       if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to the ${shipName(toKey)}` });
       beam(u, toKey);
       if (u !== ws) send(ws, { type: 'notice', text: `Transporter: ${u.name} beamed to the ${shipName(toKey)}` });
+      return;
+    }
+
+    // All hands: setup between the speaker and each listener, and the speaker ending it.
+    if (msg.type === 'bsignal' && ws.id) {
+      const b = broadcasts.get(msg.bid);
+      const to = typeof msg.to === 'string' && users.get(msg.to);
+      if (!b || !to) return;
+      const ok = (b.speaker === ws.id && b.audience.has(to.id)) || (b.speaker === to.id && b.audience.has(ws.id));
+      if (ok) send(to, { type: 'bsignal', bid: b.bid, from: ws.id, data: msg.data });
+      return;
+    }
+    if (msg.type === 'bcast-end' && ws.id) {
+      const b = broadcasts.get(msg.bid);
+      if (b && b.speaker === ws.id) endBroadcast(b, `${ws.name} ended it`);
+      return;
+    }
+
+    // The ship's radio: Communications or ops plays a station on every console
+    // aboard, or across the data network.
+    if (msg.type === 'ship-radio' && ws.id) {
+      if (ws.station !== 'Communications' && !ws.operator) return send(ws, { type: 'notice', text: 'Only Communications or ops can set the ship\'s radio' });
+      const ships = msg.scope === 'network' ? network(ws.shipKey) : new Set([ws.shipKey]);
+      let radio = null;
+      if (msg.url) {
+        if (typeof msg.url !== 'string' || !/^https?:\/\/\S+$/i.test(msg.url) || msg.url.length > 500) return send(ws, { type: 'notice', text: 'Not a radio stream address' });
+        radio = { name: clean(msg.name).slice(0, 80) || 'Radio', url: msg.url, by: info(ws) };
+      }
+      for (const k of ships) {
+        if (radio) shipRadio.set(k, radio); else shipRadio.delete(k);
+        for (const u of crewOf(k)) sendShipRadio(u);
+        opLog(k, radio ? `${ws.name} put ${radio.name} on the ship's radio` : `${ws.name} switched off the ship's radio`);
+      }
       return;
     }
 

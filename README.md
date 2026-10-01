@@ -44,7 +44,7 @@ Each crew member gets an LCARS console for their station, styled with `public/lc
 | Engineering | side view of the ship with the warp core, warp field harmonics, power distribution |
 | Medical | patient monitor with ECG and vitals, neural activity, sickbay, cellular analysis |
 | Science | long range sensors, spectral analysis, anomaly readings, science log |
-| Communications | **comm traffic** (every call in progress or ringing on the ship and its data network: who, and for how long; no listening in), subspace bands, carrier signal, message traffic |
+| Communications | **comm traffic** (every call in progress or ringing, every hail waiting for an answer, and every all-hands broadcast, on the ship and its data network: who, and for how long; no listening in), subspace bands, carrier signal, message traffic |
 | Transporter | transporter controls (beam crew to another ship), transporter pad, pattern buffer |
 | Crew | ship schematic, ship status, deck status |
 
@@ -55,6 +55,7 @@ Comms opens an LCARS modal, the same for every role, ops included:
 - **Directory:** everyone you can call. That's your ship (ops first, as **Call ops**), plus every ship on your data network.
 - **Call panel:** incoming calls with Accept and Decline, then mute, hang up, chat and files (any size, sent in 16 KB chunks). The microphone is only requested once a call connects.
 - **Subspace radio:** search internet radio stations (the free, community-run [Radio Browser](https://www.radio-browser.info/) directory) or tune any stream URL, and listen on your console. During a call, **Patch into call** mixes the station into what you send, alongside your mic (Mute still mutes just your mic), so everyone on the call hears it; the call's chat notes when someone patches radio in or out. Patching needs the station's server to allow cross-site access (CORS), which many Icecast servers do; stations that don't still play locally, with Patch disabled. Pages served over https can only play https streams. The radio search and streams go straight from the browser to radio-browser.info and the station's own servers.
+- **Ship's radio:** Communications and ops get **Ship's radio** and **Fleet radio** buttons for the station they're playing: every console aboard (or across the data network) then plays it, shown in a bar at the top of the screen with a local Mute. **Ship's radio off** switches it off. Crew who come aboard later hear it too.
 - **Call waiting:** while you're in a call, a second caller shows up as "call waiting" with three choices. **Ignore** tells them you're busy. **Switch** hangs up your current call and answers them. **Join** brings them into the call you're in, so everyone hears everyone. If your call ends while someone's waiting, their call rings. Anyone else calling while you're busy, ringing or dialling hears busy.
 - The modal opens by itself for an incoming or waiting call, or when an operator puts you through. Calls carry on while it's closed, and the Comms button shows the call state.
 
@@ -76,6 +77,7 @@ Pick **Operations** at sign-in, or open `?station=Operations&name=O'Brien&ship=E
 
 - **Hail · ship to ship:** hail another ship on behalf of one of your crew, yourself included. That ship's operator routes the hail to someone aboard (it defaults to their Captain, and can be themselves), or declines. You can cancel while it's pending. For example: Picard on the Enterprise, via Enterprise ops, via K'Vatch ops, to Martok, Captain of the K'Vatch.
 - **Data link:** request a link with another ship. Their operator accepts or declines, and either side can close the link later. Linked ships form a data network (links chain, so three or more ships can share one network). Everyone on it sees everyone on every ship in the Comms directory and can call them directly. The **data network map** beside the controls shows every ship (crew aboard, shields, ops on duty) and who is linked to whom: solid lines are data links, dashed lines pending requests, and colours mark this ship, the ships on its network, other ships and ships without ops. Click a ship to pick it for a link request.
+- **All hands:** open a one-way broadcast for someone aboard (the Captain, yourself, anyone), to **this ship** or **the data network** (the fleet). Their mic goes to everyone in range over send-only connections, so listeners hear it on top of any call they're in but can't answer. Everyone sees an "All hands" bar at the top of their console with a local Mute; the speaker gets "On air" with End broadcast, and ops can End it too. Crew who come aboard during it hear it as well.
 - **Intercom:** connect two of your crew immediately, without ringing, ending any calls they're in.
 - **Conference · patch in:** bring one of your crew into the call another crew member is in, even if it spans ships.
 - **Crew roster:** your crew's stations and call status, with Call and Disconnect buttons.
@@ -98,6 +100,7 @@ npm test
 Starts the server and drives headless Chromium pages with a fake microphone through crew consoles and ops consoles:
 
 - **Crew calls:** decline; accept with audio both ways; chat; a 300 KB file arrives byte-for-byte; hang-up; a peer going offline.
+- **Broadcasts:** Communications seeing a hail before it's answered; all hands to the ship (heard, receive-only, other ships don't hear it); all hands to the fleet over a data link, ended by ops; the fleet radio playing on crew consoles and switching off.
 - **Subspace radio:** a local test station (a tone) tuned by URL and patched into a call (the outgoing track switches to the mix, the other side sees the note, the call stays up), unpatched back to the mic; a station without CORS plays locally with Patch disabled.
 - **Call waiting:** ignore (the caller hears busy), the caller giving up, join (three-way), switch, and a waiting call ringing once the current one ends.
 - **Operator actions:** intercom, moving someone, patching a third person in (everyone hears everyone, chat and files reach everyone), one person leaving a three-way call, disconnect.
@@ -115,6 +118,7 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 ## How it works
 
 - `server.js` keeps everyone online by id (`name@ship`, lowercased), with their ship and station. It sends each person the crew list for their data network (just their ship when unlinked), relays call-control and signal messages to a user id, and adds `from` and `fromInfo`. A `call` to someone off your network is refused with `unavailable`. Each ship's ops consoles get a roster of that ship's crew, the ships in range, their links and network, and the open hails and link requests. Hails and link requests live on the server until answered or until a party goes away.
+- `public/broadcast.js` handles all-hands broadcasts (send-only from the speaker, receive-only to each listener) and the ship's radio, with the bar at the top of every console.
 - `public/radio.js` is Subspace radio; patching uses `voice.setRadio()`, which mixes mic and radio with Web Audio and swaps the outgoing track on every connection (`RTCRtpSender.replaceTrack`, no renegotiation).
 - `public/relay.js` finds the comm relay (same server by default, or `config.js`, `?relay=`, or the sign-in field).
 - `public/voice.js` is the call engine and call panel. `public/comms.js` builds the Comms modal around it: the directory, plus optional extras like Transfer. `public/library.js` is the Library screen and `public/screens.js` switches screens. All of these are shared by the crew console (`public/client.js`, with the station displays in `public/stations.js`) and, at the Operations station, the ops screens (`public/ops.js`), all on the one console page. Shared console styles are in `public/console.css`.
@@ -132,6 +136,8 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 | `{type:"merge", caller}` | call waiting, Join: bring user id `caller` (who is calling you) into your call |
 | `{type:"change-station", station, key?}` | move to another station aboard your ship; reply `registered`, or `operator-ok` for Operations (`station-failed` if the key is wrong) |
 | `{type:"shields", up}` | Tactical only: raise or lower the ship's shields |
+| `{type:"ship-radio", url, name, scope}` | Communications or ops: put a stream on the ship's (`ship`) or fleet's (`network`) radio; `url: null` switches it off |
+| `{type:"bsignal", to, bid, data}` / `{type:"bcast-end", bid}` | all hands: offer/answer/ICE between speaker and listener; the speaker ending it |
 | `{type:"beam", who, ship}` | Transporter only: beam user id `who` (aboard your ship) to `ship`; they get `registered` with `beamedFrom` |
 
 | Message (server → client) | Meaning |
@@ -143,7 +149,10 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 | `{type:"connect", peers, role, cid}` | an operator connected you with `peers`; `role:"caller"` means you send the offers |
 | `{type:"add-peer", peer, cid}` | an operator is patching `peer` into your call; wait for their offer |
 | `{type:"force-hangup", reason?}` | an operator disconnected you, or your transfer went through (ops) |
-| `{type:"traffic", calls}` | Communications only: calls on your data network, `[{state, since, members}]` |
+| `{type:"traffic", calls}` | Communications only: calls, pending hails and broadcasts on your data network, `[{state, since, members, to?}]` |
+| `{type:"bcast-speak", bid, label}` / `{type:"bcast-add", bid, listener}` | you're the all-hands speaker / connect (send-only) to this listener |
+| `{type:"bcast-listen", bid, from, label}` / `{type:"bcast-ended", bid}` | an all-hands broadcast you'll receive (receive-only) / it ended |
+| `{type:"ship-radio", radio}` | the ship's radio: `{name, url, by}` or `null` |
 | `{type:"notice", text}` | hail progress, for example "Ops is hailing the K'Vatch for you" |
 
 | Message (operator → server) | Meaning |
@@ -153,6 +162,7 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 | `{type:"hail", ship, crew}` | hail `ship` on behalf of crew id `crew` |
 | `{type:"route", hail, to}` / `{type:"decline-hail", hail}` | answer an incoming hail: connect it to crew id `to`, or decline |
 | `{type:"cancel-hail", hail}` | withdraw an outgoing hail |
+| `{type:"all-hands", speaker, scope}` / `{type:"all-hands-end", id}` | open an all-hands broadcast for crew id `speaker` to `scope` `ship` or `network`, or end one |
 | `{type:"transfer", to}` / `{type:"transfer", ship}` | hand the call you're in to user id `to` (aboard or on the data network), or hail `ship` for the person on the line; you drop off the call |
 | `{type:"link-request", ship}` / `{type:"link-cancel", request}` | ask another ship's ops for a data link / withdraw the request |
 | `{type:"link-accept", request}` / `{type:"link-decline", request}` | answer a data link request |

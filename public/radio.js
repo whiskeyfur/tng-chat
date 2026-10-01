@@ -7,13 +7,16 @@
 // Icecast servers do. Stations that don't still play locally, but can't be
 // patched in. Pages served over https can only play https streams.
 //
-// const radio = createRadio(container, { voice, log });
+// Communications and ops can also put the station on the ship's radio (every
+// console aboard plays it) or the fleet's (the whole data network).
+//
+// const radio = createRadio(container, { voice, log, send, canShipRadio });
 // radio.render()   // call state changed
 (function () {
   const DIRECTORY = ['de1', 'fi1', 'nl1'].map((h) => `https://${h}.api.radio-browser.info`);
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 
-  window.createRadio = function createRadio(root, { voice, log }) {
+  window.createRadio = function createRadio(root, { voice, log, send, canShipRadio = () => false }) {
     const q = el('input', { className: 'ops-input', id: 'radio-q', placeholder: 'Station name or genre', autocomplete: 'off', ariaLabel: 'search radio stations' });
     const url = el('input', { className: 'ops-input', id: 'radio-url', placeholder: 'or a stream URL', autocomplete: 'off', ariaLabel: 'radio stream URL' });
     const btn = (text, id, cls = '') => el('button', { type: 'submit', className: `lcars-button lcars-button--pill ${cls}`, id, textContent: text });
@@ -23,9 +26,22 @@
     const title = el('span', { className: 'radio-title', id: 'radio-title' });
     const stop = el('button', { type: 'button', className: 'lcars-button lcars-button--pill lcars-button--alert', id: 'radio-stop', textContent: 'Stop' });
     const patch = el('button', { type: 'button', className: 'lcars-button lcars-button--pill', id: 'radio-patch', textContent: 'Patch into call' });
-    const now = el('div', { className: 'radio-now', hidden: true }, title, patch, stop);
+    const onShip = el('button', { type: 'button', className: 'lcars-button lcars-button--pill', id: 'radio-ship', textContent: "Ship's radio" });
+    const onFleet = el('button', { type: 'button', className: 'lcars-button lcars-button--pill', id: 'radio-fleet', textContent: 'Fleet radio' });
+    const now = el('div', { className: 'radio-now', hidden: true }, title, patch, onShip, onFleet, stop);
+    const off = el('button', { type: 'button', className: 'lcars-button lcars-button--pill lcars-button--alert', id: 'radio-off', textContent: "Ship's radio off" });
     const status = el('p', { className: 'ops-notice', id: 'radio-status' });
-    root.replaceChildren(now, status, search, tune, results);
+    root.replaceChildren(now, status, search, tune, results, el('div', { className: 'radio-ship-ctl' }, off));
+    const toShip = (scope) => {
+      if (!current) return;
+      send({ type: 'ship-radio', url: current.url, name: current.name, scope });
+      status.textContent = scope === 'network' ? `${current.name} is on the fleet's radio` : `${current.name} is on the ship's radio`;
+      stopPlaying(); // the ship's radio plays it now
+      render();
+    };
+    onShip.onclick = () => toShip('ship');
+    onFleet.onclick = () => toShip('network');
+    off.onclick = () => { send({ type: 'ship-radio', url: null, scope: 'network' }); status.textContent = "Ship's radio switched off"; };
 
     // The station playing now. With CORS, it goes through Web Audio so it can
     // be both heard here and sent into a call.
@@ -121,6 +137,9 @@
     };
 
     function render() {
+      const can = canShipRadio();
+      onShip.hidden = onFleet.hidden = !can;
+      off.parentElement.hidden = !can;
       now.hidden = !current;
       if (!current) return;
       title.textContent = `On air: ${current.name}`;
@@ -129,6 +148,7 @@
       patch.title = !current.dest ? 'This station does not allow patching into calls' : voice.state !== 'in-call' ? 'Patch in during a call' : '';
     }
 
+    render();
     return {
       render,
       get playing() { return current?.name || null; },

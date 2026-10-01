@@ -15,6 +15,7 @@
     let roster = [], ships = [], incoming = [], outgoing = [];
     let links = [], network = [], linkIncoming = [], linkOutgoing = [];
     let graph = { ships: [], links: [], requests: [] };
+    let broadcasts = [];
     let me = getMe(), ship = me.ship;
 
     function stardate() {
@@ -36,6 +37,7 @@
           logShipChanges(ships, msg.ships);
           ({ users: roster, ships, incoming, outgoing, links, network, linkIncoming, linkOutgoing } = msg);
           graph = msg.graph || graph;
+          broadcasts = msg.broadcasts || [];
           render();
           return true;
         case 'op-ok':
@@ -136,6 +138,12 @@
 
     function render() {
       renderMap();
+
+      // All hands: who's on air, and the speaker picker (captain first).
+      fillSelect('ah-speaker', roster, Math.max(0, roster.findIndex((u) => u.station === 'Captain')));
+      $('broadcasts').replaceChildren(...broadcasts.map((b) => el('li', { className: 'ops-hail' },
+        el('span', { className: 'ops-hail__text', textContent: `On air: ${b.speaker.name} (${b.speaker.station}), ${b.label}` }),
+        el('button', { className: 'lcars-button lcars-button--pill lcars-button--alert', textContent: 'End', onclick: () => send({ type: 'all-hands-end', id: b.id }) }))));
       // Transfer (in the Comms modal) shows while you are in a call: anyone
       // aboard or on the data network, or a hail to a ship off the network.
       const inMyCall = voice.state === 'in-call';
@@ -283,6 +291,7 @@
     action('add-form', () => ({ type: 'add', name: $('newcomer').value, into: $('host').value }));
     action('hail-form', () => ({ type: 'hail', ship: $('hail-ship').value, crew: $('hail-crew').value }));
     action('link-form', () => ({ type: 'link-request', ship: $('link-ship').value }));
+    action('allhands-form', () => ({ type: 'all-hands', speaker: $('ah-speaker').value, scope: $('ah-scope').value }));
     action('transfer-form', () => {
       const v = $('transfer-to').value;
       return v.startsWith('ship:') ? { type: 'transfer', ship: v.slice(5) } : { type: 'transfer', to: v };

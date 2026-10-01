@@ -30,10 +30,12 @@ const send = (msg) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stri
 
 const comms = createComms({
   send, me: () => me, log,
+  canShipRadio: () => !!me && (me.station === 'Communications' || !!ops),
   button: $('comms-button'),
   extras: $('transfer-form'), // ops only: hand off the call you're in
   onChange: () => ops?.render(),
 });
+const bc = createBroadcast({ send, me: () => me, log });
 const library = createLibrary($('library-view'), { token: () => token, base: relay.http, log, canDelete: (s) => s.own && !!ops });
 
 function setLink(status, text) {
@@ -72,6 +74,7 @@ function connect() {
 // Back to the sign-in form when the link to the server drops.
 function signedOut(reason) {
   comms.reset(reason);
+  bc.reset();
   me = null;
   token = null;
   stationView = null;
@@ -162,11 +165,15 @@ function renderTraffic() {
   const ul = document.createElement('ul');
   ul.className = 'traffic';
   const fmt = (ms) => { const t = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+  const STATE = { 'in-call': ['Open', ''], ringing: ['Ringing', ' traffic-state--ringing'], hailing: ['Hailing', ' traffic-state--ringing'], broadcast: ['All hands', ' traffic-state--broadcast'] };
   for (const c of traffic) {
     const li = document.createElement('li');
+    const [word, cls] = STATE[c.state] || [c.state, ''];
+    const who = c.members.map((m) => comms.voice.label(m)).join('  ⟷  ');
     li.append(
-      Object.assign(document.createElement('span'), { className: `traffic-state${c.state === 'in-call' ? '' : ' traffic-state--ringing'}`, textContent: c.state === 'in-call' ? 'Open' : 'Ringing' }),
-      Object.assign(document.createElement('span'), { className: 'traffic-who', textContent: c.members.map((m) => comms.voice.label(m)).join('  ⟷  ') }),
+      Object.assign(document.createElement('span'), { className: `traffic-state${cls}`, textContent: word }),
+      Object.assign(document.createElement('span'), { className: 'traffic-who',
+        textContent: c.state === 'hailing' ? `${who} → the ${c.to}, awaiting their ops` : c.state === 'broadcast' ? `${who} → ${c.to}` : who }),
       Object.assign(document.createElement('span'), { className: 'traffic-time', textContent: fmt(Date.now() - c.since) }));
     ul.append(li);
   }
@@ -251,6 +258,7 @@ function hideOps() {
 async function onMessage(msg) {
   if (msg.type === 'users') queueMicrotask(() => ops?.render()); // transfer targets
   if (ops?.handle(msg)) return;
+  if (await bc.handle(msg)) return;
   if (msg.type === 'notice' && msg.text.startsWith('Transporter:')) {
     const st = document.getElementById('beam-status');
     if (st) st.textContent = msg.text;
@@ -266,6 +274,7 @@ async function onMessage(msg) {
       me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station };
       token = msg.token;
       if (ops) hideOps();
+      queueMicrotask(() => comms.radio?.render());
       if (msg.beamedFrom) log(`beamed from the ${msg.beamedFrom} to the ${me.ship}`);
       document.title = `LCARS: ${me.station} · ${me.ship}`;
       $('home').hidden = false;
@@ -291,6 +300,7 @@ async function onMessage(msg) {
       $('library-tab').hidden = false;
       log(`${me.name} took the ops station aboard the ${me.ship}`);
       showOps();
+      comms.radio?.render();
       try {
         localStorage.setItem('voice-reg', JSON.stringify({ name: me.name, ship: me.ship, station: 'Operations' }));
       } catch {}
@@ -398,6 +408,7 @@ connect();
 
 // Exposed for the headless test.
 window.__comms = comms;
+window.__broadcast = bc;
 window.__operator = new Proxy({}, { get: (_, k) => ops?.[k] });
 window.__voice = Object.create(comms.voice, {
   myName: { get: () => me?.name },

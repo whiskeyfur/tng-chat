@@ -662,6 +662,80 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     for (const page of [kor, martok]) await page.close();
 
+    // Comm traffic shows a hail while it waits for the other ship's ops.
+    const dops = await openOps(browser, 'Defiant', 'defiant ops 2', 'dax');
+    const nog = await openAs(browser, 'nog', 'nog', 'Defiant', 'Crew');
+    const uhura2 = await openAs(browser, 'uhura', 'uhura2', 'Enterprise', 'Communications');
+    await uhura2.waitForFunction(() => window.__voice.myName === 'uhura');
+    await closeComms(op);
+    await screen(op, 'hail');
+    await op.waitForFunction(() => window.__operator.ships.includes('Defiant'));
+    await op.selectOption('#hail-ship', 'Defiant');
+    await op.selectOption('#hail-crew', id('bob'));
+    await op.click('#hail-form button');
+    await uhura2.waitForSelector('[data-traffic] li:has-text("Hailing"):has-text("bob")', { state: 'attached' });
+    await screen(dops, 'hail');
+    const hail4 = await dops.waitForSelector('#incoming li.ops-hail:has-text("bob")');
+    await hail4.$eval('button.lcars-button--alert', (b) => b.click()); // Decline
+    await uhura2.waitForFunction(() => !document.querySelector('[data-traffic]').textContent.includes('Hailing'));
+    step('Communications sees a hail in comm traffic before it is answered');
+
+    // All hands aboard: alice speaks, everyone aboard hears, nobody sends back.
+    await screen(op, 'intercom');
+    await op.selectOption('#ah-speaker', id('alice'));
+    await op.selectOption('#ah-scope', 'ship');
+    await op.click('#allhands-form button');
+    await alice.waitForFunction(() => window.__broadcast.speaking?.listeners >= 4); // bob, carol, ops, uhura
+    for (const page of [bob, uhura2]) await page.waitForFunction(() => window.__broadcast.listening[0]?.connected, null, { timeout: 20000 });
+    await bob.waitForTimeout(1500);
+    const heard = await bob.evaluate(async () => {
+      const pc = window.__broadcast.listening[0].pc;
+      let bytes = 0;
+      (await pc.getStats()).forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'audio') bytes += r.bytesReceived; });
+      const t = pc.getTransceivers()[0];
+      return { bytes, direction: t.currentDirection, sending: !!t.sender.track };
+    });
+    assert.ok(heard.bytes > 0, 'bob did not hear the broadcast');
+    assert.equal(heard.direction, 'recvonly', 'listeners must not send');
+    assert.equal(heard.sending, false);
+    assert.equal(await nog.evaluate(() => window.__broadcast.listening.length), 0, 'the Defiant heard an Enterprise-only broadcast');
+    await bob.waitForSelector('.bcast--listening:has-text("alice")');
+    await uhura2.waitForSelector('[data-traffic] li:has-text("All hands"):has-text("alice")', { state: 'attached' });
+    await alice.click('.bcast--speaking button'); // End broadcast
+    await bob.waitForFunction(() => window.__broadcast.listening.length === 0);
+    step('all hands: ops opened a one-way broadcast for alice to the whole ship; bob heard it and sent nothing back');
+
+    // All hands to the fleet (data network), ended by ops.
+    await screen(op, 'link');
+    await op.selectOption('#link-ship', 'Defiant');
+    await op.click('#link-form button');
+    await screen(dops, 'link');
+    await dops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
+    await op.waitForFunction(() => window.__operator.network.includes('Defiant'));
+    await screen(op, 'intercom');
+    await op.selectOption('#ah-speaker', id('carol'));
+    await op.selectOption('#ah-scope', 'network');
+    await op.click('#allhands-form button');
+    await nog.waitForFunction(() => window.__broadcast.listening[0]?.connected, null, { timeout: 20000 });
+    await nog.waitForSelector('.bcast--listening:has-text("carol"):has-text("Enterprise")');
+    await op.click('#broadcasts li button'); // ops ends it
+    await nog.waitForFunction(() => window.__broadcast.listening.length === 0);
+    step('all hands to the fleet: carol was heard aboard the Defiant over the data link; ops ended it');
+
+    // The ship's radio: Communications puts a station on the fleet's radio.
+    assert.equal(await bob.isVisible('#radio-fleet'), false, 'crew can set the ship radio');
+    await openComms(uhura2);
+    await uhura2.fill('#radio-url', `http://localhost:${RADIO_PORT}/cors/tone.wav`);
+    await uhura2.click('#radio-tune');
+    await uhura2.waitForSelector('#radio-fleet:visible');
+    await uhura2.click('#radio-fleet');
+    for (const page of [bob, nog]) await page.waitForFunction(() => window.__broadcast.shipRadio?.playing, null, { timeout: 15000 });
+    await bob.waitForSelector('.bcast--radio:has-text("uhura")');
+    await uhura2.click('#radio-off');
+    await bob.waitForFunction(() => !window.__broadcast.shipRadio);
+    step("ship's radio: Communications put a station on every console in the fleet, then switched it off");
+    for (const page of [nog, uhura2, dops]) await page.close();
+
     // Closing the tab mid-call ends the call for the other side.
     await callFrom(carol, 'bob');
     await bob.waitForSelector('.v-incoming:not([hidden])');

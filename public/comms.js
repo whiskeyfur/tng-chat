@@ -63,7 +63,7 @@
     });
 
     // Subspace radio: listen, or patch a station into the call.
-    const radio = window.createRadio ? createRadio($('radio'), { voice, log: opts.log }) : null;
+    const radio = window.createRadio ? createRadio($('radio'), { voice, log: opts.log, send: opts.send, canShipRadio: opts.canShipRadio }) : null;
 
     function open() {
       if (!dialog.open) dialog.showModal();
