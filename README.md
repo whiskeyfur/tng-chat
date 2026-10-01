@@ -6,9 +6,13 @@ Starship comms in the browser, on LCARS consoles. A small Node server, the comm 
 
 ```sh
 npm install
-npm start                                  # the relay: http://localhost:8080  (PORT, RELAY_NAME to change)
-npm run shipcore -- Enterprise "K'Vatch"   # a ship's computer: no ship's computer, no ship
+npm start                                  # the relay (http://localhost:8080; PORT, RELAY_NAME to change) and a ship's computer for every ship saved in shipcore-data/
+npm start -- Enterprise "K'Vatch"          # ... or for just these ships
+npm run relay                              # the relay alone
+npm run shipcore -- Enterprise "K'Vatch"   # a ship's computer on its own: no ship's computer, no ship
 ```
+
+`npm start` runs `tools/supervisor.js`, which also restarts everything when the code changes: 5 seconds after the last change to `server.js`, `tools/*.js` or `data/*.json`, every console is told to reload, the relay and the ship's computers restart, and each console signs back in as who and where it was (calls aren't resumed: call or join again). A change to `public/*` only reloads the consoles. Ship state comes through in each ship's `.nav.json`. (With `npm start` running the ship's computers, there's no need to start them by hand as well.)
 
 Everyone uses the same page, http://localhost:8080:
 

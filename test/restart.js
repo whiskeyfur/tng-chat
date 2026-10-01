@@ -76,6 +76,37 @@ async function look() {
     await stop(c); c = computer(); await wait(4000);
     assert.equal((await look()).docked, 'Starbase 47');
     step("still docked at Starbase 47 after the ship's computer restarted");
+
+    // The supervisor (npm start): a code change restarts the relay and the
+    // computers 1 s after (5 s normally), telling the consoles to reload first;
+    // a change to the pages only reloads them.
+    await stop(c); await stop(r);
+    const WATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-watch-'));
+    fs.mkdirSync(path.join(WATCH, 'public'));
+    const sup = run(['tools/supervisor.js'], { SHIPCORE_DATA: DATA, SUPERVISE_DELAY: '800', SUPERVISE_WATCH: [path.join(WATCH, 'code'), path.join(WATCH, 'public')].join(path.delimiter) });
+    fs.mkdirSync(path.join(WATCH, 'code'));
+    await wait(3500);
+    const ws = new WebSocket(`ws://localhost:${PORT}`);
+    const got = [];
+    ws.on('message', (m) => got.push(JSON.parse(m)));
+    await new Promise((res) => ws.on('open', res));
+    ws.send(JSON.stringify({ type: 'register', name: 'kim', ship: 'Oldship', station: 'Helm' }));
+    await wait(800);
+    fs.writeFileSync(path.join(WATCH, 'public', 'page.js'), '// changed');
+    const until = async (fn, ms = 10000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return; await wait(100); } throw new Error('timed out'); };
+    await until(() => got.some((m) => m.type === 'reload' && m.restart === false));
+    assert.equal(ws.readyState, WebSocket.OPEN, 'a page change should not restart the relay');
+    step('the supervisor: a change to the pages told the consoles to reload, without restarting the relay');
+    const closed = new Promise((res) => ws.on('close', res));
+    fs.writeFileSync(path.join(WATCH, 'code', 'server.js'), '// changed');
+    await until(() => got.some((m) => m.type === 'reload' && m.restart === true));
+    await closed;
+    await wait(4000);
+    assert.equal((await look()).docked, 'Starbase 47');
+    step('a code change: the consoles were told to reload, the relay and the ship\'s computer restarted, and the ship was still docked');
+    procs.add(sup);
+    await stop(sup);
+    fs.rmSync(WATCH, { recursive: true, force: true });
     ok = true;
   } catch (err) {
     console.error('FAIL:', err.message);

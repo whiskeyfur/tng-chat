@@ -2950,4 +2950,11 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => console.log(`${RELAY_NAME} on http://localhost:${PORT}`));
+
+// Run by tools/supervisor.js: before a restart (or after the pages change)
+// every console is told to reload; they rejoin as who and where they were.
+process.on('message', (m) => {
+  if (m?.type !== 'reload') return;
+  for (const ws of sockets) if (!ws.shipcore) send(ws, { type: 'reload', restart: !!m.restart });
+});
 module.exports = server;

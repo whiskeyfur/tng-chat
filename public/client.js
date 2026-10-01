@@ -67,12 +67,46 @@ function connect() {
   let queue = Promise.resolve();
   ws.onmessage = (ev) => { queue = queue.then(() => onMessage(JSON.parse(ev.data))).catch((err) => log(`error: ${err}`, 'error')); };
   ws.onclose = () => {
+    if (reloading) return waitForRelay(); // the relay is restarting: reload once it's back
     log('signaling disconnected', 'error');
     signedOut('Lost the link to the comm relay. Reconnecting...');
     setLink('error', `Comm relay unreachable: ${relay.address()}`);
     renderShips([]);
     setTimeout(connect, 3000);
   };
+}
+
+// The relay restarting (or the pages changing): remember who and where we
+// are, reload once the relay is back, and rejoin. Calls aren't resumed.
+const REJOIN = 'stchat-rejoin';
+let reloading = false;
+function prepareReload(restart) {
+  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: me.station })); } catch {}
+  reloading = true;
+  log(restart ? 'the comm relay is restarting: back in a moment' : 'consoles updated: reloading');
+  if (!restart) setTimeout(() => location.reload(), 300);
+}
+function waitForRelay() {
+  const probe = () => {
+    let t;
+    try { t = new WebSocket(relay.ws()); } catch { return setTimeout(probe, 1000); }
+    t.onopen = () => { t.close(); location.reload(); };
+    t.onerror = () => setTimeout(probe, 1000);
+  };
+  setTimeout(probe, 1000);
+}
+// After a reload: sign straight back in (once the ship is in the list).
+let rejoin = null;
+try { rejoin = JSON.parse(sessionStorage.getItem(REJOIN) || 'null'); } catch {}
+function tryRejoin() {
+  if (!rejoin || me || !ships.some((x) => x.computer && x.name.toLowerCase() === rejoin.ship.toLowerCase())) return;
+  const r = rejoin;
+  rejoin = null;
+  try { sessionStorage.removeItem(REJOIN); } catch {}
+  if (r.station === 'Operations' && opsKeyRequired) { $('name').value = r.name; return; } // needs the code: sign in by hand
+  if (r.station === 'Operations') send({ type: 'operator', name: r.name, ship: r.ship });
+  else send({ type: 'register', name: r.name, ship: r.ship, station: r.station });
+  log(`rejoined the ${r.ship} as ${r.name}, ${r.station}`);
 }
 
 // Back to the sign-in form when the link to the server drops.
@@ -1154,6 +1188,10 @@ async function onMessage(msg) {
       ships = msg.ships;
       renderShips(msg.ships);
       renderShipState();
+      tryRejoin();
+      break;
+    case 'reload':
+      prepareReload(msg.restart);
       break;
     case 'library':
       library.render(msg);

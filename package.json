@@ -5,10 +5,11 @@
   "description": "Starship comms on LCARS consoles: WebSocket signaling relay + peer-to-peer WebRTC voice, chat and files",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node tools/supervisor.js",
     "test": "node test/e2e.js && node test/restart.js",
     "export-pages": "node tools/export-pages.js",
-    "shipcore": "node tools/shipcore.js"
+    "shipcore": "node tools/shipcore.js",
+    "relay": "node server.js"
   },
   "dependencies": {
     "ws": "^8.18.0"
