@@ -764,7 +764,8 @@ const known = new Map();       // ship key -> Map(other ship key -> { x, y, at }
 // Autopilot: Helm picks a known contact or a starbase and the ship's computer
 // flies there (no one needs to stay at Helm): it intercepts a ship it can see,
 // heads for its last known position if not, and docks at a starbase on arrival.
-const autopilots = new Map();  // ship key -> { target (name), key, base }
+const autopilots = new Map();  // ship key -> { target (name), key, base, mode: go | follow | match, range, warp }
+const FOLLOW_RANGES = [10, 25, 50, 100, 200];
 
 function distance(a, b) {
   const p = navState.get(a), q = navState.get(b);
@@ -780,6 +781,7 @@ function navMessage(key) {
     type: 'nav',
     own: own ? { name: shipName(key), ...own, power: powerOf(key), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
       autopilot: autopilots.get(key)?.target || null,
+      autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
       // Crewless ships on a data link with us: their stations can be taken by remote control.
       remoteTargets: linkedTo(key).filter((t) => present(t) && !isBase(t) && !crewOf(t).some((u) => !u.remoteFrom)).map(shipName),
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
@@ -810,6 +812,29 @@ function scheduleNav() {
     for (const [k, ap] of autopilots) {
       const nav = navState.get(k), core = primaryCore.get(k);
       if (!nav || !core) continue;
+      // Follow (at a range) and match (heading and speed) need the contact on sensors.
+      if (ap.mode === 'follow' || ap.mode === 'match') {
+        const t = navState.get(ap.key);
+        if (!t || !present(ap.key) || !sensorOk(k, ap.key)) {
+          opLog(k, `autopilot: lost the ${ap.target} from sensors, ${ap.mode} ended`);
+          for (const u of crewOf(k)) if (u.station === 'Helm') send(u, { type: 'notice', text: `Helm: the ${ap.target} left sensor range, ${ap.mode === 'follow' ? 'follow' : 'match'} ended` });
+          autopilots.delete(k);
+          continue;
+        }
+        if (ap.mode === 'match') {
+          const warp = Math.min(t.warp, speedLimits(k).warp || speedLimits(k).impulse);
+          if (Math.abs(nav.heading - t.heading) > 1 || Math.abs(nav.warp - warp) > 0.01 || nav.dest) send(core, { type: 'core-helm', ship: shipName(k), heading: t.heading, warp });
+        } else {
+          // A point at the chosen range from the contact, on our side of it.
+          const dx = nav.x - t.x, dy = nav.y - t.y, d = Math.hypot(dx, dy) || 1;
+          const px = t.x + (dx / d) * ap.range, py = t.y + (dy / d) * ap.range;
+          const off = Math.hypot(nav.x - px, nav.y - py);
+          if (off > Math.max(2, ap.range * 0.1)) {
+            if (!nav.dest || Math.hypot(nav.dest.x - px, nav.dest.y - py) > 2 || nav.warp === 0) send(core, { type: 'core-helm', ship: shipName(k), dest: { x: px, y: py }, warp: ap.warp });
+          } else if (nav.warp > 0 && t.warp === 0) send(core, { type: 'core-helm', ship: shipName(k), warp: 0 });
+        }
+        continue;
+      }
       if (!ap.base && !navTargets.has(k) && navState.has(ap.key) && sensorOk(k, ap.key) && nav.warp > 0) {
         navTargets.set(k, ap.key); // back on sensors: intercept again
         opLog(k, `autopilot: the ${ap.target} is back on sensors, intercepting`);
@@ -944,7 +969,18 @@ function navCommand(ws, msg) {
       if (!k2) return note(`Helm: no known position for the ${name}`);
       dest = { x: k2.x, y: k2.y };
     }
-    autopilots.set(key, { target: base ? base.name : shipName(t), key: base ? null : t, base: !!base, since: Date.now() });
+    const mode = ['follow', 'match'].includes(msg.mode) ? msg.mode : 'go';
+    if (mode !== 'go') {
+      // Follow at a range, or match heading and speed: a ship on sensors.
+      if (base) return note('Helm: starbases don\'t move: use go to');
+      if (!navState.has(t) || !present(t) || !sensorOk(key, t)) return note(`Helm: the ${name} is not on sensors`);
+      const range = FOLLOW_RANGES.includes(Number(msg.range)) ? Number(msg.range) : 25;
+      autopilots.set(key, { target: shipName(t), key: t, base: false, mode, range, warp: Number(msg.warp) || 5, since: Date.now() });
+      navTargets.delete(key);
+      opLog(key, `Helm (${ws.name}): autopilot ${mode === 'follow' ? `following the ${shipName(t)} at ${range}` : `matching the ${shipName(t)}'s heading and speed`}`);
+      return note(`Helm: autopilot ${mode === 'follow' ? `following the ${shipName(t)} at ${range} units` : `matching the ${shipName(t)}`}`);
+    }
+    autopilots.set(key, { target: base ? base.name : shipName(t), key: base ? null : t, base: !!base, mode, since: Date.now() });
     opLog(key, `Helm (${ws.name}): autopilot to ${base ? base.name : `the ${shipName(t)}`}`);
     return navCommand(ws, { type: 'helm', dest, warp: Number(msg.warp) || 5, autopilot: true });
   }

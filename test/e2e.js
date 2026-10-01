@@ -1299,6 +1299,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => data.msgs.some((m) => m.type === 'registered' && m.ship === 'Reliant' && m.station === 'Helm' && m.remoteFrom === 'Enterprise'));
     data.send({ type: 'helm', heading: 90, warp: 0.25 });
     await waitFor(() => data.nav()?.own?.name === 'Reliant' && data.nav().own.warp > 0);
+    // Autopilot follow: the Reliant tails the Enterprise at 25 units; then matches it.
+    data.send({ type: 'autopilot', target: 'Enterprise', mode: 'follow', range: 25, warp: 1 });
+    await waitFor(() => { const n = data.nav(); const e = n?.ships.find((x) => x.name === 'Enterprise'); return n?.own?.autopilotMode?.mode === 'follow' && e && e.distance > 20 && e.distance < 32; }, 30000);
+    data.send({ type: 'autopilot', target: 'Enterprise', mode: 'match' });
+    await waitFor(() => data.nav()?.own?.autopilotMode?.mode === 'match' && data.nav().own.warp === 0); // the Enterprise is stopped
+    step('autopilot: the Reliant followed the Enterprise at 25 units, then matched its heading and speed');
+    data.send({ type: 'autopilot', target: null });
     data.send({ type: 'change-station', station: 'Crew', ship: 'Enterprise' });
     await waitFor(() => data.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && !m.remoteFrom));
     step('the Enterprise forced a data link onto the crewless Reliant; Data took its Helm by remote control, flew it, and came back');

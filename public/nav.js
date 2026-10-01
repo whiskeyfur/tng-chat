@@ -120,17 +120,27 @@
     // there at the speed set above (and docks at a starbase).
     const autoBox = el('div', { className: 'nav-autopilot', id: 'autopilot' });
     let autoSig = '';
+    let autoMode = 'go', autoRange = 25; // go to / follow (at a range) / match
     function renderAutopilot() {
       const own = nav?.own;
       if (!own) return;
       const targets = [...(own.known || []).map((k) => [k.name, `The ${k.name}${k.visible ? '' : ` (last seen ${k.age < 60 ? `${k.age} s` : `${Math.round(k.age / 60)} min`} ago)`}`]), ...(nav.bases || []).map((b) => [b.name, b.name])];
-      const sig = JSON.stringify([targets, own.autopilot]);
+      const visible = new Set((own.known || []).filter((k) => k.visible).map((k) => k.name));
+      const sig = JSON.stringify([targets, own.autopilot, own.autopilotMode, autoMode, autoRange, [...visible]]);
       if (sig === autoSig) return;
       autoSig = sig;
+      const am = own.autopilotMode;
+      const what = !own.autopilot ? '' : am?.mode === 'follow' ? `following the ${own.autopilot} at ${am.range} units` : am?.mode === 'match' ? `matching the ${own.autopilot}'s heading and speed` : `course for ${/^(Starbase|Deep Space) /.test(own.autopilot) ? own.autopilot : `the ${own.autopilot}`}`;
+      const modeTap = (m, label) => { const b = button(label, `autopilot-mode-${m}`, () => { autoMode = m; autoSig = ''; renderAutopilot(); }); b.classList.add('tr-tap'); b.setAttribute('aria-pressed', String(autoMode === m)); return b; };
+      const rangeTap = (r) => { const b = button(`${r}`, `autopilot-range-${r}`, () => { autoRange = r; autoSig = ''; renderAutopilot(); }); b.classList.add('tr-tap'); b.setAttribute('aria-pressed', String(autoRange === r)); return b; };
+      // Follow and match need a ship on sensors; go to takes any known contact or a starbase.
+      const shown = autoMode === 'go' ? targets : targets.filter(([name]) => visible.has(name));
       autoBox.replaceChildren(
-        el('p', { className: 'ops-hint', id: 'autopilot-state', textContent: own.autopilot ? `Autopilot: course for ${/^(Starbase|Deep Space) /.test(own.autopilot) ? own.autopilot : `the ${own.autopilot}`}. The ship's computer is flying.` : 'Tap a known contact or a starbase: the ship\'s computer flies there at the speed set above, and docks at a starbase.' }),
-        el('div', { className: 'tr-taps' }, ...targets.map(([name, label]) => {
-          const b = button(label, '', () => send({ type: 'autopilot', target: name, warp: Number(speedSel.value) || 5 }));
+        el('p', { className: 'ops-hint', id: 'autopilot-state', textContent: own.autopilot ? `Autopilot: ${what}. The ship's computer is flying.` : 'Pick go to, follow (at a range) or match, then tap a contact: the ship\'s computer flies it at the speed set above.' }),
+        el('div', { className: 'tr-taps' }, modeTap('go', 'Go to'), modeTap('follow', 'Follow'), modeTap('match', 'Match')),
+        ...(autoMode === 'follow' ? [el('div', { className: 'tr-taps' }, el('span', { textContent: 'Range' }), ...(own.followRanges || [10, 25, 50, 100, 200]).map(rangeTap))] : []),
+        el('div', { className: 'tr-taps' }, ...shown.map(([name, label]) => {
+          const b = button(label, '', () => send({ type: 'autopilot', target: name, mode: autoMode, range: autoRange, warp: Number(speedSel.value) || 5 }));
           b.classList.add('tr-tap');
           b.dataset.target = name;
           b.setAttribute('aria-pressed', String(own.autopilot === name));
