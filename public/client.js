@@ -557,7 +557,7 @@ function renderCombat() {
         ties(src, `${d[0].toUpperCase()}${d.slice(1)} impulse drive`, src, { level: 1, note: `${state}${dr.state === 'running' ? ` · ${grid.cells[src].EPS || 0} of ${grid.impulseOutput} to the EPS, the rest to thrust` : ''}`,
           controls: [dr.state === 'off' ? small('Start', `drive-${d}-start`, () => send({ type: 'grid', impulse: { drive: d, on: true } })) : small('Stop', `drive-${d}-stop`, () => send({ type: 'grid', impulse: { drive: d, on: false } }), true)] }),
         subRow(`${d}Pump`, 2, dr.state === 'starting' ? (grid.subOk[`${d}Pump`] ? 'powering startup' : 'NO POWER') : dr.state === 'running' ? 'self-powered' : ''),
-        subRow(`${d}Thrusters`, 2, dr.thrusters ? (grid.subOk[`${d}Thrusters`] === false ? 'NO POWER' : 'tied in: impulse takes its share of the drive') : 'untied: the drive only generates power'),
+        ties(`thrusters${d[0].toUpperCase()}${d.slice(1)}`, 'Maneuvering thrusters', `thrusters${d[0].toUpperCase()}${d.slice(1)}`, { level: 2, note: dr.thrusters ? 'tied in: the drive\'s unused thrust feeds the EPS' : 'untied: thrust only, nothing to the EPS' }),
       ];
     };
     // A row with a control across the bus columns (EPS taps' light bars).
@@ -583,7 +583,6 @@ function renderCombat() {
       ...(grid.core !== 'ejected' ? ['constriction', 'corePump', 'injector'].map((x) => subRow(x, 2)) : []),
       ...driveRows('port'), ...driveRows('starboard'),
       ...tapRows(),
-      crosslinkRow(),
       ties('battery', `Batteries ${grid.battery.charge}%`, 'battery', { level: 1, note: grid.battery.charging ? 'charging' : grid.battery.supplying ? 'supplying' : '' }),
       ties('solar', 'Solar', 'solar', { level: 1 }),
       ties('dock', grid.docked ? `Dock power (${grid.docked})` : 'Dock power (not docked)', 'dock', { level: 1 }),
@@ -592,7 +591,11 @@ function renderCombat() {
     const table = () => {
       const SYS = { ...Object.fromEntries(POWER), tractor: 'Tractor beam' };
       const crewAt = (st) => comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st).length;
-      const rows = [];
+      // The bus crosslink heads the table, set apart from the consoles.
+      const xl = crosslinkRow();
+      xl.querySelector('th').className = '';
+      xl.classList.add('grid-crosslink');
+      const rows = [xl];
       for (const key of Object.keys(grid.tieNodes).filter((x) => x.startsWith('console:'))) {
         const st = key.slice(8), n = crewAt(st);
         rows.push(ties(key, `${st} console`, key, { note: n ? (grid.consoleOk[st] ? `${n} aboard` : `${n} aboard · DARK`) : 'unmanned' }));

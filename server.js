@@ -722,8 +722,7 @@ function rangesOf(k) {
   return { comms: COMMS_RANGE * f, sensors: SENSOR_RANGE * f, transporter: TRANSPORTER_RANGE * f };
 }
 // Top speeds: warp (1-9) needs the warp core online and engine power; impulse
-// (below 1) comes from the impulse drives with their thrusters tied in, half
-// impulse (0.125) each. maxWarp: the top of whichever the ship has.
+// (below 1) comes from the running impulse drives, half impulse (0.125) each. maxWarp: the top of whichever the ship has.
 function speedLimits(k) {
   const e = eng.get(k);
   const eng9 = powerOf(k).engines <= 0 ? 0 : Math.round((powerOf(k).engines / 100) * 9 * 10) / 10;
@@ -899,7 +898,7 @@ function navCommand(ws, msg) {
       order.warp = Math.max(0, Math.min(9, msg.warp));
       const lim = speedLimits(key);
       if (order.warp > 0 && order.warp < 1) {
-        if (!lim.impulse) return note('Helm: no impulse: start an impulse drive and tie in its thrusters (Engineering)');
+        if (!lim.impulse) return note('Helm: no impulse: start an impulse drive (Engineering)');
         order.warp = Math.min(order.warp, lim.impulse); // impulse: what there is
       } else if (order.warp >= 1 && order.warp > lim.warp) {
         return note(lim.warp ? `Helm: engines only give warp ${lim.warp} at this power` : engOf(key).core !== 'online' ? 'Helm: no warp: the warp core is offline' : 'Helm: no power to the engines');
@@ -1051,9 +1050,9 @@ function crewCommand(ws, msg) {
 //  - batteries: supply only when nothing else will, recharge from a tied
 //    bus's surplus (A or B)
 //  - the impulse drives, port and starboard: each its own reactor, started on
-//    bus power (its deuterium pump) and then self-sustaining. With its
-//    maneuvering thrusters tied in it drives the ship (half impulse each);
-//    with them off it's a generator feeding the EPS
+//    bus power (its deuterium pump) and then self-sustaining. Each gives half
+//    impulse; with its maneuvering thrusters tied in to the EPS, whatever
+//    share isn't thrusting feeds the EPS (untied: thrust only)
 //  - the warp core (M/ARC): to the EPS only. It needs its magnetic constriction,
 //    deuterium pump and antimatter injector powered (Bus A or B) to start and
 //    to keep running; warp needs it
@@ -1069,7 +1068,7 @@ function crewCommand(ws, msg) {
 // containment, the reactors' subsystems, consoles, Communications, a docked
 // ship, then systems a bus at a time in priority order.
 
-const GRID = { thrusters: 5, core: 650, coreStartSecs: 10, containment: 20, constriction: { start: 60, run: 20 }, corePump: 10, injector: 10, solar: 25, dock: 700, impulse: 75, impulseStartSecs: 5, impulsePump: 10, comms: 10, batteryOut: 150, batteryCap: 3000, batteryCharge: 50, console: 2, breachSecs: 5 };
+const GRID = { core: 650, coreStartSecs: 10, containment: 20, constriction: { start: 60, run: 20 }, corePump: 10, injector: 10, solar: 25, dock: 700, impulse: 75, impulseStartSecs: 5, impulsePump: 10, comms: 10, batteryOut: 150, batteryCap: 3000, batteryCharge: 50, console: 2, breachSecs: 5 };
 const BUS_MAX = { A: 300, B: 300, C: 300, EPS: 1000 };
 // Supplies: the warp core burns antimatter and deuterium (per second, at full
 // output; less as it gives less), each impulse drive deuterium while it runs.
@@ -1089,11 +1088,11 @@ const SOURCES = ['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'co
 // Every tie is one class: Bus A/B, or the EPS only (the warp core's and
 // impulse drives' outputs). The warp core itself spans both: its
 // subsystems on A/B, its output on the EPS.
-const SOURCE_NODES = { ship: AB, solar: AB, dock: AB, impulsePort: ['EPS'], impulseStarboard: ['EPS'], core: ['EPS'], battery: AB, containment: AB, crosslink: AB };
-// Low-power loads may tie to several of Bus A, B and C (their load split
-// evenly); so may the crosslink (the buses checked are one pool). Sources and
-// EPS loads tie to one.
-const isMulti = (k) => k === 'crosslink' || ((k === 'containment' || /^(console|system|sub):/.test(k)) && !tieNodes(k).includes('EPS'));
+const SOURCE_NODES = { ship: AB, solar: AB, dock: AB, impulsePort: ['EPS'], impulseStarboard: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], battery: AB, containment: AB, crosslink: AB };
+// Low-power loads and sources may tie to several of Bus A, B and C (a load
+// split evenly over them, a source's output shared evenly); so may the
+// crosslink (the buses checked are one pool). EPS ties are one.
+const isMulti = (k) => k === 'crosslink' || ((['containment', 'ship', 'solar', 'dock', 'battery'].includes(k) || /^(console|system|sub):/.test(k)) && !tieNodes(k).includes('EPS'));
 const SHIP_FEED_MAX = 500; // what Engineering can offer a ship docked with us
 const SYSTEM_BUS = { lifeSupport: 'A', sensors: 'A', replicators: 'B', recreation: 'B', engines: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
@@ -1111,8 +1110,6 @@ const SUBSYSTEMS = {
   injector: { parent: 'core', ties: ['A'], name: 'antimatter injector' },
   portPump: { parent: 'impulsePort', ties: ['B'], name: 'deuterium pump' },
   starboardPump: { parent: 'impulseStarboard', ties: ['B'], name: 'deuterium pump' },
-  portThrusters: { parent: 'impulsePort', ties: ['B'], name: 'maneuvering thrusters' },
-  starboardThrusters: { parent: 'impulseStarboard', ties: ['B'], name: 'maneuvering thrusters' },
   rf: { parent: 'Communications', ties: ['B'], name: 'local RF (calls aboard)' },
   radio: { parent: 'Communications', ties: ['B'], name: 'radio (hails, ship-to-ship calls)' },
   subspace: { parent: 'Communications', ties: ['B'], name: 'subspace relay (data links)' },
@@ -1179,12 +1176,14 @@ const BLAST = { range: 30, damage: 30 }; // a ship blowing up hurts ships close 
 const TRACTOR = { range: 20, draw: 30, maxWarp: 3, behind: 3 };
 const eng = new Map(); // ship key -> { core, antimatter, start, taps, ties, battery, docked, breach, selfDestruct, towing, dirty }
 
-const DEFAULT_TIES = { solar: ['A'], dock: ['A'], ship: [], impulsePort: ['EPS'], impulseStarboard: ['EPS'], core: ['EPS'], battery: ['B'], containment: ['A'], crosslink: [] };
+// thrustersPort / thrustersStarboard: a drive's maneuvering thrusters tied in
+// to the EPS (the drive's unused thrust feeds it) or not (thrust only).
+const DEFAULT_TIES = { solar: ['A'], dock: ['A'], ship: [], impulsePort: ['EPS'], impulseStarboard: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], battery: ['B'], containment: ['A'], crosslink: [] };
 // New ships (unless their computer says --warm) and rebuilt ones start cold:
 // docked at a starbase, reactors offline, no power source tied in (consoles
 // and systems keep their wiring), taps closed, no antimatter or deuterium.
 // Engineering brings them up on dock power.
-const COLD = { ties: { ...Object.fromEntries(Object.keys(DEFAULT_TIES).map((k) => [k, []])), impulsePort: ['EPS'], impulseStarboard: ['EPS'] }, taps: { A: 0, B: 0, C: 0 }, core: 'offline', drives: { port: 'off', starboard: 'off' }, antimatter: 0, deuterium: 0 };
+const COLD = { ties: { ...Object.fromEntries(Object.keys(DEFAULT_TIES).map((k) => [k, []])), impulsePort: ['EPS'], impulseStarboard: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'] }, taps: { A: 0, B: 0, C: 0 }, core: 'offline', drives: { port: 'off', starboard: 'off' }, antimatter: 0, deuterium: 0 };
 function freshEng(saved, { cold = false } = {}) {
   const s = saved && typeof saved === 'object' ? saved : cold ? COLD : {};
   // Ties: a list of nodes (older saves had one bus, or null for off), only those allowed.
@@ -1197,12 +1196,14 @@ function freshEng(saved, { cold = false } = {}) {
   };
   // Older saves: crosslinks per pair, thrusters on/off.
   const oldXl = s.crosslinks ? [...new Set(Object.entries(s.crosslinks).filter(([, on]) => on).flatMap(([x]) => x.split('')))] : s.crosslink ? ['A', 'B'] : undefined;
-  const ties = Object.fromEntries(Object.entries(DEFAULT_TIES).map(([k, d]) => [k, tiesOf(k, s.ties?.[k] ?? (k === 'battery' ? s.battery?.bus : k === 'crosslink' ? oldXl : s[k]), d)]));
+  // Thrusters were once a load (sub:portThrusters) or on/off (thrusters.port): tied there means tied in.
+  const oldThr = (d) => (Array.isArray(s.ties?.[`sub:${d}Thrusters`]) ? (s.ties[`sub:${d}Thrusters`].length ? ['EPS'] : []) : s.thrusters?.[d] === false ? [] : undefined);
+  const ties = Object.fromEntries(Object.entries(DEFAULT_TIES).map(([k, d]) => [k, tiesOf(k, s.ties?.[k] ?? (k === 'battery' ? s.battery?.bus : k === 'crosslink' ? oldXl : k === 'thrustersPort' ? oldThr('port') : k === 'thrustersStarboard' ? oldThr('starboard') : s[k]), d)]));
   // Older saves: antimatter was true/false (false: core ejected); tanks full.
   const amount = (v, cap) => (Number.isFinite(v) ? Math.max(0, Math.min(cap, v)) : v === false ? 0 : cap);
   const antimatter = amount(s.antimatter, FUEL.antimatter), deuterium = amount(s.deuterium, FUEL.deuterium);
   if (!ties.containment.length && antimatter > 0) ties.containment = DEFAULT_TIES.containment; // never no feed with antimatter aboard
-  for (const [k, d] of Object.entries(DEFAULT_LOAD_TIES)) ties[k] = tiesOf(k, s.ties?.[k] ?? (k.endsWith('Thrusters') && s.thrusters?.[k.slice(4, -9)] === false ? [] : undefined), d);
+  for (const [k, d] of Object.entries(DEFAULT_LOAD_TIES)) ties[k] = tiesOf(k, s.ties?.[k], d);
   const core = s.core === 'ejected' || s.antimatter === false ? 'ejected' : s.core === 'offline' || !antimatter || !deuterium ? 'offline' : 'online';
   return {
     core, antimatter, deuterium, start: 0, // a startup in progress starts over
@@ -1243,16 +1244,19 @@ function flow(k) {
   // sends the difference, drawn from (or, received, fed into) the docked-ship ties.
   const partner = e.dockedShip && engOf(e.dockedShip).dockedShip === k ? engOf(e.dockedShip) : null;
   const net = partner ? e.feed - partner.feed : 0;
-  // Impulse drives always feed the EPS, less the share going to thrust: a
-  // drive with its thrusters tied in, at the ship's impulse speed, gives that
-  // fraction of its output to moving the ship (full impulse: none to the EPS).
+  // Each running drive gives half impulse. With its thrusters tied in to the
+  // EPS, whatever share of it isn't thrusting feeds the EPS; untied, it only thrusts.
   const nv = navState.get(k);
-  const thrustTied = DRIVES.filter((d) => e.drives[d].state === 'running' && (e.ties[`sub:${d}Thrusters`] || []).length);
+  const running = DRIVES.filter((d) => e.drives[d].state === 'running' && e.deuterium > 0);
   const impulseNow = nv && nv.warp > 0 && nv.warp < 1 ? nv.warp : 0;
-  const share = thrustTied.length ? Math.min(1, impulseNow / (0.125 * thrustTied.length)) : 0;
-  const driveGen = (d) => (e.drives[d].state === 'running' && e.deuterium > 0 ? GRID.impulse * (thrustTied.includes(d) ? 1 - share : 1) : 0);
+  const share = running.length ? Math.min(1, impulseNow / (0.125 * running.length)) : 0;
+  const driveGen = (d) => (running.includes(d) && (e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length ? GRID.impulse * (1 - share) : 0);
   const cap = { ship: partner && net < 0 ? Math.min(-net, partner.fed || 0) : 0, solar: GRID.solar, dock: e.docked ? GRID.dock : 0, impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), core: e.core === 'online' ? GRID.core : 0, battery: Math.min(GRID.batteryOut, e.battery.charge) };
-  const srcs = SOURCES.map((name) => ({ name, ties: e.ties[name], left: e.ties[name].length ? cap[name] : 0 }));
+  // A source tied to several buses shares its output evenly between them.
+  const srcs = SOURCES.map((name) => {
+    const t = e.ties[name], full = t.length ? cap[name] : 0;
+    return { name, ties: t, left: full, share: t.length > 1 ? Object.fromEntries(t.map((n) => [n, full / t.length])) : null };
+  });
   const buses = Object.fromEntries(BUSES.map((X) => [X, { need: 0, have: 0, src: {}, tapUsed: 0 }]));
   let viaEps = 0;
   const blank = () => Object.fromEntries(NODES.map((n) => [n, 0]));
@@ -1270,19 +1274,20 @@ function flow(k) {
   const take = (node, amt) => {
     let got = 0;
     const bus = buses[node];
-    const pull = (s, eps) => {
+    const pull = (s, eps, side = node) => {
       const room = Math.min(bus ? busRoom(node) - got : Infinity, eps ? BUS_MAX.EPS - viaEps : Infinity, bus && eps ? tapRoom(node) : Infinity);
-      const t = Math.min(s.left, amt - got, room);
+      const t = Math.min(s.left, amt - got, room, s.share && !eps ? s.share[side] : Infinity);
       if (t <= 0) return;
       s.left -= t; got += t;
-      cells[s.name][eps ? 'EPS' : node] += t;
+      if (s.share && !eps) s.share[side] -= t;
+      cells[s.name][eps ? 'EPS' : side] += t;
       if (eps) viaEps += t;
       if (bus && eps) { let rest = t; for (const X of [node, ...pool(node).filter((y) => y !== node)]) { const u = Math.min(rest, Math.max(0, e.taps[X] - buses[X].tapUsed)); buses[X].tapUsed += u; rest -= u; } }
       if (bus) bus.src[s.name] = (bus.src[s.name] || 0) + t;
     };
     const sides = bus ? pool(node) : [node];
     for (const last of [false, true]) { // batteries only when nothing else will do
-      for (const side of sides) for (const s of srcs) if ((s.name === 'battery') === last && s.ties.includes(side)) pull(s, node === 'EPS');
+      for (const side of sides) for (const s of srcs) if ((s.name === 'battery') === last && s.ties.includes(side)) pull(s, node === 'EPS', side);
       if (bus) for (const s of srcs) if ((s.name === 'battery') === last && s.ties.includes('EPS')) pull(s, true);
     }
     if (bus) { bus.need += amt; bus.have += got; }
@@ -1324,7 +1329,6 @@ function flow(k) {
     ['sub:constriction', !coreOn ? 0 : e.core === 'starting' ? GRID.constriction.start : GRID.constriction.run],
     ['sub:corePump', coreOn ? GRID.corePump : 0], ['sub:injector', coreOn ? GRID.injector : 0],
     ...DRIVES.map((d) => [`sub:${d}Pump`, e.drives[d].state === 'starting' ? GRID.impulsePump : 0]), // running drives power their own pumps
-    ...DRIVES.map((d) => [`sub:${d}Thrusters`, e.drives[d].state === 'running' ? GRID.thrusters : 0]),
     ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => u.station === st).length * GRID.console]),
     ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
     ['feed', Math.max(0, net)],
@@ -1344,9 +1348,11 @@ function flow(k) {
       const sides = pool(X);
       const direct = sides.some((y) => x.ties.includes(y));
       if (!(direct || (tapRoom(X) > 0 && x.ties.includes('EPS')))) continue;
-      const t = Math.min(x.left, room - charging, busRoom(X), direct ? Infinity : tapRoom(X));
+      const via = sides.find((y) => x.ties.includes(y));
+      const t = Math.min(x.left, room - charging, busRoom(X), direct ? (x.share ? x.share[via] : Infinity) : tapRoom(X));
       if (t <= 0) continue;
       x.left -= t; charging += t;
+      if (direct && x.share) x.share[via] -= t;
       buses[X].need += t; buses[X].have += t;
       if (!direct) { viaEps += t; let rest = t; for (const y of sides) { const u = Math.min(rest, Math.max(0, e.taps[y] - buses[y].tapUsed)); buses[y].tapUsed += u; rest -= u; } }
       cells.battery[X] -= t; // shown as a draw on the battery row
@@ -1375,8 +1381,8 @@ function flow(k) {
   }
   const used = usedOf('battery');
   const drawn = SOURCES.reduce((n, name, i) => n + ((srcs[i].ties.length ? cap[name] : 0) - srcs[i].left), 0); // charging included
-  // Impulse: half impulse for each running drive with its thrusters tied in.
-  const thrusting = DRIVES.filter((d) => e.drives[d].state === 'running' && (e.ties[`sub:${d}Thrusters`] || []).length && subOk[`${d}Thrusters`] && e.deuterium > 0).length;
+  // Impulse: half impulse for each running drive.
+  const thrusting = running.length;
   // The grid table's footer: per bus (and the EPS), power used, available and the most it carries.
   const epsLeft = srcs.filter((x) => x.ties.includes('EPS')).reduce((m, x) => m + x.left, 0);
   const totals = Object.fromEntries(NODES.map((n) => {
@@ -1439,7 +1445,7 @@ function gridView(k) {
   const r = (o) => Object.fromEntries(Object.entries(o).map(([x, v]) => [x, Math.round(v)]));
   return {
     core: e.core, antimatter: Math.floor(e.antimatter), deuterium: Math.floor(e.deuterium), fuelCaps: { antimatter: FUEL.antimatter, deuterium: FUEL.deuterium },
-    drives: Object.fromEntries(DRIVES.map((d) => [d, { state: e.drives[d].state, start: e.drives[d].start, thrusters: !!(e.ties[`sub:${d}Thrusters`] || []).length }])), impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
+    drives: Object.fromEntries(DRIVES.map((d) => [d, { state: e.drives[d].state, start: e.drives[d].start, thrusters: !!(e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length }])), impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
     transfer: e.transfer ? { ...e.transfer, left: Math.ceil(e.transfer.left), with: e.transfer.with === 'station' ? e.docked : shipName(e.transfer.with) } : null,
     dockedShip: e.dockedShip ? shipName(e.dockedShip) : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName),
     feed: e.feed, fed: Math.round(e.fed), shipIn: Math.round(Object.values(f.cells.ship).reduce((a, b) => a + b, 0)), partnerFeed: e.dockedShip ? engOf(e.dockedShip).feed : 0, feedMax: SHIP_FEED_MAX,
@@ -1466,7 +1472,7 @@ function gridCommand(ws, msg) {
   const note = (text) => send(ws, { type: 'notice', text: `Engineering: ${text}` });
   if (ws.station !== 'Engineering') return send(ws, { type: 'notice', text: 'Only Engineering runs the power grid' });
   const said = [];
-  const NAME = { crosslink: 'bus crosslink', solar: 'solar', dock: 'dock power', ship: 'docked-ship power', core: 'warp core', battery: 'batteries', containment: 'antimatter containment', impulsePort: 'port impulse drive', impulseStarboard: 'starboard impulse drive' };
+  const NAME = { thrustersPort: 'port maneuvering thrusters', thrustersStarboard: 'starboard maneuvering thrusters', crosslink: 'bus crosslink', solar: 'solar', dock: 'dock power', ship: 'docked-ship power', core: 'warp core', battery: 'batteries', containment: 'antimatter containment', impulsePort: 'port impulse drive', impulseStarboard: 'starboard impulse drive' };
   const feeds = (list) => (list.length ? list.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(' + ') : 'off');
   if (msg.eject) {
     if (e.core === 'ejected') return note('the warp core is already gone');

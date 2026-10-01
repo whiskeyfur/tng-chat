@@ -105,22 +105,22 @@ Three low-power buses, **A**, **B** and **C** (300 each at most), and the high-p
 
 | Source | Gives | Ties |
 | --- | --- | --- |
-| Solar collectors | 25 | one of A, B, C |
-| Dock power | 700, while docked at a starbase | one of A, B, C |
-| Docked ship | what a ship docked with us sends | one of A, B, C |
+| Solar collectors | 25 | any of A, B, C |
+| Dock power | 700, while docked at a starbase | any of A, B, C |
+| Docked ship | what a ship docked with us sends | any of A, B, C |
 | Port and starboard impulse drives | 75 each, burning deuterium | EPS |
 | Warp core (M/ARC) | 650, burning antimatter and deuterium | EPS |
-| Batteries | up to 150 (3000 stored), only when nothing else covers the need; recharge from their bus's surplus | one of A, B, C |
+| Batteries | up to 150 (3000 stored), only when nothing else covers the need; recharge from their buses' surplus | any of A, B, C |
 
 Sources are drawn on in this order: a docked ship's power, solar, dock power, the impulse drives, the warp core, batteries last.
 
-- **Two classes:** everything ties to the low-power buses or to the EPS alone, never both. Low-power loads (consoles, life support, sensors, replicators, recreation, transporter, tractor beam, containment, the subsystems) may tie to any combination of A, B and C, their load split evenly between them. Sources tie to one bus. Engines, shields and weapons draw on the EPS alone, so they need the warp core or an impulse drive.
+- **Two classes:** everything ties to the low-power buses or to the EPS alone, never both. Low-power loads (consoles, life support, sensors, replicators, recreation, transporter, tractor beam, containment, the subsystems) and sources (solar, dock power, docked-ship power, batteries) may tie to any combination of A, B and C: a load is split evenly between them, a source's output shared evenly (batteries charge from and drain into each). Engines, shields and weapons draw on the EPS alone, so they need the warp core or an impulse drive.
 - **EPS taps:** one light bar per low bus sets how much EPS power may flow down into it (default A 300, B 300, C 0; a cold ship starts at 0).
-- **Bus crosslink:** a row of A, B and C checkboxes. Two or more checked are one pool: each draws on what's tied to the others, and their maxes add up.
+- **Bus crosslink:** the first row of the table, a row of A, B and C checkboxes. Two or more checked are one pool: each draws on what's tied to the others, and their maxes add up.
 - **Breakers:** tie more sustained load to a bus (or pool) than it carries and its breaker trips loads off it at random, one at a time, until it fits; Engineering re-ties them. The console log says what tripped. Startup surges don't count, and containment and the warp core's constriction never trip.
 - **Serving order** when supply is short: antimatter containment first, ahead of everything. Then each bus serves the loads tied to it alone, in priority order (the reactors' subsystems, consoles, Communications, power for a docked ship, then life support, sensors, shields, engines, weapons, tractor beam, transporter, replicators, recreation), and charges its batteries; then loads split over two buses; then over three.
 - **The warp core** needs its magnetic constriction (60 to start, 20 running), deuterium pump (10) and antimatter injector (10), all low-power loads, to start (10 seconds) and to keep running, plus antimatter and deuterium aboard. It shuts down if any of them fails or fuel runs out. Warp needs it.
-- **Impulse drives:** each is its own reactor. Start it on bus power for its deuterium pump (10, for 5 seconds); then it powers itself. It always feeds the EPS, less the share its maneuvering thrusters (5, a low-power load) take for impulse: each drive with thrusters tied in gives half impulse, so at full impulse with both thrusting there's nothing left for the EPS, and at all stop it's all EPS power.
+- **Impulse drives:** each is its own reactor. Start it on bus power for its deuterium pump (10, for 5 seconds); then it powers itself. Each running drive gives half impulse. Its **maneuvering thrusters** tie to the EPS: tied in, whatever share of the drive isn't thrusting feeds the EPS (all stop: all 75; half impulse: half; full impulse: none); untied, the drive only thrusts.
 - **Communications** has three subsystems (10 each, default Bus B): local RF (calls aboard), radio (hails and calls between ships) and the subspace relay (data links). Without power, that service stops.
 - **Subsystems** can be damaged in combat and fail outright at 50% damage until repaired.
 - **Antimatter containment** draws 20 while there's antimatter aboard, from its feeds in turn. With antimatter aboard it can't be left with no feed: only self-destruct switches it off. With none aboard it can be switched off safely, and taking on antimatter needs a feed set first. With no power for 5 seconds the core **breaches** and the ship is destroyed; every console counts it down.

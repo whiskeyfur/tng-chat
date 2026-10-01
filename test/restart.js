@@ -53,13 +53,14 @@ async function look() {
     assert.equal(g.docked, 'Starbase 47');
     assert.deepEqual(g.taps, { A: 300, B: 0, C: 0 });
     assert.deepEqual(g.ties.crosslink, ['A', 'B']);
-    assert.deepEqual(g.ties.battery, ['A'], 'batteries tie to one bus');
+    assert.deepEqual(g.ties.battery, ['A', 'B'], 'batteries may share two buses');
     assert.deepEqual(g.ties.containment, ['A'], 'containment no longer takes the EPS');
     assert.deepEqual(g.ties['system:transporter'], ['B'], 'the transporter no longer takes the EPS');
     assert.deepEqual(g.ties['console:Helm'], ['A', 'B'], 'a console may share two buses');
-    assert.deepEqual(g.ties['sub:portThrusters'], [], 'thrusters that were off stay untied');
+    assert.deepEqual(g.ties.thrustersPort, [], 'thrusters that were off stay untied');
+    assert.deepEqual(g.ties.thrustersStarboard, ['EPS'], 'thrusters otherwise tied in');
     assert.deepEqual(g.ties.dock, ['A']);
-    step('an older save came through: taps, crosslink, single-bus sources, EPS ties moved to their bus, thrusters off');
+    step('an older save came through: taps, crosslink, batteries on two buses, EPS ties moved to their bus, thrusters off');
 
     await wait(5500); // the relay hands the computer a copy every 5 s
     await stop(r); r = relay(); await wait(4000);

@@ -1105,17 +1105,15 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Ties are any combination of what a source allows: batteries on both
     // buses (not the EPS); the warp core feeds the EPS only. Containment can't
     // be left with no feed.
-    laforge.send({ type: 'grid', ties: { battery: ['A', 'B'] } });
-    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /batteries ties to one: Bus A, B or C/.test(m.text)));
-    laforge.send({ type: 'grid', ties: { battery: ['A'], crosslink: ['A', 'B'] } });
-    await waitFor(() => laforge.nav()?.own.grid.ties.battery.join() === 'A' && laforge.nav().own.grid.ties.crosslink.join() === 'A,B');
+    laforge.send({ type: 'grid', ties: { battery: ['A', 'B'], crosslink: ['A', 'B'] } });
+    await waitFor(() => laforge.nav()?.own.grid.ties.battery.join() === 'A,B' && laforge.nav().own.grid.ties.crosslink.join() === 'A,B');
     laforge.send({ type: 'grid', ties: { core: ['A', 'EPS'] } });
     await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /warp core can only be tied to EPS/.test(m.text)));
     laforge.send({ type: 'grid', ties: { battery: ['EPS'] } });
     await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /batteries can only be tied to Bus A \+ Bus B/.test(m.text)));
     laforge.send({ type: 'grid', ties: { containment: [] } });
     await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /containment can't be switched off/.test(m.text)));
-    step('ties are one each: batteries refused both buses (the A-B crosslink joins them instead); the warp core (EPS only) and batteries (no EPS) refused other ties; containment could not be left without a feed');
+    step('batteries tied to Bus A and B and the A-B crosslink on; the warp core (EPS only) and batteries (no EPS) refused other ties; containment could not be left without a feed');
 
     // Engineering ejects the warp core: no antimatter, no core power.
     laforge.send({ type: 'grid', eject: true });
@@ -1316,10 +1314,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', impulse: { drive: 'port', on: true } });
     await waitFor(() => barclay.nav()?.own.grid.drives.port.state === 'running', 15000);
     await waitFor(() => barclay.nav()?.speed.impulse === 0.125);
-    barclay.send({ type: 'grid', ties: { 'sub:portThrusters': [], core: [] } });
-    await waitFor(() => { const n = barclay.nav(); return n?.own.grid.cells.impulsePort.EPS > 0 && n.speed.impulse === 0; });
-    step(`the port impulse drive started on bus power; with its thrusters tied in it gave half impulse, untied it fed the EPS (${barclay.nav().own.grid.cells.impulsePort.EPS}) and the ship had no impulse`);
-    barclay.send({ type: 'grid', ties: { 'sub:portThrusters': ['B'] }, impulse: { drive: 'port', on: false } });
+    barclay.send({ type: 'grid', ties: { core: [] } }); // the EPS on the port drive alone
+    await waitFor(() => barclay.nav()?.own.grid.cells.impulsePort.EPS > 0);
+    const fed = barclay.nav().own.grid.cells.impulsePort.EPS;
+    barclay.send({ type: 'grid', ties: { thrustersPort: [] } });
+    await waitFor(() => { const n = barclay.nav(); return n?.own.grid.cells.impulsePort.EPS === 0 && n.speed.impulse === 0.125; });
+    step(`the port impulse drive started on bus power and gave half impulse; with its thrusters tied in, its unused thrust fed the EPS (${fed}); untied, thrust only`);
+    barclay.send({ type: 'grid', ties: { thrustersPort: ['EPS'] }, impulse: { drive: 'port', on: false } });
     // #2: a battery on Bus A charges from Bus A's surplus even while Bus B and
     // the EPS are short (Bus A is served, and its batteries charged, first).
     barclay.send({ type: 'grid', ties: { dock: ['A'], battery: ['B'], crosslink: [] } }); // Bus B on the battery alone: drain it a little
@@ -1342,6 +1343,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', ties: { 'system:lifeSupport': ['A', 'C'] }, tap: { bus: 'C', amount: 300 } });
     await waitFor(() => { const c = barclay.nav()?.own.grid.cells['system:lifeSupport']; return c && c.A === 50 && c.C === 50; });
     step('life support tied to Bus A and Bus C drew half its load from each');
+
+    // A source tied to two buses shares its output evenly: solar on A and C.
+    barclay.send({ type: 'grid', ties: { solar: ['A', 'C'] } });
+    await waitFor(() => { const c = barclay.nav()?.own.grid.cells.solar; return c && c.A > 0 && c.C > 0 && c.A <= 12.5 + 0.5 && c.C <= 12.5 + 0.5; });
+    step(`solar tied to Bus A and Bus C split its 25 between them (${barclay.nav().own.grid.cells.solar.A} + ${barclay.nav().own.grid.cells.solar.C})`);
 
     // Communications' local RF without power: no calls aboard.
     barclay.send({ type: 'grid', ties: { 'sub:rf': [] } });
