@@ -1461,7 +1461,8 @@ function freshEng(saved, { cold = false } = {}) {
     shipDocks: Object.fromEntries(PORTS.map((p) => { const v = s.shipDocks?.[p] ?? (p === 'starboard' && typeof s.dockedShip === 'string' ? s.dockedShip : null); return [p, typeof v === 'string' ? shipKey(v) : null]; })),
     partnerGoneAt: { port: Date.now(), starboard: Date.now() },
     dockedPort: PORTS.includes(s.dockedPort) ? s.dockedPort : 'port',
-    autoRefuel: !!s.autoRefuel, // top up antimatter and deuterium while docked at a starbase
+    // Top up each while docked at a starbase (older saves: one switch for both).
+    autoRefuel: Object.fromEntries(RESOURCES.map((r) => [r, typeof s.autoRefuel === 'object' && s.autoRefuel ? !!s.autoRefuel[r] : !!s.autoRefuel])),
     battery: { charge: Number.isFinite(s.battery?.charge) ? Math.max(0, Math.min(GRID.batteryCap, s.battery.charge)) : GRID.batteryCap },
     docked: STARBASES.some((b) => b.name === s.docked) ? s.docked : null,
     breach: 0, selfDestruct: null, towing: null, dirty: false,
@@ -1857,8 +1858,10 @@ function gridCommand(ws, msg) {
     said.push(o ? `offering the ${shipName(o)} ${e.feed[p]} power (${p} dock)` : `power for a ship at the ${p} dock set to ${e.feed[p]}`);
   }
   if ('autoRefuel' in msg) {
-    e.autoRefuel = !!msg.autoRefuel;
-    said.push(`auto refuel ${e.autoRefuel ? 'on: antimatter and deuterium are topped off while docked at a starbase' : 'off'}`);
+    // { resource, on } for one; true/false for both.
+    const a = msg.autoRefuel;
+    for (const r of RESOURCES) if (typeof a !== 'object' || a?.resource === r) e.autoRefuel[r] = typeof a === 'object' ? !!a?.on : !!a;
+    said.push(`auto refuel: ${RESOURCES.map((r) => `${r} ${e.autoRefuel[r] ? 'on' : 'off'}`).join(', ')} (topped off while docked at a starbase)`);
   }
   // Supplies: take on or send off antimatter or deuterium, docked at a
   // starbase (refuel, offload) or with another ship (send ours to them).
@@ -2422,8 +2425,8 @@ setInterval(() => {
     const req = dockRequests.get(k);
     if (req && now > req.until) { dockRequests.delete(k); for (const u of crewOf(req.from)) if (u.station === 'Helm') send(u, { type: 'notice', text: `Helm: the ${shipName(k)} didn't answer the docking request` }); }
     // Auto refuel: top off antimatter and deuterium while docked at a starbase.
-    if (e.autoRefuel && e.docked && !e.transfer) {
-      const want = ['deuterium', 'antimatter'].find((r) => FUEL[r] - e[r] >= 1 && (r !== 'antimatter' || (e.ties.containment.length && e.core !== 'ejected')));
+    if (e.docked && !e.transfer) {
+      const want = ['deuterium', 'antimatter'].find((r) => e.autoRefuel[r] && FUEL[r] - e[r] >= 1 && (r !== 'antimatter' || (e.ties.containment.length && e.core !== 'ejected')));
       if (want) e.transfer = { resource: want, dir: 'in', left: FUEL[want] - e[want], with: 'station', auto: true };
     }
     if (e.docked) {

@@ -182,6 +182,11 @@
     .grid-table .grid-na { color: #444; }
     .grid-table .grid-section th { color: var(--lcars-orange); padding-top: 14px; }
     .grid-table .grid-section th span { margin-right: 10px; }
+    .lcars-toggle[aria-pressed="false"] { opacity: 0.45; filter: saturate(0.3); }
+    .lcars-toggle[aria-pressed="true"] { background: var(--lcars-orange); box-shadow: 0 0 10px var(--lcars-orange); }
+    button.lcars-back { border: 0; font: inherit; color: #000; cursor: pointer; display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 14px 6px 0; letter-spacing: 0.1em; }
+    button.lcars-back:disabled { opacity: 0.35; cursor: default; }
+    button.lcars-back:not(:disabled):hover { filter: brightness(1.2); }
     .grid-chip { display: inline-block; padding: 0 10px; border-radius: 10px; font-size: 12px; color: #000; background: var(--lcars-tan); vertical-align: middle; }
     .grid-chip[data-state="online"] { background: #66cc66; }
     .grid-chip[data-state="startup"] { background: var(--lcars-gold); }
@@ -267,10 +272,10 @@
       <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="intercom" style="--accent: var(--lcars-peach)" hidden><span>Intercom</span></button>
       <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="roster" style="--accent: var(--lcars-blue)" hidden><span>Crew roster</span></button>
       <div class="lcars-sidebar__fill"></div>
-      <!-- On every console: at the bottom, with Library. -->
+      <!-- On every console: at the bottom, Library, then Station at the very bottom. -->
       <button type="button" class="lcars-nav-button" data-screen-tab="log" id="log-tab" style="--accent: var(--lcars-lilac)" hidden><span>Console log</span></button>
-      <button type="button" class="lcars-nav-button" data-screen-tab="reassign" id="reassign-tab" style="--accent: var(--lcars-peach)" hidden><span>Station</span></button>
       <button type="button" class="lcars-nav-button" data-screen-tab="library" id="library-tab" style="--accent: var(--lcars-violet)" hidden><span>Library</span></button>
+      <button type="button" class="lcars-nav-button" data-screen-tab="reassign" id="reassign-tab" style="--accent: var(--lcars-peach)" hidden><span>Station</span></button>
     </nav>
 
     <main class="lcars-content" tabindex="-1">
@@ -467,7 +472,8 @@
     </main>
 
     <footer class="lcars-footer">
-      <div class="lcars-elbow lcars-elbow--bottom"></div>
+      <!-- The bottom-left corner: back to the previous screen at this station. -->
+      <button type="button" class="lcars-elbow lcars-elbow--bottom lcars-back" id="back-button" disabled aria-label="Back to the previous screen"><span>BACK</span></button>
       <div class="lcars-bar">
         <span class="lcars-status" id="link" data-status="connecting">Comm relay</span>
         <span class="lcars-bar__seg lcars-bar__seg--c"></span>

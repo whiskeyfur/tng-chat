@@ -93,9 +93,46 @@ let pendingScreen = null;
 function restoreScreen() {
   const id = pendingScreen;
   pendingScreen = null;
+  quietScreen = true;
   if (id && document.querySelector(`[data-screen="${CSS.escape(id)}"]`)) showScreen(id);
+  quietScreen = false;
   saveRejoin();
 }
+
+// Back (the bottom-left corner): the screens shown at this station, on this
+// vessel (a remote one too), newest last. Moving to another station starts
+// afresh, so Back never crosses stations. Kept across reloads.
+const HISTORY = 'stchat-history';
+let screenHistory = { key: null, stack: [], at: null };
+try { screenHistory = { ...screenHistory, ...JSON.parse(sessionStorage.getItem(HISTORY) || '{}') }; } catch {}
+let quietScreen = false; // showing a screen that isn't a step forward (Back, a rejoin, a station's first screen)
+let controllingVessel = null;
+const historyKey = () => (me ? `${controllingVessel || me.ship}|${me.station}` : null);
+function renderBack() {
+  const b = $('back-button');
+  if (b) b.disabled = !me || screenHistory.key !== historyKey() || !screenHistory.stack.length;
+}
+window.addEventListener('screenchange', (ev) => {
+  const key = historyKey(), id = ev.detail;
+  if (!key) return renderBack();
+  if (screenHistory.key !== key) screenHistory = { key, stack: [], at: null };
+  else if (!quietScreen && screenHistory.at && screenHistory.at !== id) { screenHistory.stack.push(screenHistory.at); screenHistory.stack.splice(0, screenHistory.stack.length - 50); }
+  screenHistory.at = id;
+  try { sessionStorage.setItem(HISTORY, JSON.stringify(screenHistory)); } catch {}
+  renderBack();
+});
+document.getElementById('back-button')?.addEventListener('click', () => {
+  if (screenHistory.key !== historyKey()) return;
+  while (screenHistory.stack.length) {
+    const id = screenHistory.stack.pop();
+    if (!document.querySelector(`[data-screen="${CSS.escape(id)}"]`)) continue;
+    quietScreen = true;
+    showScreen(id);
+    quietScreen = false;
+    return;
+  }
+  renderBack();
+});
 function prepareReload(restart) {
   saveRejoin();
   reloading = true;
@@ -213,7 +250,9 @@ function showStation() {
   fillReassign();
   renderTraffic();
   renderCommLinks();
+  quietScreen = screenHistory.key === historyKey();
   showScreen(stationView.sections[0].id);
+  quietScreen = false;
   restoreScreen();
 }
 
@@ -573,6 +612,7 @@ function renderCrewPanels() {
 let vesselSig = '';
 function renderVesselBar(remote) {
   const bar = $('vessel-bar');
+  controllingVessel = remote?.controlling || null;
   const vessels = remote?.vessels || [];
   const sig = JSON.stringify([vessels, remote?.controlling, me?.station]);
   bc.setAlert('remote', remote?.controlling ? `Remote control: the ${remote.controlling}'s ${me.station}` : null, { level: 'yellow' });
@@ -760,8 +800,8 @@ function renderCombat() {
       parentRow('ties-core-parent', 'Warp core (M/ARC)', 1, grid.core === 'starting' ? `starting ${grid.start} of ${grid.startSecs} s` : grid.core,
         grid.core === 'ejected' ? [] : grid.core === 'offline' ? [small('Start', 'core-start', () => send({ type: 'grid', core: 'start' }))] : [small('Stop', 'core-stop', () => send({ type: 'grid', core: 'stop' }), true)]),
       ...(grid.core !== 'ejected' ? [
-        ties('core', 'Power transfer conduits', 'core', { level: 2, note: c.damage.conduits >= 50 ? 'DAMAGED: no output' : 'carry the core\'s output into the EPS' }),
         ...['constriction', 'corePump', 'injector'].map((x) => subRow(x, 2)),
+        ties('core', 'Power transfer conduits', 'core', { level: 2, note: c.damage.conduits >= 50 ? 'DAMAGED: no output' : 'carry the core\'s output into the EPS' }),
       ] : []),
       ...driveRows('port'), ...driveRows('starboard'),
       ...tapRows(),
@@ -821,15 +861,18 @@ function renderCombat() {
         const others = consoles.filter((st) => st !== 'Engineering');
         const engNoReactors = () => consoleRows('Engineering', { reactors: false });
         const containment = engineeringRows().filter((r) => r.id === 'ties-containment');
-        const coreRows = () => engineeringRows().filter((r) => /^ties-(core|sub-constriction|sub-corePump|sub-injector)/.test(r.id));
+        // In Shutdown the core's rows run the other way under it (conduits first, constriction last).
+        const coreRows = () => { const [head, ...rest] = engineeringRows().filter((r) => /^ties-(core|sub-constriction|sub-corePump|sub-injector)/.test(r.id)); return [head, ...(gridOrder === 'shutdown' ? rest.reverse() : rest)]; };
         const driveRowsAll = () => [...driveRows('port'), ...driveRows('starboard')];
-        const antimatterButton = () => {
-          const t = grid.transfer?.resource === 'antimatter' ? grid.transfer : null;
+        // Startup fills a tank from the dock (once, to full); Shutdown empties it to the dock.
+        const fuelButton = (r) => () => {
+          const t = grid.transfer?.resource === r ? grid.transfer : null;
           const dockedShip = Object.values(grid.ports).find((v) => v?.ship)?.ship;
-          if (t) return [small('Stop transfer', 'antimatter-stop', () => send({ type: 'grid', transfer: null }), true)];
-          if (gridOrder === 'startup') return grid.antimatter >= grid.fuelCaps.antimatter ? [] : [small('Onboard antimatter', 'antimatter-onboard', () => send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: grid.fuelCaps.antimatter - grid.antimatter } }))];
-          return !grid.antimatter ? [] : [small('Offload antimatter', 'antimatter-offload', () => send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'out', amount: grid.antimatter, ...(grid.docked ? {} : dockedShip ? { ship: dockedShip } : {}) } }), true)];
+          if (t) return [small('Stop transfer', `${r}-stop`, () => send({ type: 'grid', transfer: null }), true)];
+          if (gridOrder === 'startup') return grid[r] >= grid.fuelCaps[r] ? [] : [small(`Onboard ${r}`, `${r}-onboard`, () => send({ type: 'grid', transfer: { resource: r, dir: 'in', amount: grid.fuelCaps[r] - grid[r] } }))];
+          return !grid[r] ? [] : [small(`Offload ${r}`, `${r}-offload`, () => send({ type: 'grid', transfer: { resource: r, dir: 'out', amount: grid[r], ...(grid.docked ? {} : dockedShip ? { ship: dockedShip } : {}) } }), true)];
         };
+        const antimatterButton = fuelButton('antimatter');
         const steps = [
           { title: 'Dock power, Solar', rows: sourceRows, state: () => (cells('dock') + cells('solar') + cells('ship') > 0 ? 'Online' : 'Cold'),
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
@@ -841,7 +884,7 @@ function renderCombat() {
             on: () => (busOn ? '' : 'the Engineering console needs Bus A, B or C energized'), off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
           { title: 'Antimatter containment', rows: () => containment, extra: antimatterButton, state: () => (!grid.antimatter ? 'Cold' : grid.ties.containment.length && grid.containmentOk ? 'Online' : 'Startup'),
             on: () => (grid.core === 'ejected' ? 'no warp core aboard' : busOn ? '' : 'containment needs Bus A, B or C energized'), off: () => (grid.antimatter ? 'containment can\'t be cut with antimatter aboard: offload it at a starbase' : '') },
-          { title: 'Impulse drives', rows: driveRowsAll, state: () => (drives.every((d) => d.state === 'running') ? 'Online' : drives.some((d) => d.state !== 'off') ? 'Startup' : 'Cold'),
+          { title: 'Impulse drives', rows: driveRowsAll, extra: fuelButton('deuterium'), state: () => (drives.every((d) => d.state === 'running') ? 'Online' : drives.some((d) => d.state !== 'off') ? 'Startup' : 'Cold'),
             on: () => (!grid.deuterium ? 'the impulse drives need deuterium aboard' : busOn ? '' : 'the deuterium pumps need Bus A, B or C energized') },
           { title: 'EPS taps', rows: tapRows, state: () => (Object.values(grid.taps).some((v) => v > 0) ? 'Online' : 'Cold'),
             on: () => (epsOn ? '' : 'the EPS taps need the EPS energized (impulse drives or warp core)') },
@@ -932,8 +975,14 @@ function renderCombat() {
             ...(grid.docked ? [button('Offload', 'transfer-out', () => send({ type: 'grid', transfer: { resource: res.value, dir: 'out', amount: Number(amt.value) } }))] : []),
             ...shipsHere.map((n) => button(`Send to the ${n}`, `transfer-to-${n}`, () => send({ type: 'grid', transfer: { resource: res.value, dir: 'out', amount: Number(amt.value), ship: n } }))))
           : el('p', { className: 'ops-hint', textContent: 'Dock at a starbase to refuel or offload, or with another ship to send it supplies.' }),
-        el('div', { className: 'ops-form' }, button(`Auto refuel: ${grid.autoRefuel ? 'on' : 'off'}`, 'auto-refuel', () => send({ type: 'grid', autoRefuel: !grid.autoRefuel }), grid.autoRefuel ? '' : 'lcars-button--alert'),
-          el('span', { className: 'ops-hint', textContent: grid.autoRefuel ? (grid.docked ? (grid.ties.containment.length ? 'topping off antimatter and deuterium from the starbase' : 'topping off deuterium; antimatter needs a containment feed set') : 'tops off antimatter and deuterium when docked at a starbase') : 'top off antimatter and deuterium automatically while docked at a starbase' })));
+        // Auto refuel, one switch each: topped off while docked at a starbase.
+        el('div', { className: 'ops-form' }, ...['antimatter', 'deuterium'].map((r) => {
+          // A toggle: lit when on, dim when off (as the ship has it saved).
+          const b = button(`Auto refuel ${r}: ${grid.autoRefuel[r] ? 'on' : 'off'}`, `auto-refuel-${r}`, () => send({ type: 'grid', autoRefuel: { resource: r, on: !grid.autoRefuel[r] } }), 'lcars-toggle');
+          b.setAttribute('aria-pressed', String(!!grid.autoRefuel[r]));
+          return b;
+        }),
+          el('span', { className: 'ops-hint', textContent: grid.autoRefuel.antimatter && !grid.ties.containment.length ? 'antimatter needs a containment feed set' : 'topped off while docked at a starbase' })));
     };
     const coreText = grid.core === 'online' ? `Online · ${grid.coreOutput} to ${feeds(grid.ties.core)}` : grid.core === 'starting' ? `Starting · ${grid.start} of ${grid.startSecs} s on Bus A power` : grid.core === 'ejected' ? 'Ejected · solar and batteries only' : 'Offline';
     gp.replaceChildren(
@@ -1180,7 +1229,9 @@ function showOps() {
   $('ops-log').replaceChildren();
   ops = createOps({ send, comms, me: () => me });
   fillReassign();
+  quietScreen = screenHistory.key === historyKey();
   showScreen('status');
+  quietScreen = false;
   restoreScreen();
 }
 

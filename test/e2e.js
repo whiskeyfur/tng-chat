@@ -1229,6 +1229,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await geordi.isChecked('#ties-battery input[data-node="A"]'), battTied, 'the refused tap changed nothing');
     assert.equal(await geordi.evaluate(() => localStorage.getItem('stchat-grid-order')), 'shutdown');
     await geordi.click('#grid-order-operations');
+    // Auto refuel: a toggle per resource that shows the saved state.
+    assert.equal(await geordi.getAttribute('#auto-refuel-deuterium', 'aria-pressed'), 'false');
+    await geordi.click('#auto-refuel-deuterium');
+    await geordi.waitForSelector('#auto-refuel-deuterium[aria-pressed="true"]:has-text("on")');
+    assert.equal(await geordi.getAttribute('#auto-refuel-antimatter', 'aria-pressed'), 'false', 'one at a time');
+    await geordi.click('#auto-refuel-deuterium');
+    await geordi.waitForSelector('#auto-refuel-deuterium[aria-pressed="false"]');
     // The warp core's Start / Stop is on its row in the grid, in every order.
     await geordi.waitForSelector('#ties-core-parent #core-stop');
     assert.deepEqual(await geordi.evaluate(() => ['#grid-table thead th', '#grid-table tfoot td'].map((q) => getComputedStyle(document.querySelector(q)).position)), ['sticky', 'sticky'], 'the headings and totals stay in view');
@@ -1246,8 +1253,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.notEqual(laforge.nav().own.grid.core, 'ejected', 'one press only arms it');
     await geordi.click('#core-eject');
     await waitFor(() => laforge.nav()?.own.grid.core === 'ejected' && !laforge.nav().own.grid.antimatter);
+    // Back (the bottom-left corner): to the power grid, where geordi was before Damage control (and before the refresh).
+    await geordi.click('#back-button');
+    await geordi.waitForSelector('[data-screen="st-grid"]:not([hidden])');
+    step('Engineering ejected the warp core and antimatter pods from Damage control (armed by one press, fired by a second); Back returned to the power grid');
     await geordi.close();
-    step('Engineering ejected the warp core and antimatter pods from Damage control (armed by one press, fired by a second)');
 
     // The Defiant comes alongside and tows the crippled Enterprise with a tractor beam.
     const ezri = await crewWs('ezri', 'Defiant', 'Helm');
