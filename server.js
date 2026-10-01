@@ -751,7 +751,7 @@ const POWER_MAX = 150;
 const OVERDRIVE_DAMAGE = 0.02; // damage per second for each point drawn over 100
 const REACTOR = 450; // total power to share, in percent of one system at full
 const MIN_SHIELD_POWER = 20;
-const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 };
+const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
 // actually gets from the power grid (see "the power grid" below): damage caps
 // a system, unarmed weapons draw nothing, and a bus short of power browns out.
@@ -812,7 +812,7 @@ function navMessage(key) {
   return {
     type: 'nav',
     own: own ? { name: shipName(key), ...own, power: powerOf(key), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
-      autopilot: autopilots.get(key)?.target || null,
+      autopilot: autopilots.get(key)?.target || null, transporter: transporterView(key),
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
     bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
@@ -1466,6 +1466,7 @@ function flow(k) {
   const demand = {};
   // Damage takes the same share off what a system can draw, overdrive included.
   for (const s of SYSTEMS) demand[s] = s === 'weapons' && !c.armed ? 0 : Math.min(a[s], Math.max(0, (POWER_MAX * (100 - c.damage[s])) / 100));
+  demand.transporter = Math.min(demand.transporter, transporterDraw(k));
   // A ship docked with us: each side offers power (feed); whoever offers more
   // sends the difference, drawn from (or, received, fed into) the docked-ship ties.
   // Each connection on its own: per port, whoever offers more sends the difference.
@@ -2042,6 +2043,8 @@ function destroy(k, cause) {
   const tower = towedBy(k);
   if (tower) releaseTractor(tower, `the ${name} was destroyed`);
   combat.set(k, { ...freshCombat(), loaded: true });
+  transporters.delete(k);
+  for (const [o, t] of transporters) if (t.lock === k && !t.energizing) dropLock(o, `the ${name} was destroyed`);
   undockShips(k, `the ${name} was destroyed`);
   eng.set(k, { ...freshEng(null, { cold: true }), docked: base.name }); // rebuilt cold: Engineering brings it up on dock power
   shields.delete(k);
@@ -2251,6 +2254,7 @@ function combatCommand(ws, msg) {
 let combatTick = 0;
 setInterval(() => {
   combatTick++;
+  checkTransporterLocks();
   const now = Date.now();
   let changed = false;
   for (const k of [...cores.keys()]) {
@@ -2382,6 +2386,7 @@ function stationCommand(ws, msg) {
   const gate = (fn) => { if (consoleDark(ws)) darkNote(ws); else fn(ws, msg); return true; };
   if (t === 'shields') return shieldsCommand(ws, msg), true;
   if (t === 'beam') return beamCommand(ws, msg), true;
+  if (t === 'transporter-lock') return transporterLock(ws, msg), true;
   if (['helm', 'autopilot', 'scan', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
@@ -2453,36 +2458,100 @@ function shieldsCommand(ws, msg) {
   return;
 }
 
-// The transporter beams someone aboard this ship to another ship (or within it).
+// The transporter: it locks onto a destination (this ship too, site to
+// site), then energizes for BEAM_SECS and the person moves at the end. Its
+// power follows what it's doing: nothing with no lock, half while it holds
+// one, all of it while it energizes. It needs that 100%: short of it (the
+// limiter below 100, damage, or the bus can't supply it), the beam won't
+// start, or fails at the end.
+const BEAM_SECS = Number(process.env.BEAM_SECS) || 5;
+const transporters = new Map(); // ship key -> { lock: ship key, energizing: { who, station, at } }
+const transporterDraw = (k) => { const t = transporters.get(k); return t?.energizing ? 100 : t?.lock ? 50 : 0; };
+const transporterView = (k) => { const t = transporters.get(k); return { lock: t?.lock ? shipName(t.lock) : null, energizing: t?.energizing ? { who: t.energizing.who, until: t.energizing.at + BEAM_SECS * 1000 } : null, secs: BEAM_SECS }; };
+const transporterPower = (k) => { flowCache.delete(k); return powerOf(k).transporter; };
+function dropLock(k, why) {
+  const t = transporters.get(k);
+  if (!t?.lock) return;
+  transporters.delete(k);
+  gridChanged(k);
+  tellStations(k, ['Transporter'], `Transporter: lock on the ${shipName(t.lock)} lost (${why})`);
+}
+// Every tick: a lock on another ship holds only while it's there and in range.
+function checkTransporterLocks() {
+  for (const [k, t] of transporters) {
+    if (t.energizing || !t.lock || t.lock === k) continue;
+    if (!present(t.lock)) dropLock(k, `the ${shipName(t.lock)} has no ship's computer online`);
+    else if (!transporterOk(k, t.lock)) dropLock(k, 'out of transporter range');
+  }
+}
+
+function transporterLock(ws, msg) {
+  const fail = (text) => send(ws, { type: 'notice', text: `Transporter: ${text}` });
+  if (ws.station !== 'Transporter') return fail('only the transporter room can lock on');
+  if (consoleDark(ws)) return fail('console offline, no power on its bus');
+  const k = ws.shipKey, t = transporters.get(k);
+  if (t?.energizing) return fail('energizing: wait for the beam to finish');
+  if (msg.ship == null) {
+    if (t?.lock) { transporters.delete(k); gridChanged(k); }
+    return broadcastShips();
+  }
+  const toKey = shipKey(clean(msg.ship));
+  if (toKey !== k) {
+    if (!present(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
+    if (!transporterOk(k, toKey)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(k, toKey)}; get within ${Math.round(rangesOf(k).transporter)})`);
+  }
+  transporters.set(k, { lock: toKey });
+  gridChanged(k);
+  broadcastShips();
+}
+
+// Why someone can't be beamed to toKey right now (null: they can).
+function beamBlocked(k, u, toKey, station) {
+  if (!u || users.get(u.id) !== u || u.shipKey !== k) return 'that person is not aboard';
+  if (u.operator) return 'the ops station cannot be beamed';
+  if (toKey === k) return !station || station === u.station ? `${u.name} is already at ${u.station}: pick another station` : null;
+  if (!present(toKey)) return `the ${shipName(toKey)} has no ship's computer online`;
+  if (!transporterOk(k, toKey)) return `the ${shipName(toKey)} is out of transporter range (${rangeText(k, toKey)}; get within ${Math.round(rangesOf(k).transporter)})`;
+  for (const x of [k, toKey]) if (shields.has(x)) return `cannot beam through the shields of the ${shipName(x)}`;
+  if (lockoutOf(toKey)) return `the ${shipName(toKey)} has a transporter lockout: Security's force field is up`;
+  if (users.has(userId(u.name, shipName(toKey)))) return `someone called ${u.name} is already aboard the ${shipName(toKey)}`;
+  return null;
+}
+
 function beamCommand(ws, msg) {
   const fail = (text) => send(ws, { type: 'notice', text: `Transporter: ${text}` });
   if (ws.station !== 'Transporter') return fail('only the transporter room can beam people');
   if (consoleDark(ws)) return fail('console offline, no power on its bus');
+  const k = ws.shipKey, t = transporters.get(k);
   const u = typeof msg.who === 'string' && users.get(msg.who);
-  const toKey = shipKey(clean(msg.ship));
-  if (!u || u.shipKey !== ws.shipKey) return fail('that person is not aboard');
-  if (u.operator) return fail('the ops station cannot be beamed');
   const station = msg.station == null ? null : STATIONS.includes(msg.station) && msg.station !== 'Operations' ? msg.station : undefined;
   if (station === undefined) return fail('no such station to beam to');
-  if (toKey === ws.shipKey) {
-    // Site to site, within the ship: inside our own shields and lockout.
-    if (!station || station === u.station) return fail(`${u.name} is already at ${u.station}: pick another station`);
-    if (powerOf(ws.shipKey).transporter <= 0) return fail('no power to the transporter: ask Engineering');
-    if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to ${station}` });
+  if (t?.energizing) return fail('already energizing');
+  if (!t?.lock) return fail('no lock: lock onto a destination first');
+  const toKey = t.lock;
+  if (msg.ship != null && shipKey(clean(msg.ship)) !== toKey) return fail(`locked onto the ${shipName(toKey)}, not the ${clean(msg.ship)}: lock onto it first`);
+  const why = beamBlocked(k, u, toKey, station);
+  if (why) return fail(why);
+  if (allocOf(k).transporter < 100) return fail(`the transporter's limiter is at ${allocOf(k).transporter}%: it needs 100% to energize (ask Engineering)`);
+  t.energizing = { who: u.id, station, at: Date.now() };
+  const have = transporterPower(k);
+  if (have < 100 - 1e-6) { t.energizing = null; gridChanged(k); return fail(`not enough power to energize: ${have}% of 100% (ask Engineering)`); }
+  scheduleNav();
+  const where = toKey === k ? station : `the ${shipName(toKey)}${station ? `'s ${station}` : ''}`;
+  if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to ${where}` });
+  send(ws, { type: 'notice', text: `Transporter: energizing (${BEAM_SECS} s)` });
+  setTimeout(() => {
+    const now = transporters.get(k);
+    if (now !== t) return; // destroyed meanwhile
+    const have = transporterPower(k);
+    const lost = beamBlocked(k, u, toKey, station) || (have < 100 - 1e-6 ? `power fell to ${have}% while energizing` : null);
+    t.energizing = null;
+    gridChanged(k);
+    if (lost) { tellStations(k, ['Transporter'], `Transporter: beam failed: ${lost}`); if (u.shipKey === k && u !== ws) send(u, { type: 'notice', text: 'The transporter beam failed: you are still here' }); return broadcastShips(); }
     beam(u, toKey, station);
-    if (u !== ws) send(ws, { type: 'notice', text: `Transporter: ${u.name} beamed to ${station}` });
-    return;
-  }
-  if (powerOf(ws.shipKey).transporter <= 0) return fail('no power to the transporter: ask Engineering');
-  if (toKey !== ws.shipKey && present(toKey) && !transporterOk(ws.shipKey, toKey)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(ws.shipKey, toKey)}; get within ${Math.round(rangesOf(ws.shipKey).transporter)})`);
-  if (!present(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
-  for (const k of [ws.shipKey, toKey]) if (shields.has(k)) return fail(`cannot beam through the shields of the ${shipName(k)}`);
-  if (lockoutOf(toKey)) return fail(`the ${shipName(toKey)} has a transporter lockout: Security's force field is up`);
-  if (users.has(userId(u.name, shipName(toKey)))) return fail(`someone called ${u.name} is already aboard the ${shipName(toKey)}`);
-  if (u !== ws) send(u, { type: 'notice', text: `You are being beamed to the ${shipName(toKey)}` });
-  beam(u, toKey, station);
-  if (u !== ws) send(ws, { type: 'notice', text: `Transporter: ${u.name} beamed to the ${shipName(toKey)}${station ? `'s ${station}` : ''}` });
-  return;
+    if (u !== ws) tellStations(k, ['Transporter'], `Transporter: ${u.name} beamed to ${where}`);
+    broadcastShips();
+  }, BEAM_SECS * 1000);
 }
 
 // POST   /api/library            upload to your own ship (X-Token, X-Filename)

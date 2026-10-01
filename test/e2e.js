@@ -12,6 +12,7 @@ const { spawn } = require('child_process');
 const { chromium } = require('playwright');
 
 process.env.PORT = process.env.PORT || '8099';
+process.env.BEAM_SECS = process.env.BEAM_SECS || '2'; // the transporter energizes this long (5 s in play)
 // Ship's computers keep their libraries in a scratch folder for the test.
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-test-'));
 const computers = new Set();
@@ -35,7 +36,7 @@ const stopComputer = (proc) => new Promise((r) => { proc.once('exit', r); proc.k
 const stored = (folder, ship, name) => { try { return fs.readFileSync(path.join(DATA_DIR, folder, ship, name), 'utf8'); } catch { return null; } };
 const SYSTEMS_SHORT = (own) => Object.keys(own.grid.demand).filter((k) => own.grid.delivered[k] < own.grid.demand[k]);
 // The transporter's TOS energize sliders: all three to the top.
-const energize = async (page) => { await page.waitForFunction(() => [...document.querySelectorAll('.tr-slider')].every((r) => Number(r.value) === 0)); for (const n of [1, 2, 3]) await page.$eval(`#beam-slider-${n}`, (r) => { r.value = 100; r.dispatchEvent(new Event('input', { bubbles: true })); }); };
+const energize = async (page) => { await page.waitForSelector('#beam-slider-1:not([disabled])'); await page.waitForFunction(() => [...document.querySelectorAll('.tr-slider')].every((r) => Number(r.value) === 0)); for (const n of [1, 2, 3]) await page.$eval(`#beam-slider-${n}`, (r) => { r.value = 100; r.dispatchEvent(new Event('input', { bubbles: true })); }); };
 const waitFor = async (fn, ms = 10000) => {
   const where = (new Error().stack.split('\n')[2] || '').trim(); // the caller, for the failure message
   const end = Date.now() + ms;
@@ -652,14 +653,24 @@ const audioBytes = (page) => page.evaluate(async () => {
     await carol.click('[data-shield-control] button');
     await chief.waitForFunction(() => !document.body.hasAttribute('data-shields-up'));
     await chief.click(`#beam-who button[data-value="${id('wes')}"]`);
+    await chief.waitForSelector('#beam-status:has-text("No lock")');
+    assert.equal(await chief.isDisabled('#beam-slider-1'), true, 'no lock: the sliders are dead');
+    assert.equal(await chief.evaluate(() => window.__nav.last.own.power.transporter), 0, 'no lock, no power drawn');
     await chief.click('#beam-ship button[data-value="K\'Vatch"]');
+    await chief.waitForSelector('#beam-ship button[data-value="K\'Vatch"][aria-pressed="true"]');
+    await chief.waitForFunction(() => window.__nav.last.own.power.transporter === 50);
+    step('the transporter locked onto the K\'Vatch: half power while it holds the lock, none before');
     await energize(chief);
+    await chief.waitForSelector('#beam-status:has-text("Energizing")');
+    await chief.waitForFunction(() => window.__nav.last.own.power.transporter === 100);
+    assert.equal(await wes.evaluate(() => window.__voice.me?.ship), 'Enterprise', 'still aboard while it energizes');
     await wes.waitForFunction(() => window.__voice.me?.ship === "K'Vatch");
+    await chief.waitForFunction(() => window.__nav.last.own.power.transporter === 50);
     await kops.waitForFunction(() => window.__operator.roster.some((u) => u.name === 'wes'));
     await op.waitForFunction(() => !window.__operator.roster.some((u) => u.name === 'wes'));
     await wes.waitForSelector('#users li:has-text("kor")', { state: 'attached' });
     assert.equal(await wes.evaluate(() => window.__voice.me.station), 'Crew');
-    step('shields down: the transporter beamed wes to the K\'Vatch, keeping his station');
+    step('shields down: energizing drew 100% and wes arrived at the K\'Vatch at the end of it, keeping his station; back to 50% after');
 
     // Site to site, to a station: an ensign beamed to the Enterprise's Engineering console.
     const ensign = await (async () => { const sock = new (require('ws'))(`ws://localhost:${process.env.PORT}`); const msgs = []; sock.on('message', (m) => msgs.push(JSON.parse(m))); await new Promise((r) => sock.on('open', r)); sock.send(JSON.stringify({ type: 'register', name: 'ensign', ship: 'Enterprise', station: 'Crew' })); return { sock, msgs }; })();
@@ -872,7 +883,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     rand.on('message', (m) => { try { randMsgs.push(JSON.parse(m)); } catch {} });
     await new Promise((r) => rand.on('open', r));
     rand.send(JSON.stringify({ type: 'register', name: 'rand', ship: 'Enterprise', station: 'Transporter' }));
-    const beamSelf = () => rand.send(JSON.stringify({ type: 'beam', who: id('rand'), ship: 'Defiant' }));
+    const beamSelf = () => { rand.send(JSON.stringify({ type: 'transporter-lock', ship: 'Defiant' })); rand.send(JSON.stringify({ type: 'beam', who: id('rand'), ship: 'Defiant' })); };
     const spock = await openAs(browser, 'spock', 'spock', 'Enterprise', 'Science');
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     await spock.click('.nav-contacts li[data-ship="Defiant"] button:has-text("Scan")');
@@ -930,7 +941,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await new Promise((r) => odell.on('open', r));
     odell.send(JSON.stringify({ type: 'register', name: 'odell', ship: 'Enterprise', station: 'Transporter' }));
     await new Promise((r) => setTimeout(r, 300));
-    odell.send(JSON.stringify({ type: 'beam', who: id('odell'), ship: 'Defiant' }));
+    odell.send(JSON.stringify({ type: 'transporter-lock', ship: 'Defiant' }));
     await waitFor(() => odellMsgs.some((m) => m.type === 'notice' && /out of transporter range/.test(m.text) && /within 4/.test(m.text)));
     step('Engineering cut sensors to 20%: sensor, subspace and transporter range all fell to a fifth, and beaming fell short');
     // Overdrive: sensors past their rating reach further but wear out.
@@ -960,7 +971,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await screen(worf, 'st-secctl');
     await worf.click('[data-security] button:has-text("Raise force field")');
     await worf.waitForSelector('[data-security] .st-state:has-text("force field up")');
-    const randBeams = () => rand.send(JSON.stringify({ type: 'beam', who: id('rand', 'Defiant'), ship: 'Enterprise' }));
+    const randBeams = () => { rand.send(JSON.stringify({ type: 'transporter-lock', ship: 'Enterprise' })); rand.send(JSON.stringify({ type: 'beam', who: id('rand', 'Defiant'), ship: 'Enterprise' })); };
     randBeams();
     await waitFor(() => randMsgs.some((m) => m.type === 'notice' && /transporter lockout/.test(m.text)));
     await worf.click('[data-security] button:has-text("Drop force field")');

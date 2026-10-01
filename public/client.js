@@ -313,7 +313,8 @@ function renderShipState() {
   const strength = lastNav?.own?.combat?.shield;
   // Where each target is, for the transporter's reach (updates as ships move).
   const where = (name) => lastNav?.ships?.find((x) => x.name === name)?.distance ?? lastNav?.bases?.find((b) => b.name === name)?.distance;
-  const sig = JSON.stringify([up, p?.shields, p?.transporter, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields, Math.round(where(t.name) ?? -1)]), strength]);
+  const trState = lastNav?.own?.transporter || {};
+  const sig = JSON.stringify([up, p?.shields, p?.transporter, lastNav?.own?.allocated?.transporter, trState.lock, !!trState.energizing, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields, Math.round(where(t.name) ?? -1)]), strength]);
   if (sig === shipStateSig) return;
   shipStateSig = sig;
   stationView.setShields(up);
@@ -340,11 +341,13 @@ function renderShipState() {
   if (tr) renderTransporter(tr, { crew, targets, up, p, range, where });
 }
 
-// The transporter room: tap who to beam, which ship (this one too: site to
-// site) and which station they arrive at, then push all three energize
-// sliders to the top, as on the old Constitution-class consoles.
+// The transporter room: tap who to beam, lock onto a destination (this ship
+// too: site to site) and pick the station they arrive at, then push all three
+// energize sliders to the top, as on the old Constitution-class consoles.
+// No lock: it draws nothing; locked: half its power; energizing: all of it.
 const beamSel = { who: null, ship: null, station: null };
-function renderTransporter(tr, { crew, targets, up, p, range, where = () => undefined }) {
+function renderTransporter(trEl, { crew, targets, up, p, range, where = () => undefined }) {
+  const tr = trEl;
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   if (!tr.querySelector('.tr-sliders')) {
     const sliders = el('div', { className: 'tr-sliders', id: 'beam-sliders' }, ...[1, 2, 3].map((n) => {
@@ -357,7 +360,7 @@ function renderTransporter(tr, { crew, targets, up, p, range, where = () => unde
     }));
     tr.replaceChildren(
       el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Beam' }), el('div', { className: 'tr-taps', id: 'beam-who' })),
-      el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'To' }), el('div', { className: 'tr-taps', id: 'beam-ship' })),
+      el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Lock' }), el('div', { className: 'tr-taps', id: 'beam-ship' })),
       el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Station' }), el('div', { className: 'tr-taps', id: 'beam-station' })),
       el('div', { className: 'tr-energize' }, sliders, el('span', { className: 'tr-label', textContent: 'Energize: all three up' })),
       el('p', { className: 'ops-notice', id: 'beam-status' }),
@@ -375,7 +378,8 @@ function renderTransporter(tr, { crew, targets, up, p, range, where = () => unde
     return '';
   };
   if (!crew.some((u) => u.id === beamSel.who)) beamSel.who = crew[0]?.id || null;
-  if (!ships.some((x) => x.name === beamSel.ship && !reach(x))) beamSel.ship = ships.find((x) => !reach(x))?.name || me.ship;
+  const tr2 = lastNav?.own?.transporter || {};
+  beamSel.ship = tr2.lock;
   const stations = ['Same station', ...STATION_NAMES.filter((n) => n !== 'Operations')];
   if (!stations.includes(beamSel.station)) beamSel.station = 'Same station';
   const taps = (box, items, sel, set) => box.replaceChildren(...items.map(([value, text, why]) => {
@@ -383,17 +387,20 @@ function renderTransporter(tr, { crew, targets, up, p, range, where = () => unde
     b.dataset.value = value;
     if (why) { b.disabled = true; b.title = why; }
     b.setAttribute('aria-pressed', String(value === sel));
-    b.onclick = () => { set(value); renderTransporter(tr, { crew, targets, up, p, range, where }); };
+    b.onclick = () => { set(value); renderTransporter(trEl, { crew, targets, up, p, range, where }); };
     return b;
   }));
   taps(tr.querySelector('#beam-who'), crew.map((u) => [u.id, u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`]), beamSel.who, (v) => { beamSel.who = v; });
-  taps(tr.querySelector('#beam-ship'), ships.map((x) => [x.name, x.here ? `The ${x.name} (site to site)` : /^(Starbase|Deep Space) /.test(x.name) ? x.name : `The ${x.name}`, reach(x)]), beamSel.ship, (v) => { beamSel.ship = v; });
+  // Tap a destination to lock on; tap the locked one again to let go (always allowed).
+  taps(tr.querySelector('#beam-ship'), ships.map((x) => [x.name, x.here ? `The ${x.name} (site to site)` : /^(Starbase|Deep Space) /.test(x.name) ? x.name : `The ${x.name}`, x.name === tr2.lock ? '' : reach(x)]), beamSel.ship, (v) => { send({ type: 'transporter-lock', ship: v === tr2.lock ? null : v }); });
   taps(tr.querySelector('#beam-station'), stations.map((n) => [n, n]), beamSel.station, (v) => { beamSel.station = v; });
-  const noPower = p && p.transporter <= 0;
-  const blocked = noPower ? 'No power to the transporter: ask Engineering' : up && beamSel.ship !== me.ship ? `Shields are up aboard the ${me.ship}` : '';
-  for (const r of tr.querySelectorAll('.tr-slider')) r.disabled = !crew.length || noPower;
-
-  if (blocked) tr.querySelector('#beam-status').textContent = blocked;
+  const limit = lastNav?.own?.allocated?.transporter ?? 100;
+  const blocked = tr2.energizing ? `Energizing · 100% power` : !tr2.lock ? 'No lock · tap a destination to lock on (transporter idle, no power drawn)'
+    : limit < 100 ? `Locked on the ${tr2.lock} · limiter at ${limit}%: energizing needs 100% (ask Engineering)`
+    : up && tr2.lock !== me.ship ? `Locked on the ${tr2.lock} · shields are up aboard the ${me.ship}`
+    : `Locked on the ${tr2.lock} · ${p?.transporter ?? 0}% power (energizing takes 100% for ${tr2.secs || 5} s)`;
+  for (const r of tr.querySelectorAll('.tr-slider')) r.disabled = !crew.length || !tr2.lock || !!tr2.energizing || limit < 100;
+  tr.querySelector('#beam-status').textContent = blocked;
   tr.querySelector('#beam-range').textContent = range != null ? `Transporter range ${Math.round(range)} units (sensor power ${p?.sensors ?? 100}%)` : '';
 }
 
@@ -402,10 +409,10 @@ function renderTransporter(tr, { crew, targets, up, p, range, where = () => unde
 let energizing = false;
 function energizeCheck() {
   const rs = [...document.querySelectorAll('.tr-slider')];
-  if (energizing || !rs.length || rs.some((r) => Number(r.value) < 95) || !beamSel.who) return;
+  if (energizing || !rs.length || rs.some((r) => Number(r.value) < 95) || !beamSel.who || !beamSel.ship) return;
   energizing = true;
   stationView?.energize();
-  send({ type: 'beam', who: beamSel.who, ship: beamSel.ship, ...(beamSel.station !== 'Same station' ? { station: beamSel.station } : {}) });
+  send({ type: 'beam', who: beamSel.who, ...(beamSel.station !== 'Same station' ? { station: beamSel.station } : {}) });
   setTimeout(() => { rs.forEach((r) => { r.value = 0; }); energizing = false; }, 900);
 }
 
