@@ -40,12 +40,12 @@ Each crew member gets an LCARS console for their station, styled with `public/lc
 | --- | --- |
 | Captain | ship status, tactical plot, **department readiness** (how many are on duty at each station aboard: green when manned, red when not), senior staff on duty, captain's log |
 | First Officer | duty roster (who is actually aboard), department readiness (real, as for the Captain), ship status, duty log |
-| Helm | forward view starfield, course, helm systems |
+| Helm | **navigation**: the sector map, course (a ship, or click the map for a waypoint) and speed (impulse, warp 1-9), Engage / All stop, courses plotted by Science; forward view starfield at the ship's real speed; helm systems |
 | Tactical | shield grid, weapons, **shield control** (raise/lower the ship's shields), targeting scan |
 | Security | internal sensors deck grid, force fields, security log |
 | Engineering | side view of the ship with the warp core, warp field harmonics, power distribution |
 | Medical | patient monitor with ECG and vitals, neural activity, sickbay, cellular analysis |
-| Science | long range sensors, spectral analysis, anomaly readings, science log |
+| Science | **long range sensors**: the sector map and every contact on sensors with distance and speed, **Scan** (distance, position, heading and speed, shields, ops, life signs by station) and **Plot course** for Helm; spectral analysis, anomaly readings, science log |
 | Communications | **comm traffic** (every call in progress or ringing, every hail waiting for an answer, and every all-hands broadcast, on the ship and its data network: who, and for how long; no listening in), subspace bands, carrier signal, message traffic |
 | Transporter | transporter controls (beam crew to another ship), transporter pad, pattern buffer |
 | Crew | ship schematic, ship status, deck status |
@@ -66,6 +66,15 @@ Comms opens an LCARS modal, the same for every role, ops included:
 - **Change station:** the **Station** screen moves you to another station aboard the same ship, **Operations** included (with the authorization code if the relay requires one), and operators can move from Operations to any other station. Your console changes to the new station; calls in progress carry on. A ship can have several operators on duty, and any of them can route hails, manage data links, transfer calls and so on; the ship only loses off-ship comms when the last one leaves.
 - **Transporter:** the Transporter station beams anyone aboard (themselves included, but not the ops station) to another ship in the list. The person's call ends, they leave this ship's comm net and report aboard the other ship with the same name and station; both ships' ops see them leave and arrive. Beaming is refused if someone with that name is already aboard the destination.
 - **Shields:** the Tactical station raises and lowers the ship's shields. While a ship's shields are up, nobody can be beamed off it or onto it. Shield state shows on Tactical's shield grid, in the transporter's ship list and on the ops Status screen.
+
+## Navigation and range
+
+Ships have a real position in a 1000 × 1000 sector, flown by their ship's computer (new ships start near the middle; `--position x,y` sets where). **Helm** sets course and speed: impulse is 0.5 units a second, warp *w* is 2·*w*^1.8 (warp 9 crosses the sector in about ten seconds); heading for another ship tracks it and stops 5 units short. **Science** watches everything within **sensor range (600)**, scans ships and plots courses that Helm can engage with one click. Distance now matters everywhere:
+
+- **Subspace range (400):** hails, data links and transfers to another ship need it. Ops only list ships in range to hail or link, and a data link drops when the ships drift out of range.
+- **Transporter range (20):** beaming needs the ships close: have Helm intercept the other ship first.
+
+When several computers run one ship, the relay picks one to fly it; the others keep a copy of its position and the next one takes over if it stops. Positions are saved in `<data>/<ship>/.nav.json`.
 
 ## Ship's computers and the library
 
@@ -111,6 +120,7 @@ npm test
 Starts the server and drives headless Chromium pages with a fake microphone through crew consoles and ops consoles:
 
 - **Crew calls:** decline; accept with audio both ways; chat; a 300 KB file arrives byte-for-byte; hang-up; a peer going offline.
+- **Navigation:** Science scanning the Defiant and plotting a course for Helm; Helm flying out of subspace range at warp 9 (the data link drops, the Defiant leaves hailing range, beaming is out of range), then intercepting the Defiant (back in range, beaming works).
 - **Broadcasts:** Communications seeing a hail before it's answered; all hands to the ship (heard, receive-only, other ships don't hear it); all hands to the fleet over a data link, ended by ops; the fleet radio playing on crew consoles and switching off.
 - **Subspace radio:** a local test station (a tone) tuned by URL and patched into a call (the outgoing track switches to the mix, the other side sees the note, the call stays up), unpatched back to the mic; a station without CORS plays locally with Patch disabled.
 - **Call waiting:** ignore (the caller hears busy), the caller giving up, join (three-way), switch, and a waiting call ringing once the current one ends.
@@ -147,6 +157,8 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 | `{type:"merge", caller}` | call waiting, Join: bring user id `caller` (who is calling you) into your call |
 | `{type:"change-station", station, key?}` | move to another station aboard your ship; reply `registered`, or `operator-ok` for Operations (`station-failed` if the key is wrong) |
 | `{type:"shields", up}` | Tactical only: raise or lower the ship's shields |
+| `{type:"helm", dest?, heading?, warp}` | Helm only: `dest` `{ship}` or `{x, y}`, speed `0` (all stop), `0.25` (impulse) or 1-9 |
+| `{type:"scan", ship}` / `{type:"plot-course", dest}` | Science only: scan a ship on sensors (reply `scan-result`) / send Helm a course (`course-plotted`) |
 | `{type:"ship-radio", url, name, scope}` | Communications or ops: put a stream on the ship's (`ship`) or fleet's (`network`) radio; `url: null` switches it off |
 | `{type:"bsignal", to, bid, data}` / `{type:"bcast-end", bid}` | all hands: offer/answer/ICE between speaker and listener; the speaker ending it |
 | `{type:"beam", who, ship}` | Transporter only: beam user id `who` (aboard your ship) to `ship`; they get `registered` with `beamedFrom` |
@@ -164,6 +176,7 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 | `{type:"bcast-speak", bid, label}` / `{type:"bcast-add", bid, listener}` | you're the all-hands speaker / connect (send-only) to this listener |
 | `{type:"bcast-listen", bid, from, label}` / `{type:"bcast-ended", bid}` | an all-hands broadcast you'll receive (receive-only) / it ended |
 | `{type:"ship-radio", radio}` | the ship's radio: `{name, url, by}` or `null` |
+| `{type:"nav", own, ships, ranges}` | twice a second: your ship's position and course, every ship on your sensors, and the ranges |
 | `{type:"notice", text}` | hail progress, for example "Ops is hailing the K'Vatch for you" |
 
 | Message (operator → server) | Meaning |

@@ -132,6 +132,7 @@ const sameNetwork = (a, b) => network(a).has(b);
 // when unlinked). `ops` says whether their own ship has ops on duty.
 function broadcastCrew(key) {
   scheduleTraffic();
+  scheduleNav();
   const net = network(key);
   const list = [...net].flatMap(crewOf).map(info)
     .sort((a, b) => a.ship.localeCompare(b.ship) || a.name.localeCompare(b.name));
@@ -157,8 +158,9 @@ function broadcastOps(key) {
   const roster = crewOf(key)
     .map((u) => ({ ...info(u), state: u.state, peers: u.peers.map(peerInfo) }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  // Ships in range: ops on duty, within subspace (comms) range.
   const otherShips = [...new Set([...operators].map((op) => op.shipKey))]
-    .filter((k) => k !== key).map(shipName).sort();
+    .filter((k) => k !== key && inRange(key, k, COMMS_RANGE)).map(shipName).sort();
   const describe = (h) => ({ id: h.id, fromShip: shipName(h.fromShip), toShip: shipName(h.toShip), caller: peerInfo(h.caller) });
   const all = [...hails.values()];
   const requests = [...linkRequests.values()].map((r) => ({ id: r.id, fromShip: shipName(r.fromShip), toShip: shipName(r.toShip), from: r.fromShip, to: r.toShip }));
@@ -284,6 +286,7 @@ function operatorMessage(op, msg) {
         if (target === op.shipKey) return fail('that is this ship');
         if (target === caller.shipKey) return fail(`${caller.name} is from the ${shipName(target)}`);
         if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship)}: no operator on duty`);
+        if (!inRange(op.shipKey, target, COMMS_RANGE)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
         if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
         const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now() };
         hails.set(h.id, h);
@@ -315,6 +318,7 @@ function operatorMessage(op, msg) {
       if (!caller) return fail('pick a crew member to put the hail through for');
       if (target === op.shipKey) return fail('that is this ship');
       if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
+      if (!inRange(op.shipKey, target, COMMS_RANGE)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
       if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
       const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now() };
       hails.set(h.id, h);
@@ -356,6 +360,7 @@ function operatorMessage(op, msg) {
       const target = shipKey(clean(msg.ship));
       if (target === op.shipKey) return fail('that is this ship');
       if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
+      if (!inRange(op.shipKey, target, COMMS_RANGE)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
       if (links.has(linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already open`);
       if ([...linkRequests.values()].some((r) => linkKey(r.fromShip, r.toShip) === linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already being negotiated`);
       const req = { id: newId('l-'), fromShip: op.shipKey, toShip: target };
@@ -374,6 +379,7 @@ function operatorMessage(op, msg) {
       const other = msg.type === 'link-cancel' ? req.toShip : req.fromShip;
       if (msg.type === 'link-accept') {
         if (!opsOf(other).length) { broadcastOps(op.shipKey); return fail(`no operator on duty aboard the ${shipName(other)}`); }
+        if (!inRange(op.shipKey, other, COMMS_RANGE)) { broadcastOps(op.shipKey); return fail(`the ${shipName(other)} is out of subspace range (${rangeText(op.shipKey, other)})`); }
         links.add(linkKey(req.fromShip, req.toShip));
         opLog(other, `the ${shipName(op.shipKey)} accepted: data link open`);
         refreshNetworks([op.shipKey]);
@@ -604,6 +610,11 @@ function coreMessage(c, msg, isBinary) {
       refreshLibraries(key);
       return;
     }
+    case 'core-nav': {
+      const key = shipKey(clean(msg.ship));
+      if (c.coreShips.has(key)) coreNav(c, key, msg.nav);
+      return;
+    }
     case 'core-get-end': return endTransfer(msg.tid);
     case 'core-get-error': return endTransfer(msg.tid, msg.reason || 'transfer failed');
     case 'core-put-ok': {
@@ -644,11 +655,172 @@ function coreSignOff(ws) {
     opLog(k, cores.has(k) ? 'a ship\'s computer went offline' : 'ship\'s computer offline: the library is unavailable');
     refreshLibraries(k);
     syncShip(k);
+    reassignPrimary(k, ws);
     dropLinksIfUnmaintained(k);
   }
   broadcastAllOps();
   console.log(`ship's computer offline for ${[...ws.coreShips].map(shipName).join(', ')}`);
   broadcastShips();
+}
+
+// --- navigation: where ships are, and what's in range ------------------------------
+//
+// Each ship's position is simulated by one of its ship's computers (the
+// primary, picked here); the others keep a copy and take over if it goes.
+// Helm sets course and speed; Science scans and plots courses. Distance
+// matters: hails, data links and transfers off ship need subspace (comms)
+// range, sensors only see so far, and beaming needs transporter range.
+
+const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
+const navState = new Map();   // ship key -> { x, y, heading, warp, dest }
+const primaryCore = new Map(); // ship key -> computer socket flying it
+const navTargets = new Map();  // ship key -> ship key it's heading for (intercept)
+
+function distance(a, b) {
+  const p = navState.get(a), q = navState.get(b);
+  if (!p || !q || !cores.has(a) || !cores.has(b)) return Infinity;
+  return Math.hypot(p.x - q.x, p.y - q.y);
+}
+const inRange = (a, b, range) => a === b || distance(a, b) <= range;
+const rangeText = (a, b) => (Number.isFinite(distance(a, b)) ? `${Math.round(distance(a, b))} units away` : 'position unknown');
+
+function navMessage(key) {
+  const own = navState.get(key);
+  const seen = [...navState.keys()].filter((k) => cores.has(k) && (k === key || distance(key, k) <= SENSOR_RANGE));
+  return {
+    type: 'nav',
+    own: own ? { name: shipName(key), ...own } : null,
+    ships: seen.map((k) => ({ name: shipName(k), ...navState.get(k), ops: opsOf(k).length > 0, shields: shields.has(k), distance: k === key ? 0 : distance(key, k) })),
+    ranges: { comms: COMMS_RANGE, sensors: SENSOR_RANGE, transporter: TRANSPORTER_RANGE },
+  };
+}
+
+// Send positions to everyone (at most twice a second), keep intercept courses
+// pointed at moving ships, and drop data links that fall out of range.
+let navTimer = null;
+let lastRangeSig = '';
+function scheduleNav() {
+  if (navTimer) return;
+  navTimer = setTimeout(() => {
+    navTimer = null;
+    for (const [k, t] of navTargets) {
+      const nav = navState.get(k), tgt = navState.get(t), core = primaryCore.get(k);
+      if (!nav?.dest || !tgt || !core) { navTargets.delete(k); continue; }
+      if (Math.hypot(nav.dest.x - tgt.x, nav.dest.y - tgt.y) > 2) send(core, { type: 'core-helm', ship: shipName(k), dest: { x: tgt.x, y: tgt.y, name: shipName(t) } });
+    }
+    for (const l of [...links]) {
+      const [a, b] = l.split('|');
+      if (distance(a, b) > COMMS_RANGE && cores.has(a) && cores.has(b)) {
+        links.delete(l);
+        for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} lost: out of subspace range`);
+        refreshNetworks([a, b]);
+        broadcastAllOps();
+      }
+    }
+    // Ops consoles list the ships in hailing range: refresh them when that changes.
+    const keys = [...cores.keys()].sort();
+    const sig = keys.flatMap((a, i) => keys.slice(i + 1).filter((b) => distance(a, b) <= COMMS_RANGE).map((b) => `${a}|${b}`)).join(',');
+    if (sig !== lastRangeSig) { lastRangeSig = sig; broadcastAllOps(); }
+    const byShip = new Map();
+    for (const u of users.values()) {
+      if (!byShip.has(u.shipKey)) byShip.set(u.shipKey, navMessage(u.shipKey));
+      send(u, byShip.get(u.shipKey));
+    }
+  }, 500);
+}
+
+// A computer reports a ship's position (or its saved one, when it signs on).
+function coreNav(c, key, nav) {
+  if (!nav || typeof nav.x !== 'number' || typeof nav.y !== 'number') return;
+  const clean = { x: nav.x, y: nav.y, heading: Number(nav.heading) || 0, warp: Number(nav.warp) || 0, dest: nav.dest || null };
+  const current = primaryCore.get(key);
+  if (!current) {
+    primaryCore.set(key, c);
+    if (!navState.has(key)) navState.set(key, clean); // a fresher copy here wins
+    send(c, { type: 'core-primary', ship: shipName(key), primary: true, nav: navState.get(key) });
+  } else if (current === c) {
+    navState.set(key, clean);
+    for (const o of coresOf(key)) if (o !== c) send(o, { type: 'core-nav-sync', ship: shipName(key), nav: clean });
+  } else {
+    send(c, { type: 'core-primary', ship: shipName(key), primary: false, nav: navState.get(key) });
+  }
+  scheduleNav();
+}
+
+// A primary computer went away: another one for the ship takes over.
+function reassignPrimary(key, gone) {
+  if (primaryCore.get(key) !== gone) return;
+  primaryCore.delete(key);
+  const next = coresOf(key)[0];
+  if (next) {
+    primaryCore.set(key, next);
+    send(next, { type: 'core-primary', ship: shipName(key), primary: true, nav: navState.get(key) });
+  }
+  scheduleNav();
+}
+
+// Messages from crew about navigation: Helm flies, Science scans and plots.
+function navCommand(ws, msg) {
+  const note = (text) => send(ws, { type: 'notice', text });
+  const key = ws.shipKey;
+  // Resolve a destination: another ship (in sensor range) or a point.
+  const resolve = (dest) => {
+    if (!dest) return null;
+    if (typeof dest.ship === 'string') {
+      const t = shipKey(clean(dest.ship));
+      if (t === key || !navState.has(t) || distance(key, t) > SENSOR_RANGE) return { error: `the ${clean(dest.ship)} is not on sensors` };
+      return { x: navState.get(t).x, y: navState.get(t).y, name: shipName(t), key: t };
+    }
+    if (Number.isFinite(dest.x) && Number.isFinite(dest.y)) return { x: Math.min(1000, Math.max(0, dest.x)), y: Math.min(1000, Math.max(0, dest.y)) };
+    return { error: 'no such destination' };
+  };
+
+  if (msg.type === 'helm') {
+    if (ws.station !== 'Helm') return note('Only Helm can set course and speed');
+    const core = primaryCore.get(key);
+    if (!core) return note("No ship's computer is flying the ship");
+    const order = { type: 'core-helm', ship: ws.ship };
+    if (msg.dest) {
+      const d = resolve(msg.dest);
+      if (d.error) return note(`Helm: ${d.error}`);
+      order.dest = { x: d.x, y: d.y, ...(d.name ? { name: d.name } : {}) };
+      if (d.key) navTargets.set(key, d.key); else navTargets.delete(key);
+    } else if (typeof msg.heading === 'number') {
+      order.heading = msg.heading;
+      navTargets.delete(key);
+    }
+    if (typeof msg.warp === 'number') order.warp = Math.max(0, Math.min(9, msg.warp));
+    if (order.warp === 0) navTargets.delete(key);
+    send(core, order);
+    const what = order.warp === 0 ? 'all stop' : `${order.dest ? `course for ${order.dest.name ? `the ${order.dest.name}` : `${Math.round(order.dest.x)}, ${Math.round(order.dest.y)}`}` : typeof order.heading === 'number' ? `heading ${Math.round(order.heading)}` : 'speed'}${order.warp ? `, ${order.warp < 1 ? 'impulse' : `warp ${order.warp}`}` : ''}`;
+    opLog(key, `Helm (${ws.name}): ${what}`);
+    return;
+  }
+
+  if (msg.type === 'scan') {
+    if (ws.station !== 'Science') return note('Only Science can run sensor scans');
+    const t = shipKey(clean(msg.ship));
+    if (!navState.has(t) || (t !== key && distance(key, t) > SENSOR_RANGE)) return note(`Sensors: the ${clean(msg.ship)} is out of sensor range`);
+    const crew = crewOf(t);
+    const stations = {};
+    for (const u of crew) stations[u.station] = (stations[u.station] || 0) + 1;
+    const n = navState.get(t);
+    return send(ws, { type: 'scan-result', ship: shipName(t), at: Date.now(), data: {
+      distance: t === key ? 0 : Math.round(distance(key, t)), x: n.x, y: n.y, heading: n.heading, warp: n.warp,
+      shields: shields.has(t), ops: opsOf(t).length > 0, crew: crew.length, stations,
+      inCommsRange: inRange(key, t, COMMS_RANGE), inTransporterRange: inRange(key, t, TRANSPORTER_RANGE),
+    } });
+  }
+
+  if (msg.type === 'plot-course') {
+    if (ws.station !== 'Science') return note('Only Science plots courses');
+    const d = resolve(msg.dest);
+    if (!d || d.error) return note(`Science: ${d?.error || 'no destination'}`);
+    const dest = d.name ? { ship: d.name } : { x: d.x, y: d.y };
+    const helm = crewOf(key).filter((u) => u.station === 'Helm');
+    for (const u of helm) send(u, { type: 'course-plotted', by: info(ws), dest, label: d.name ? `the ${d.name}` : `${Math.round(d.x)}, ${Math.round(d.y)}` });
+    return note(helm.length ? `Course plotted for Helm: ${d.name ? `the ${d.name}` : `${Math.round(d.x)}, ${Math.round(d.y)}`}` : 'Course plotted, but nobody is at Helm');
+  }
 }
 
 // POST   /api/library            upload to your own ship (X-Token, X-Filename)
@@ -991,6 +1163,7 @@ wss.on('connection', (ws) => {
       const toKey = shipKey(clean(msg.ship));
       if (!u || u.shipKey !== ws.shipKey) return fail('that person is not aboard');
       if (u.operator) return fail('the ops station cannot be beamed');
+      if (toKey !== ws.shipKey && cores.has(toKey) && !inRange(ws.shipKey, toKey, TRANSPORTER_RANGE)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(ws.shipKey, toKey)}; get within ${TRANSPORTER_RANGE})`);
       if (!cores.has(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
       if (toKey === ws.shipKey) return fail(`${u.name} is already aboard`);
       for (const k of [ws.shipKey, toKey]) if (shields.has(k)) return fail(`cannot beam through the shields of the ${shipName(k)}`);
@@ -1033,6 +1206,8 @@ wss.on('connection', (ws) => {
       }
       return;
     }
+
+    if ((msg.type === 'helm' || msg.type === 'scan' || msg.type === 'plot-course') && ws.id) return navCommand(ws, msg);
 
     // Call waiting, "join": bring the person calling us into the call we're in.
     // Everyone in it is told, and the caller connects to each of them.

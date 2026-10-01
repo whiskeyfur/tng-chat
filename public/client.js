@@ -14,6 +14,8 @@ let token = null;   // proves who we are to the library's HTTP endpoints
 let stationView = null;
 let ops = null;     // the ops screens, when signed in at Operations
 let traffic = [];   // calls in progress on our data network (Communications)
+let lastNav = null; // ships on sensors and our own position, from the relay
+let navPanel = null; // Helm or Science navigation controls (nav.js)
 let ships = [];     // [{ name, ops, shields }]
 let relayName = 'Comm relay';   // the relay's name, from its hello
 let opsKeyRequired = true;      // whether the relay asks ops for an authorization code (from its hello)
@@ -80,6 +82,8 @@ function signedOut(reason) {
   me = null;
   token = null;
   stationView = null;
+  navPanel = null;
+  lastNav = null;
   ops = null;
   $('ops-view').hidden = true;
   $('transfer-form').hidden = true;
@@ -143,6 +147,10 @@ function showStation() {
     return b;
   }));
   stationView.setCrew(comms.users);
+  // Helm and Science fly and watch the ship on the sector map.
+  const navRoot = document.querySelector('[data-helm], [data-sensors]');
+  navPanel = navRoot ? createNavPanel(navRoot, { mode: navRoot.hasAttribute('data-helm') ? 'helm' : 'science', send }) : null;
+  if (lastNav) { navPanel?.update(lastNav); stationView.setNav(lastNav.own); }
   renderShipState();
   fillReassign();
   renderTraffic();
@@ -235,6 +243,7 @@ function renderShipState() {
 // Ops screens instead of station displays.
 function showOps() {
   stationView = null;
+  navPanel = null;
   $('station-view').replaceChildren();
   $('sections').replaceChildren();
   setHeader('OPS', `${me.name} · ${me.ship}`, 'Operations');
@@ -260,6 +269,7 @@ async function onMessage(msg) {
   if (msg.type === 'users') queueMicrotask(() => ops?.render()); // transfer targets
   if (ops?.handle(msg)) return;
   if (await bc.handle(msg)) return;
+  if (msg.type === 'notice' && /^(Helm|Sensors|Science|Course plotted|No ship's computer is flying)/.test(msg.text)) navPanel?.status(msg.text);
   if (msg.type === 'notice' && msg.text.startsWith('Transporter:')) {
     const st = document.getElementById('beam-status');
     if (st) st.textContent = msg.text;
@@ -316,6 +326,18 @@ async function onMessage(msg) {
     case 'traffic':
       traffic = msg.calls;
       renderTraffic();
+      break;
+    case 'nav':
+      lastNav = msg;
+      navPanel?.update(msg);
+      stationView?.setNav(msg.own);
+      break;
+    case 'course-plotted':
+      log(`${msg.by.name} plotted a course to ${msg.label}`);
+      navPanel?.plotted(msg);
+      break;
+    case 'scan-result':
+      navPanel?.scanned(msg);
       break;
     case 'hello': {
       opsKeyRequired = msg.opsKey !== false; // older relays don't say: show it
@@ -411,6 +433,7 @@ connect();
 // Exposed for the headless test.
 window.__comms = comms;
 window.__broadcast = bc;
+window.__nav = { get last() { return lastNav; } };
 window.__operator = new Proxy({}, { get: (_, k) => ops?.[k] });
 window.__voice = Object.create(comms.voice, {
   myName: { get: () => me?.name },

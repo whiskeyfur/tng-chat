@@ -92,6 +92,26 @@
       .ops-roster .lcars-button { min-height: 32px; padding: 0 12px; font-size: 14px; }
     }
 
+    /* Navigation (nav.js): sector map plus Helm / Science controls */
+    [data-helm], [data-sensors] { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    .nav-panel { display: flex; gap: 20px; flex: 1 1 auto; min-height: 0; }
+    .nav-map { position: relative; flex: 1 1 auto; min-height: 220px; min-width: 0; border-radius: 12px; overflow: hidden; cursor: crosshair; }
+    .nav-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .nav-side { flex: 0 0 360px; display: flex; flex-direction: column; gap: 12px; overflow: auto; text-transform: uppercase; }
+    .nav-readout { margin: 0; display: flex; flex-direction: column; gap: 4px; color: var(--lcars-gold); font-size: 19px; }
+    .nav-controls { display: flex; flex-direction: column; gap: 10px; }
+    .nav-plotted { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0 6px 12px; border-left: 6px solid var(--lcars-violet); color: var(--lcars-violet); }
+    .nav-contacts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+    .nav-contacts li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: auto auto; column-gap: 6px; align-items: center; padding: 4px 0; border-bottom: 2px solid #1a1a1a; }
+    .nav-contacts li.selected .nav-contact-name { color: #fff; }
+    .nav-contact-name { color: var(--lcars-gold); font-size: 18px; }
+    .nav-contact-info { grid-row: 2; color: var(--lcars-tan); font-size: 13px; }
+    .nav-contacts .lcars-button { grid-row: 1 / 3; min-height: 32px; font-size: 13px; padding: 0 12px; }
+    .nav-contacts .empty { display: block; color: var(--lcars-tan); border: 0; }
+    .nav-scan-list { list-style: none; margin: 0; padding: 0; }
+    .nav-scan-list li { display: flex; justify-content: space-between; gap: 10px; border-bottom: 2px dotted #333; color: var(--lcars-tan); }
+    .nav-scan-list b { color: var(--lcars-sky); font-weight: 400; text-align: right; }
+    @media (max-width: 900px) { .nav-panel { flex-direction: column; } .nav-side { flex: 0 0 auto; } }
     .st-depts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px 20px; text-transform: uppercase; }
     .st-depts li { display: flex; align-items: center; gap: 10px; }
     .st-dept-label { flex: 0 0 150px; padding: 3px 12px; border-radius: 999px 0 0 999px; color: #000; text-align: right; background: var(--lcars-red); }
@@ -342,6 +362,7 @@
   <script src="radio.js"></script>
   <script src="comms.js"></script>
   <script src="stations.js"></script>
+  <script src="nav.js"></script>
   <script src="ops.js"></script>
   <script src="client.js"></script>
 </body>

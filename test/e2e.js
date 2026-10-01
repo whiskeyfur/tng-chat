@@ -16,9 +16,11 @@ process.env.PORT = process.env.PORT || '8099';
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-test-'));
 const computers = new Set();
 // Start a ship's computer (tools/shipcore.js) for some ships, with its own folder.
+// Test ships start close together (within transporter range) unless they fly off.
+const START = { Enterprise: '500,500', Defiant: '510,500', "K'Vatch": '505,505', Voyager: '520,520' };
 function startComputer(folder, ...ships) {
   const proc = spawn(process.execPath, [path.join(__dirname, '..', 'tools', 'shipcore.js'),
-    '--relay', `ws://localhost:${process.env.PORT}`, '--data', path.join(DATA_DIR, folder), ...ships], { stdio: ['ignore', 'pipe', 'pipe'] });
+    '--relay', `ws://localhost:${process.env.PORT}`, '--data', path.join(DATA_DIR, folder), '--position', START[ships[0]] || '500,500', ...ships], { stdio: ['ignore', 'pipe', 'pipe'] });
   proc.stdout.on('data', (d) => process.stdout.write(String(d).replace(/^(?=.)/gm, `  [computer ${folder}] `)));
   proc.stderr.on('data', (d) => process.stdout.write(String(d).replace(/^(?=.)/gm, `  [computer ${folder} ERR] `)));
   computers.add(proc);
@@ -820,6 +822,53 @@ const audioBytes = (page) => page.evaluate(async () => {
     await uhura2.click('#radio-off');
     await bob.waitForFunction(() => !window.__broadcast.shipRadio);
     step("ship's radio: Communications put a station on every console in the fleet, then switched it off");
+
+    // Navigation: Science scans and plots; Helm flies. Distance matters.
+    const WebSocket = require('ws');
+    const sulu = new WebSocket(`ws://localhost:${process.env.PORT}`);
+    const suluMsgs = [];
+    sulu.on('message', (m) => { try { suluMsgs.push(JSON.parse(m)); } catch {} });
+    await new Promise((r) => sulu.on('open', r));
+    sulu.send(JSON.stringify({ type: 'register', name: 'sulu', ship: 'Enterprise', station: 'Helm' }));
+    const helm = (order) => sulu.send(JSON.stringify({ type: 'helm', ...order }));
+    // A transporter chief, beaming themself, to check transporter range.
+    const rand = new WebSocket(`ws://localhost:${process.env.PORT}`);
+    const randMsgs = [];
+    rand.on('message', (m) => { try { randMsgs.push(JSON.parse(m)); } catch {} });
+    await new Promise((r) => rand.on('open', r));
+    rand.send(JSON.stringify({ type: 'register', name: 'rand', ship: 'Enterprise', station: 'Transporter' }));
+    const beamSelf = () => rand.send(JSON.stringify({ type: 'beam', who: id('rand'), ship: 'Defiant' }));
+    const spock = await openAs(browser, 'spock', 'spock', 'Enterprise', 'Science');
+    await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
+    await spock.click('.nav-contacts li[data-ship="Defiant"] button:has-text("Scan")');
+    await spock.waitForSelector('.nav-scan:has-text("Scan: the Defiant")');
+    assert.match(await spock.textContent('.nav-scan'), /Distance\s*10 units \(transporter range\)/);
+    assert.match(await spock.textContent('.nav-scan'), /Ops\s*On duty/);
+    await spock.click('.nav-contacts li[data-ship="Defiant"] button:has-text("Plot course")');
+    await waitFor(() => suluMsgs.some((m) => m.type === 'course-plotted' && m.label === 'the Defiant'));
+    step('Science scanned the Defiant (distance, ops, life signs) and plotted a course for Helm');
+
+    // Helm takes the Enterprise out of subspace range: the data link drops,
+    // and the Defiant is no longer in range to hail.
+    helm({ dest: { x: 950, y: 950 }, warp: 9 });
+    await op.waitForFunction(() => !window.__operator.network.includes('Defiant'), null, { timeout: 20000 });
+    await op.waitForFunction(() => !window.__operator.ships.includes('Defiant'));
+    await op.waitForSelector('#ops-log li:has-text("out of subspace range")', { state: 'attached' });
+    assert.ok((await spock.evaluate(() => window.__nav.last.own.warp)) > 0 || (await spock.evaluate(() => window.__nav.last.own.x)) > 800);
+    beamSelf();
+    await waitFor(() => randMsgs.some((m) => m.type === 'notice' && /out of transporter range/.test(m.text)));
+    step('Helm flew the Enterprise out of subspace range at warp 9: the data link dropped, the Defiant left hailing range, and beaming over is out of range');
+
+    // And back: intercept the Defiant, arriving within transporter range.
+    helm({ dest: { ship: 'Defiant' }, warp: 9 });
+    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); const d = n?.ships.find((s) => s.name === 'Defiant'); return n?.own.warp === 0 && d && d.distance <= 20; }, 30000);
+    await op.waitForFunction(() => window.__operator.ships.includes('Defiant'));
+    beamSelf();
+    await waitFor(() => randMsgs.some((m) => m.type === 'registered' && m.ship === 'Defiant'));
+    step('Helm intercepted the Defiant: back in hailing range, and the transporter beamed across');
+    sulu.close();
+    rand.close();
+    await spock.close();
     for (const page of [nog, uhura2, dops]) await page.close();
 
     // Closing the tab mid-call ends the call for the other side.

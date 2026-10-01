@@ -328,16 +328,11 @@
         ['Security drill scheduled, deck 8'], [`${ship}: personnel evaluations due`], ['Shore leave rotation approved'], ['Away team readiness confirmed']])),
     ] }),
     Helm: () => {
-      const warp = drift(6, 5.8, 6.2, 0.05);
-      let speed = 6;
-      every(1000, () => { speed = warp(); });
       return { code: 'CON 03', color: 'orange', panels: [
-        panel('st-view', 'Forward view', 'orange', true, starfield(260, () => speed)),
-        panel('st-course', 'Course', 'gold', false,
-          live(readout('Heading', 'gold'), drift(127, 126, 128, 0.2), (v) => `${v.toFixed(1)} mark ${(4 + v / 100).toFixed(1)}`),
-          live(readout('Speed', 'sky'), () => speed, (v) => `Warp ${v.toFixed(2)}`),
-          live(readout('ETA', 'orange', 'h'), drift(14, 13, 15, 0.05), (v) => v.toFixed(1)),
-          live(readout('Navigation', 'blue'), () => 'Autopilot engaged')),
+        // Course and speed, on the sector map (nav.js, filled in by client.js).
+        panel('st-nav', 'Navigation', 'gold', true, h('div', { 'data-helm': '' })),
+        // The stars move at the ship's real speed.
+        panel('st-view', 'Forward view', 'orange', true, starfield(260, () => navSpeed)),
         panel('st-helm', 'Helm systems', 'blue', false,
           live(gauge('Impulse reserve', 'blue'), drift(0.95, 0.85, 1, 0.02)),
           live(gauge('Inertial dampers', 'sky'), drift(0.99, 0.95, 1, 0.01)),
@@ -397,7 +392,7 @@
       panel('st-cell', 'Cellular analysis', 'peach', false, spectrum(110, ['peach', 'lilac'], 24, 'Cellular analysis')),
     ] }),
     Science: () => ({ code: 'SCI 08', color: 'blue', panels: [
-      panel('st-scan', 'Long range sensors', 'blue', false, sweep(260, 'blue', 8, 'Long range sensor sweep')),
+      panel('st-sensors', 'Long range sensors', 'blue', true, h('div', { 'data-sensors': '' })),
       panel('st-spectrum', 'Spectral analysis', 'violet', false, spectrum(150, ['violet', 'blue', 'sky', 'lilac'], 40, 'Spectral analysis'),
         live(readout('Dominant band', 'sky', 'nm'), drift(486, 430, 660, 6), Math.round)),
       panel('st-readings', 'Anomaly readings', 'sky', true, h('div', { class: 'ops-readouts' },
@@ -437,6 +432,8 @@
   };
 
   window.STATION_NAMES = Object.keys(STATIONS);
+  // The ship's real speed (warp factor; impulse 0.25), for the forward view.
+  let navSpeed = 0;
   // The duty stations counted for department readiness.
   const DEPARTMENTS = ['Operations', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter'];
 
@@ -447,6 +444,7 @@
     const sections = def.panels.map((p) => ({ id: p.id, title: p.querySelector('.lcars-panel__title span').textContent, color: p.style.getPropertyValue('--accent') }));
     return {
       code: def.code,
+      setNav(own) { navSpeed = own ? (own.warp >= 1 ? own.warp : own.warp > 0 ? 0.6 : 0.05) : 0; },
       // Shield displays follow the ship's real shield state.
       setShields(up) {
         for (const el of container.querySelectorAll('[data-shields]')) el.toggleAttribute('data-down', !up);
