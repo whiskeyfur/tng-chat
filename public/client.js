@@ -563,14 +563,21 @@ function renderCombat() {
       }
       return tr;
     };
+    // A system with subsystems (the warp core, an impulse drive) has no tie
+    // cells of its own: status and controls only; its subsystems carry the ties.
+    const parentRow = (id, label, level, note, controls = []) => {
+      const tr = el('tr', { id }, el('th', { scope: 'row', className: `grid-indent grid-indent--${level}` }, el('span', { textContent: label }), ...controls, ...(note ? [el('small', { className: 'grid-note', textContent: note })] : [])));
+      for (const n of COLS) tr.append(el('td', { className: 'grid-na' }));
+      return tr;
+    };
     const small = (text, id, onclick, alert) => { const b = button(text, id, onclick, alert ? 'lcars-button--alert' : ''); b.classList.add('grid-mini'); return b; };
     const subRow = (name, level, note) => ties(`sub:${name}`, grid.subsystems[name].name, `sub:${name}`, { level, note: note ?? (grid.subOk[name] === false ? 'NO POWER' : '') });
     const driveRows = (d) => {
       const dr = grid.drives[d], src = d === 'port' ? 'impulsePort' : 'impulseStarboard';
       const state = dr.state === 'starting' ? `starting ${dr.start} of ${grid.impulseStartSecs} s` : dr.state;
       return [
-        ties(src, `${d[0].toUpperCase()}${d.slice(1)} impulse drive`, src, { level: 1, note: `${state}${dr.state === 'running' ? ` · ${grid.cells[src].EPS || 0} of ${grid.impulseOutput} to the EPS, the rest to thrust` : ''}`,
-          controls: [dr.state === 'off' ? small('Start', `drive-${d}-start`, () => send({ type: 'grid', impulse: { drive: d, on: true } })) : small('Stop', `drive-${d}-stop`, () => send({ type: 'grid', impulse: { drive: d, on: false } }), true)] }),
+        parentRow(`ties-${src}`, `${d[0].toUpperCase()}${d.slice(1)} impulse drive`, 1, `${state}${dr.state === 'running' ? ` · ${grid.cells[src].EPS || 0} of ${grid.impulseOutput} to the EPS, the rest to thrust` : ''}`,
+          [dr.state === 'off' ? small('Start', `drive-${d}-start`, () => send({ type: 'grid', impulse: { drive: d, on: true } })) : small('Stop', `drive-${d}-stop`, () => send({ type: 'grid', impulse: { drive: d, on: false } }), true)]),
         subRow(`${d}Pump`, 2, dr.state === 'starting' ? (grid.subOk[`${d}Pump`] ? 'powering startup' : 'NO POWER') : dr.state === 'running' ? 'self-powered' : ''),
         ties(`thrusters${d[0].toUpperCase()}${d.slice(1)}`, 'Maneuvering thrusters', `thrusters${d[0].toUpperCase()}${d.slice(1)}`, { level: 2, note: dr.thrusters ? 'tied in: the drive\'s unused thrust feeds the EPS' : 'untied: thrust only, nothing to the EPS' }),
       ];
@@ -594,8 +601,11 @@ function renderCombat() {
     // Engineering's own rows: life support, then every power source and its subsystems.
     const engineeringRows = () => [
       ...(grid.core !== 'ejected' ? [ties('containment', grid.antimatter ? 'Antimatter containment' : 'Containment (no antimatter: may be off)', 'containment', { level: 1, sign: false, note: grid.antimatter ? (grid.containmentOk ? 'holding' : 'FAILING') : '' })] : []),
-      ties('core', 'Warp core (M/ARC)', 'core', { level: 1, note: grid.core === 'starting' ? `starting ${grid.start} of ${grid.startSecs} s` : grid.core }),
-      ...(grid.core !== 'ejected' ? ['constriction', 'corePump', 'injector'].map((x) => subRow(x, 2)) : []),
+      parentRow('ties-core-parent', 'Warp core (M/ARC)', 1, grid.core === 'starting' ? `starting ${grid.start} of ${grid.startSecs} s` : grid.core),
+      ...(grid.core !== 'ejected' ? [
+        ties('core', 'Power transfer conduits', 'core', { level: 2, note: c.damage.conduits >= 50 ? 'DAMAGED: no output' : 'carry the core\'s output into the EPS' }),
+        ...['constriction', 'corePump', 'injector'].map((x) => subRow(x, 2)),
+      ] : []),
       ...driveRows('port'), ...driveRows('starboard'),
       ...tapRows(),
       ties('battery', `Batteries ${grid.battery.charge}%`, 'battery', { level: 1, note: grid.battery.charging ? 'charging' : grid.battery.supplying ? 'supplying' : '' }),
@@ -698,6 +708,7 @@ function renderCombat() {
         row('hull', 'Hull', `${c.hull}%`, c.hull < 100 ? 'Damaged: at 0% the ship is destroyed' : 'Intact'),
         ...POWER.map(([k, label]) => row(k, label, c.damage[k] ? `${c.damage[k]}% damaged` : 'Operational',
           own.power[k] < own.allocated[k] ? `gets ${own.power[k]}% of ${own.allocated[k]}% set` : `${own.power[k]}%`)),
+        row('conduits', 'Warp core power transfer conduits', c.damage.conduits ? `${c.damage.conduits}% damaged` : 'Operational', c.damage.conduits >= 50 ? 'FAILED: no core output' : ''),
         // Subsystems fail outright when badly damaged (50% or more).
         // The buses: a damaged bus carries less (its max scales with its condition).
         ...['A', 'B', 'C', 'EPS'].map((X) => row(`bus${X}`, X === 'EPS' ? 'EPS grid' : `Bus ${X}`, c.damage[`bus${X}`] ? `${c.damage[`bus${X}`]}% damaged` : 'Operational',

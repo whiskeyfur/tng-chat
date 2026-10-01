@@ -1275,7 +1275,7 @@ function flow(k) {
   const impulseNow = nv && nv.warp > 0 && nv.warp < 1 ? nv.warp : 0;
   const share = running.length ? Math.min(1, impulseNow / (0.125 * running.length)) : 0;
   const driveGen = (d) => (running.includes(d) && (e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length ? GRID.impulse * (1 - share) : 0);
-  const cap = { ship: partner && net < 0 ? Math.min(-net, partner.fed || 0) : 0, solar: GRID.solar, dock: e.docked ? GRID.dock : 0, impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), core: e.core === 'online' ? GRID.core : 0, battery: Math.min(GRID.batteryOut, e.battery.charge) };
+  const cap = { ship: partner && net < 0 ? Math.min(-net, partner.fed || 0) : 0, solar: GRID.solar, dock: e.docked ? GRID.dock : 0, impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), core: e.core === 'online' && (c.damage.conduits || 0) < SUB_FAIL_DAMAGE ? GRID.core : 0, battery: Math.min(GRID.batteryOut, e.battery.charge) };
   // A source tied to several buses shares its output evenly between them.
   const srcs = SOURCES.map((name) => {
     const t = e.ties[name], full = t.length ? cap[name] : 0;
@@ -1503,7 +1503,7 @@ function gridCommand(ws, msg) {
   if (ws.station !== 'Engineering') return send(ws, { type: 'notice', text: 'Only Engineering runs the power grid' });
   if (sealed(key, 'Engineering')) return note('the console is sealed by a Security force field');
   const said = [];
-  const NAME = { thrustersPort: 'port maneuvering thrusters', thrustersStarboard: 'starboard maneuvering thrusters', crosslink: 'bus crosslink', solar: 'solar', dock: 'dock power', ship: 'docked-ship power', core: 'warp core', battery: 'batteries', containment: 'antimatter containment', impulsePort: 'port impulse drive', impulseStarboard: 'starboard impulse drive' };
+  const NAME = { core: 'power transfer conduits', thrustersPort: 'port maneuvering thrusters', thrustersStarboard: 'starboard maneuvering thrusters', crosslink: 'bus crosslink', solar: 'solar', dock: 'dock power', ship: 'docked-ship power', core: 'warp core', battery: 'batteries', containment: 'antimatter containment', impulsePort: 'port impulse drive', impulseStarboard: 'starboard impulse drive' };
   const feeds = (list) => (list.length ? list.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(' + ') : 'off');
   if (msg.eject) {
     if (e.core === 'ejected') return note('the warp core is already gone');
@@ -1549,7 +1549,7 @@ function gridCommand(ws, msg) {
     said.push(`EPS tap to Bus ${X}: ${e.taps[X] ? `up to ${e.taps[X]}` : 'closed'}`);
   }
   for (const [k, v] of Object.entries(msg.ties && typeof msg.ties === 'object' ? msg.ties : {})) {
-    if (!(k in e.ties) || !Array.isArray(v)) continue;
+    if (!(k in e.ties) || !Array.isArray(v) || k === 'impulsePort' || k === 'impulseStarboard') continue; // a drive feeds the EPS through its thrusters' tie
     const allowed = tieNodes(k);
     if (v.some((n) => !allowed.includes(n))) return note(`${NAME[k] || k.split(':')[1]} can only be tied to ${feeds(allowed)}`);
     const list = NODES.filter((n) => v.includes(n));
@@ -1778,9 +1778,9 @@ const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
 const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', lifeSupport: 'life support', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
   corePump: "warp core's deuterium pump", injector: 'antimatter injector', portPump: "port impulse drive's deuterium pump", starboardPump: "starboard impulse drive's deuterium pump",
-  rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
+  conduits: 'power transfer conduits', rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
 // What a hit can damage: the systems, and the subsystems that fail when badly damaged.
-const DAMAGEABLE = [...SYSTEMS, 'corePump', 'injector', 'portPump', 'starboardPump', 'rf', 'radio', 'subspace', 'busA', 'busB', 'busC', 'busEPS'];
+const DAMAGEABLE = [...SYSTEMS, 'conduits', 'corePump', 'injector', 'portPump', 'starboardPump', 'rf', 'radio', 'subspace', 'busA', 'busB', 'busC', 'busEPS'];
 const combat = new Map(); // ship key -> { hull, shield, damage, torpedoes, repair, lock, armed, phaserCharge, torpedoAt, restockAt, hitAt, hitBy, dirty }
 
 function freshCombat(saved) {
