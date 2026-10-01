@@ -14,7 +14,6 @@ const { chromium } = require('playwright');
 process.env.PORT = process.env.PORT || '8099';
 // Ship's computers keep their libraries in a scratch folder for the test.
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-test-'));
-process.env.STATE_FILE = path.join(DATA_DIR, 'relay-state.json'); // remembered ship names
 const computers = new Set();
 // Start a ship's computer (tools/shipcore.js) for some ships, with its own folder.
 function startComputer(folder, ...ships) {
@@ -68,7 +67,7 @@ async function openOps(browser, ship, tag, name = 'obrien') {
   await page.goto(URL);
   await page.fill('#name', name);
   await page.selectOption('#station', 'Operations');
-  await page.fill('#ops-ship', ship);
+  await page.selectOption('#ship', ship); // only ships with a ship's computer are offered
   await page.click('#register-form button');
   await page.waitForSelector('[data-screen="status"]:not([hidden])');
   return page;
@@ -104,16 +103,25 @@ const audioBytes = (page) => page.evaluate(async () => {
   });
   let ok = false;
   try {
-    // No ops on duty anywhere: no ships to report aboard.
+    // No ship's computers yet: no ships at all, not even for ops.
     const early = await (await browser.newContext()).newPage();
     await early.goto(URL);
-    await early.waitForSelector('#ship option:has-text("no ships with ops on duty")', { state: 'attached' });
+    await early.waitForSelector('#ship option:has-text("No ships")', { state: 'attached' });
     // The station picker comes from the relay and includes every station.
     await early.waitForSelector('#station option[value="Transporter"]', { state: 'attached' });
     assert.equal(await early.locator('#station option:not([disabled])').count(), 12); // 11 + Operations
     assert.equal(await early.isDisabled('#register-form button'), true);
+    await early.selectOption('#station', 'Operations');
+    assert.equal(await early.isDisabled('#register-form button'), true, 'ops could take a ship with no computer');
+    step("without a ship's computer there is no ship, not even for ops");
+
+    // Ship's computers bring the ships into existence.
+    let coreA = startComputer('a', 'Enterprise');
+    startComputer('d', 'Defiant');
+    startComputer('k', "K'Vatch");
+    for (const ship of ['Enterprise', 'Defiant', "K'Vatch"]) await early.waitForSelector(`#ship option[value="${ship}"]`, { state: 'attached' });
     await early.close();
-    step('without ops on duty there is no ship to report aboard');
+    step("ship's computers for the Enterprise, Defiant and K'Vatch put them in the ship list");
 
     const op = await openOps(browser, 'Enterprise', 'enterprise ops');
     const alice = await openAs(browser, 'alice', 'alice');
@@ -490,7 +498,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.click('#link-form button');
     // The data network map: a pending request is a dashed line, then solid.
     await kops.waitForSelector('#net-map line[stroke-dasharray="10 8"]', { state: 'attached' });
-    assert.equal(await kops.locator('#net-map .net-node').count(), 2);
+    assert.equal(await kops.locator('#net-map .net-node').count(), 3); // Enterprise, K'Vatch and the Defiant (kept alive by its computer)
     await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await op.waitForFunction(() => window.__operator.network.includes("K'Vatch"));
     await op.waitForFunction(() => window.__operator.graph.links.some((l) => l.includes('Enterprise') && l.includes("K'Vatch")));
@@ -507,19 +515,22 @@ const audioBytes = (page) => page.evaluate(async () => {
     await kor.waitForFunction(() => window.__voice.state === 'idle');
     step('ops opened a data link (shown on the data network map); bob called kor on the K\'Vatch directly');
 
-    // Library: no ship's computer yet, so it's offline.
+    // Library: the Enterprise's computer goes offline, so its library is
+    // offline (crew already aboard stay on).
+    await stopComputer(coreA);
     await closeComms(alice);
     await screen(alice, 'library');
     await alice.waitForSelector('.lib-status:has-text("computer is offline")');
     assert.equal(await alice.isDisabled('.lib-upload button'), true);
-    step("library: with no ship's computer online, the library is offline");
+    assert.equal(await alice.evaluate(() => window.__voice.me?.ship), 'Enterprise');
+    assert.equal(await alice.evaluate(() => window.__voice.connectedTo(1)), true, 'the call with martok carries on');
+    step("library: with the ship's computer offline, the library is offline and crew stay aboard");
 
     // Two computers run the Enterprise, one the K'Vatch. Alice uploads; the
     // file goes through the relay (not stored there) to one Enterprise
     // computer and is copied to the other; the K'Vatch (linked) downloads it.
-    const coreA = startComputer('a', 'Enterprise');
+    coreA = startComputer('a', 'Enterprise');
     let coreB = startComputer('b', 'Enterprise');
-    startComputer('k', "K'Vatch");
     await alice.waitForFunction(() => !document.querySelector('.lib-upload button').disabled);
     await kor.waitForSelector('.lib-folder[data-ship="K\'Vatch"] .lib-folder-name:not(:has-text("offline"))', { state: 'attached' });
     const briefing = 'Mission briefing: rendezvous with the K\'Vatch at stardate 48632.4\n'.repeat(200);
@@ -586,22 +597,17 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.waitForFunction(() => !window.__operator.graph.ships.some((s) => s.name === 'Voyager'));
     step("a ship's computer kept the Voyager alive with nobody aboard, until it stopped");
 
-    // The relay remembers the Voyager and still offers it.
+    // No ship's computer, no ship: the Voyager is no longer offered, to ops either.
     const lobby3 = await (await browser.newContext()).newPage();
     await lobby3.goto(URL);
-    await lobby3.waitForSelector('#ship option[value="Voyager"]:has-text("no one aboard")', { state: 'attached' });
+    await lobby3.waitForSelector('#ship option[value="Enterprise"]', { state: 'attached' });
+    assert.equal(await lobby3.locator('#ship option[value="Voyager"]').count(), 0);
     // No OPERATOR_KEY on this relay, so no authorization code field.
     await lobby3.selectOption('#station', 'Operations');
     assert.equal(await lobby3.isVisible('#key'), false, 'code field shown with no key required');
-    assert.ok((await lobby3.$$eval('#known-ships option', (o) => o.map((x) => x.value))).includes('Voyager'));
-    await lobby3.selectOption('#station', 'Crew');
-    await lobby3.fill('#name', 'kim');
-    await lobby3.selectOption('#ship', 'Voyager');
-    await lobby3.click('#register-form button');
-    await lobby3.waitForFunction(() => window.__voice.me?.ship === 'Voyager');
+    assert.equal(await lobby3.locator('#ops-ship').count(), 0, 'ops still type a ship name');
     await lobby3.close();
-    assert.ok(JSON.parse(fs.readFileSync(process.env.STATE_FILE, 'utf8')).ships.includes('Voyager'));
-    step('the relay remembers past ships (saved to its state file) and offers them; kim reported aboard the empty Voyager');
+    step("once its computer stopped the Voyager isn't offered to anyone, ops included; no code field without a key");
 
     // Changing station aboard the same ship.
     await closeComms(carol);

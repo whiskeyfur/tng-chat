@@ -7,17 +7,18 @@ Starship comms in the browser, on LCARS consoles. A small Node server, the comm 
 ```sh
 npm install
 npm start                                  # the relay: http://localhost:8080  (PORT, RELAY_NAME to change)
-npm run shipcore -- Enterprise "K'Vatch"   # a ship's computer for one or more ships (optional, see below)
+npm run shipcore -- Enterprise "K'Vatch"   # a ship's computer: no ship's computer, no ship
 ```
 
 Everyone uses the same page, http://localhost:8080:
 
-1. **Start an ops station** for each ship: enter your name, pick **Operations** as the station, and type the ship's name (a new name creates the ship). A ship comes into existence when its ops station signs on.
-2. **Report aboard:** enter a name, pick a ship from the list, pick a station (Captain, First Officer, Helm, Tactical, Security, Engineering, Medical, Science, Communications, Transporter, Crew). Names only need to be unique within a ship.
+1. **Start a ship's computer** for each ship (above). A ship exists only while a ship's computer runs it; the ship list on the sign-in screen shows exactly those ships, for everyone, ops included.
+2. **Take the ops station:** enter your name, pick the ship, pick **Operations** as the station.
+3. **Report aboard:** enter a name, pick a ship from the list, pick a station (Captain, First Officer, Helm, Tactical, Security, Engineering, Medical, Science, Communications, Transporter, Crew). Names only need to be unique within a ship.
 
 `operator.html` still works as a link to the Operations sign-in.
 
-The relay remembers the names of every ship it has seen in `relay-state.json` (set `STATE_FILE` to move it, or to an empty string to keep them in memory only), and offers them all at sign-in even when nobody is aboard: ships without ops show "(ops offline)", empty ones "(no one aboard)". It stores nothing else on disk; libraries live on ship's computers (see below). `MAX_UPLOAD_MB` changes the upload limit (default 200).
+The relay stores nothing on disk; ships and their libraries live on ship's computers (see below). Ships without ops on duty show "(ops offline)" in the list. If a ship's computer goes offline, the people already aboard stay on and keep their calls, but nobody new can sign in to (or be beamed to) that ship until a computer runs it again. `MAX_UPLOAD_MB` changes the upload limit (default 200).
 
 ### Hosting the pages elsewhere (GitHub Pages)
 
@@ -74,7 +75,7 @@ A **ship's computer** is a small Node program that signs on to the relay *as one
 node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] <ship> [ship...]
 ```
 
-- **Keeps ships alive:** while a ship's computer is connected, its ships exist in the ship list even with nobody aboard, so crew can report aboard any time. (Off-ship comms still need an ops station on duty.)
+- **Makes the ship:** no ship's computer, no ship. While one is connected, its ships are in the ship list (even with nobody aboard), so ops and crew can sign in any time; without one, nobody can. (Off-ship comms still need an ops station on duty.)
 - **Holds the library:** the **Library** screen (bottom of the left-hand menu) lists the files uploaded to your ship and, across data links, every library on your data network in its own ship folder. Uploads stream through the relay straight to one of the ship's computers, which stores them in `<data>/<ship>/` (default `./shipcore-data`); downloads stream back the same way. The relay never stores files. With no computer online for a ship, its library shows as offline.
 - **Work together:** run several computers for the same ship (on different machines, say) and they keep each other's libraries in sync through the relay: a new or changed file is copied to the others, the newest version wins, and deletions are remembered (`.index.json`), so a computer that was offline catches up without bringing deleted files back. One computer can also run several ships.
 - Anyone aboard can upload and download; ops can **delete** from their own ship's library. File names are cleaned up (no folders, control characters or leading dots; a taken name gets " (2)"). Uploads and downloads go over HTTP with a per-session token handed out at sign-in. With `OPERATOR_KEY` set, ship's computers need `--key` too.

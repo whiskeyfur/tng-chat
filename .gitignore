@@ -2,4 +2,3 @@ node_modules/
 data/
 shipcore-data/
 *.log
-relay-state.json

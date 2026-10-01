@@ -43,8 +43,6 @@ const PORT = process.env.PORT || 8080;
 const OPERATOR_KEY = process.env.OPERATOR_KEY || '';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const RELAY_NAME = process.env.RELAY_NAME || 'Subspace Relay Station 47';
-// Ship names the relay has seen, remembered across restarts (names only).
-const STATE_FILE = process.env.STATE_FILE ?? path.join(__dirname, 'relay-state.json');
 const MAX_UPLOAD = Number(process.env.MAX_UPLOAD_MB || 200) * 1024 * 1024;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, ...
@@ -109,26 +107,8 @@ function send(ws, msg) {
 
 function registerShip(name) {
   const key = shipKey(name);
-  if (!ships.has(key)) { ships.set(key, name); saveState(); }
+  if (!ships.has(key)) ships.set(key, name);
   return key;
-}
-
-// Remember every ship ever seen, so it's offered even when nobody's aboard.
-function loadState() {
-  if (!STATE_FILE) return;
-  try {
-    for (const name of JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')).ships || []) {
-      if (typeof name === 'string' && NAME_RE.test(name)) ships.set(shipKey(name), name);
-    }
-  } catch { /* first run */ }
-}
-let saveTimer = null;
-function saveState() {
-  if (!STATE_FILE || saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    fs.writeFile(STATE_FILE, JSON.stringify({ ships: [...ships.values()].sort() }, null, 2), (err) => { if (err) console.error('could not save relay state:', err.message); });
-  }, 200);
 }
 
 // --- broadcasts --------------------------------------------------------------
@@ -209,14 +189,17 @@ function networkGraph() {
   };
 }
 
-// Every ship the relay knows. `active`: someone (ops, crew or a ship's
-// computer) is there right now; the others are remembered from before.
+// Every ship in existence. No ship's computer, no ship: only ships with a
+// computer online are offered for sign-in (ops included) or as transporter
+// targets. People already aboard when its computer goes offline stay on, so
+// the ship is still listed (computer: false) until they leave.
 function shipList() {
   const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys()]);
-  return [...new Set([...ships.keys(), ...live])].map((k) => ({
-    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: cores.has(k), active: live.has(k),
+  return [...live].map((k) => ({
+    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: cores.has(k), active: true,
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
+const hasComputer = (name) => cores.has(shipKey(name));
 // Everyone gets the ship list: the sign-in pull-down, transporter targets,
 // and shield status.
 function broadcastShips() {
@@ -741,7 +724,7 @@ async function libraryRequest(req, res, urlPath) {
 
 // --- ops station on and off duty --------------------------------------------------
 
-// Someone takes (or moves to) a ship's ops station. Several can be on duty;
+// Someone takes (or moves to) a ship's ops station (the ship needs a computer). Several can be on duty;
 // any of them can route hails, manage links and so on.
 function joinOps(ws) {
   ws.operator = true;
@@ -900,6 +883,7 @@ wss.on('connection', (ws) => {
       if (OPERATOR_KEY && msg.key !== OPERATOR_KEY) return send(ws, { type: 'operator-failed', reason: 'wrong operator key' });
       if (!NAME_RE.test(name)) return send(ws, { type: 'operator-failed', reason: 'enter your name (letters, digits, spaces, \' . -)' });
       if (!NAME_RE.test(ship)) return send(ws, { type: 'operator-failed', reason: 'enter your ship name (letters, digits, spaces, \' . -)' });
+      if (!hasComputer(ship)) return send(ws, { type: 'operator-failed', reason: `the ${ship} has no ship's computer online` });
       const id = userId(name, ship);
       if (users.has(id)) return send(ws, { type: 'operator-failed', reason: `${name} is already aboard the ${shipName(shipKey(ship))}` });
       ws.id = id;
@@ -935,7 +919,7 @@ wss.on('connection', (ws) => {
       if (!NAME_RE.test(name)) return send(ws, { type: 'register-failed', reason: 'name: use 1-32 letters, digits, spaces, \' . -' });
       if (!NAME_RE.test(ship)) return send(ws, { type: 'register-failed', reason: 'ship: use 1-32 letters, digits, spaces, \' . -' });
       if (!STATIONS.includes(msg.station)) return send(ws, { type: 'register-failed', reason: 'pick a station' });
-      if (!shipList().some((s) => s.name.toLowerCase() === ship.toLowerCase())) return send(ws, { type: 'register-failed', reason: `there is no ship called the ${ship}` });
+      if (!hasComputer(ship)) return send(ws, { type: 'register-failed', reason: `the ${ship} has no ship's computer online` });
       const id = userId(name, ship);
       if (users.has(id)) return send(ws, { type: 'register-failed', reason: `${name} is already aboard the ${shipName(shipKey(ship))}` });
       ws.id = id;
@@ -995,7 +979,7 @@ wss.on('connection', (ws) => {
       const toKey = shipKey(clean(msg.ship));
       if (!u || u.shipKey !== ws.shipKey) return fail('that person is not aboard');
       if (u.operator) return fail('the ops station cannot be beamed');
-      if (!shipList().some((sh) => shipKey(sh.name) === toKey)) return fail(`no ship called the ${clean(msg.ship)}`);
+      if (!cores.has(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
       if (toKey === ws.shipKey) return fail(`${u.name} is already aboard`);
       for (const k of [ws.shipKey, toKey]) if (shields.has(k)) return fail(`cannot beam through the shields of the ${shipName(k)}`);
       if (users.has(userId(u.name, shipName(toKey)))) return fail(`someone called ${u.name} is already aboard the ${shipName(toKey)}`);
@@ -1076,6 +1060,5 @@ wss.on('connection', (ws) => {
   send(ws, { type: 'ships', ships: shipList() });
 });
 
-loadState();
 server.listen(PORT, () => console.log(`${RELAY_NAME} on http://localhost:${PORT}`));
 module.exports = server;

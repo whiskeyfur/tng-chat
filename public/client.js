@@ -104,30 +104,27 @@ function setHeader(code, sub, title) {
   $('station-title').textContent = title;
 }
 
-// Every ship the relay knows: [{ name, ops, active }]. Ships without ops on
-// duty are marked; remembered ships with nobody there say so.
-function renderShips(ships) {
+// Ships you can sign in to, ops included: only those with a ship's computer
+// online (no ship's computer, no ship). Ships without ops on duty are marked.
+function renderShips(all) {
+  const ships = all.filter((s) => s.computer);
   const sel = $('ship');
-  const keep = sel.value || savedReg?.ship || '';
-  const placeholder = new Option(ships.length ? 'Ship' : 'No ships with ops on duty', '');
+  const keep = sel.value || urlParams.get('ship') || savedReg?.ship || '';
+  const placeholder = new Option(ships.length ? 'Ship' : "No ships: start a ship's computer", '');
   placeholder.disabled = true;
-  sel.replaceChildren(placeholder, ...ships.map((s) => new Option(s.ops ? s.name : s.active ? `${s.name} (ops offline)` : `${s.name} (no one aboard)`, s.name)));
-  // Suggestions when typing a ship for an ops station.
-  $('known-ships').replaceChildren(...ships.map((s) => new Option(s.name)));
+  sel.replaceChildren(placeholder, ...ships.map((s) => new Option(s.ops ? s.name : `${s.name} (ops offline)`, s.name)));
   const match = ships.find((s) => s.name.toLowerCase() === keep.toLowerCase());
   sel.value = match?.name || '';
   updateSignInMode();
 }
 
-// Operations takes the ship's ops station: any ship name (a new one creates
-// the ship), plus the authorization code if the relay asks for one.
+// Operations takes the ship's ops station, plus the authorization code if the
+// relay asks for one.
 const opsSelected = () => $('station').value === 'Operations';
 function updateSignInMode() {
   const isOps = opsSelected();
-  $('ship').hidden = isOps;
-  $('ops-ship').hidden = !isOps;
   $('key').hidden = !isOps || !opsKeyRequired;
-  $('register-form').querySelector('button').disabled = !isOps && $('ship').options.length <= 1;
+  $('register-form').querySelector('button').disabled = $('ship').options.length <= 1;
   $('register-form').querySelector('button').textContent = isOps ? 'Take ops station' : 'Report aboard';
 }
 
@@ -214,7 +211,7 @@ function renderShipState() {
   if (tr) {
     const keep = { who: tr.querySelector('#beam-who')?.value, ship: tr.querySelector('#beam-ship')?.value };
     const crew = comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station !== 'Operations');
-    const targets = ships.filter((s) => s.name.toLowerCase() !== me.ship.toLowerCase());
+    const targets = ships.filter((s) => s.computer && s.name.toLowerCase() !== me.ship.toLowerCase());
     const who = Object.assign(document.createElement('select'), { className: 'ops-select', id: 'beam-who', ariaLabel: 'who to beam' });
     who.append(...crew.map((u) => new Option(u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`, u.id)));
     const dest = Object.assign(document.createElement('select'), { className: 'ops-select', id: 'beam-ship', ariaLabel: 'destination ship' });
@@ -368,7 +365,6 @@ const urlParams = new URLSearchParams(location.search);
 let savedReg = null;
 try { savedReg = JSON.parse(localStorage.getItem('voice-reg') || 'null'); } catch {}
 $('name').value = urlParams.get('name') || savedReg?.name || '';
-$('ops-ship').value = urlParams.get('ship') || (savedReg?.station === 'Operations' ? savedReg.ship : '');
 $('station').onchange = updateSignInMode;
 
 function fillStations() {
@@ -389,12 +385,7 @@ $('register-form').onsubmit = (e) => {
   if (ws?.readyState !== WebSocket.OPEN) return;
   $('register-error').textContent = '';
   $('register-form').querySelector('button').disabled = true;
-  if (opsSelected() && !$('ops-ship').value.trim()) {
-    $('register-error').textContent = 'Enter the ship for this ops station';
-    $('register-form').querySelector('button').disabled = false;
-    return;
-  }
-  if (opsSelected()) send({ type: 'operator', name: $('name').value.trim(), ship: $('ops-ship').value.trim(), key: $('key').value });
+  if (opsSelected()) send({ type: 'operator', name: $('name').value.trim(), ship: $('ship').value, key: $('key').value });
   else send({ type: 'register', name: $('name').value.trim(), ship: $('ship').value, station: $('station').value });
 };
 $('new-station').onchange = () => { $('reassign-key').hidden = $('new-station').value !== 'Operations' || !opsKeyRequired; };
