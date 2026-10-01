@@ -161,6 +161,7 @@ button.lcars-nav-button { font: inherit; font-size: 17px; letter-spacing: inheri
 .lib-name { color: var(--lcars-gold); font-size: 20px; overflow-wrap: anywhere; }
 .lib-size, .lib-date { color: var(--lcars-tan); font-size: 15px; text-transform: uppercase; }
 .lib-file-row .lcars-button { min-height: 34px; }
+.lib-actions { display: flex; gap: 8px; }
 .lib-files .empty { color: var(--lcars-tan); text-transform: uppercase; padding: 4px 6px; }
 @media (max-width: 700px) {
   .lib-file-row { grid-template-columns: minmax(0, 1fr) auto; }

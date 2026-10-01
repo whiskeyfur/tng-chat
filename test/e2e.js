@@ -464,6 +464,19 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(status, 403, 'K\'Vatch can still read the Enterprise library after the link closed');
     step('closing the data link takes the other ship out of the directory and the library');
 
+    // Library delete: ops only, own ship only.
+    const del = (page) => page.evaluate(async () => (await fetch('/api/library/Enterprise/mission%20briefing.txt', { method: 'DELETE', headers: { 'X-Token': window.__voice.token } })).status);
+    assert.equal(await bob.locator('.lib-folder button:has-text("Delete")').count(), 0, 'crew see a Delete button');
+    assert.equal(await del(bob), 403, 'crew could delete a library file');
+    assert.equal(await del(kops), 403, "another ship's ops could delete an Enterprise file");
+    await closeComms(op);
+    await screen(op, 'library');
+    op.once('dialog', (d) => d.accept());
+    await op.click('.lib-folder[data-ship="Enterprise"] li:has-text("mission briefing.txt") button:has-text("Delete")');
+    await bob.waitForFunction(() => !document.querySelector('.lib-folder li.lib-file-row'));
+    assert.equal(fs.existsSync(path.join(DATA_DIR, 'Enterprise', 'mission briefing.txt')), false);
+    step('library: only ops can delete, and only from their own ship');
+
     // Changing station aboard the same ship.
     await closeComms(carol);
     await screen(carol, 'reassign');
@@ -514,6 +527,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     // The K'Vatch's ops station drops out mid-call: alice and martok carry on,
     // but no new hail to the K'Vatch can start.
     // Re-open the link so we can check it drops with the K'Vatch's ops.
+    await screen(op, 'link');
+    await screen(kops, 'link');
     await op.click('#link-form button');
     await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await bob.waitForSelector('#users li:has-text("kor")', { state: 'attached' });

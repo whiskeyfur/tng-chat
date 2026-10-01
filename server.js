@@ -59,7 +59,7 @@ const server = http.createServer((req, res) => {
     // the X-Token header (no cookies), so any origin may call.
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'X-Token, X-Filename, Content-Type');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
     if (req.method === 'OPTIONS') { res.writeHead(204).end(); return; }
     libraryRequest(req, res, urlPath).catch((err) => {
@@ -464,8 +464,9 @@ function uniqueName(dir, name) {
   }
 }
 
-// POST /api/library            upload to your own ship (X-Token, X-Filename)
-// GET  /api/library/<ship>/<f> download, from any ship on your data network
+// POST   /api/library            upload to your own ship (X-Token, X-Filename)
+// GET    /api/library/<ship>/<f> download, from any ship on your data network
+// DELETE /api/library/<ship>/<f> ops only, own ship only
 async function libraryRequest(req, res, urlPath) {
   const ws = tokens.get(req.headers['x-token']);
   if (!ws?.id) return res.writeHead(401).end('Sign in first');
@@ -498,10 +499,24 @@ async function libraryRequest(req, res, urlPath) {
     return;
   }
 
-  const m = req.method === 'GET' && urlPath.match(/^\/api\/library\/([^/]+)\/([^/]+)$/);
+  const m = (req.method === 'GET' || req.method === 'DELETE') && urlPath.match(/^\/api\/library\/([^/]+)\/([^/]+)$/);
   if (!m) return res.writeHead(404).end('Not found');
   let key, name;
   try { key = shipKey(decodeURIComponent(m[1])); name = safeName(decodeURIComponent(m[2])); } catch { return res.writeHead(400).end('Bad request'); }
+
+  if (req.method === 'DELETE') {
+    if (!ws.operator) return res.writeHead(403).end('Only ops can delete library files');
+    if (key !== ws.shipKey) return res.writeHead(403).end("Ops can only delete from their own ship's library");
+    const dir = libraryDir(key, false);
+    const file = dir && name && path.join(dir, name);
+    if (!file || path.dirname(file) !== dir || !fs.existsSync(file)) return res.writeHead(404).end('No such file');
+    fs.rmSync(file);
+    console.log(`${ws.name} deleted ${name} from the ${ws.ship} library`);
+    opLog(ws.shipKey, `${ws.name} deleted ${name} from the library`);
+    res.writeHead(204).end();
+    for (const k of network(ws.shipKey)) for (const u of crewOf(k)) sendLibrary(u);
+    return;
+  }
   if (!sameNetwork(ws.shipKey, key)) return res.writeHead(403).end('That library is not on your data network');
   const dir = libraryDir(key, false);
   const file = dir && name && path.join(dir, name);

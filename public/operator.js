@@ -34,7 +34,7 @@ const comms = createComms({
   onChange: () => render(),
 });
 const voice = comms.voice;
-const library = createLibrary($('library-view'), { token: () => token, base: relay.http, log: (text) => log(text) });
+const library = createLibrary($('library-view'), { token: () => token, base: relay.http, log: (text) => log(text), canDelete: (s) => s.own });
 
 function signIn(name, shipName, key) {
   setLink('connecting', 'Subspace link: connecting');
@@ -337,6 +337,7 @@ window.__comms = comms;
 window.__voice = Object.create(voice, {
   myName: { get: () => me?.name },
   me: { get: () => me },
+  token: { get: () => token },
 });
 window.__operator = {
   get roster() { return roster; },

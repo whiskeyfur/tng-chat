@@ -61,7 +61,7 @@ Comms opens an LCARS modal, the same for every role, ops included:
 
 ## Library
 
-The **Library** screen, at the bottom of the left-hand menu on every console, is the ship's computer: the files uploaded to your ship, stored on the server as `data/<ship>/<file>`. Anyone aboard can upload files to their own ship's library and download any file listed. Across data links, every library on your data network is listed too, each in its own ship folder (your ship first). Closing the link takes the other ship's folder away, and its files can no longer be downloaded.
+The **Library** screen, at the bottom of the left-hand menu on every console, is the ship's computer: the files uploaded to your ship, stored on the server as `data/<ship>/<file>`. Anyone aboard can upload files to their own ship's library and download any file listed. Ops can **delete** files from their own ship's library (after a confirmation); crew can't, and nobody can delete from another ship's library. Across data links, every library on your data network is listed too, each in its own ship folder (your ship first). Closing the link takes the other ship's folder away, and its files can no longer be downloaded.
 
 File names are cleaned up: folders, control characters and leading dots are removed, and a name that's already taken gets " (2)". Uploads and downloads go over HTTP with a per-session token handed out at sign-in.
 
@@ -100,6 +100,7 @@ Starts the server and drives headless Chromium pages with a fake microphone thro
 - **Data links:** a call across a data link, closing the link, and the link dropping with ops.
 - **Stations, transporter, shields:** changing station; shields up blocking the transporter; shields down and a crew member beamed to the K'Vatch.
 - **Hosting elsewhere:** the library endpoints answer cross-origin preflight requests.
+- **Library delete:** crew and other ships' ops are refused; ops delete from their own ship and the file is gone from disk and from everyone's library.
 - **Library:** an upload lands in `data/Enterprise/`, a shipmate sees it, a K'Vatch crew member downloads it over the data link, and access ends when the link closes.
 - **Without ops:** the call in progress carries on and shipmates can still call each other.
 
@@ -110,7 +111,7 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 - `server.js` keeps everyone online by id (`name@ship`, lowercased), with their ship and station. It sends each person the crew list for their data network (just their ship when unlinked), relays call-control and signal messages to a user id, and adds `from` and `fromInfo`. A `call` to someone off your network is refused with `unavailable`. Each ship's ops consoles get a roster of that ship's crew, the ships in range, their links and network, and the open hails and link requests. Hails and link requests live on the server until answered or until a party goes away.
 - `public/relay.js` finds the comm relay (same server by default, or `config.js`, `?relay=`, or the sign-in field).
 - `public/voice.js` is the call engine and call panel. `public/comms.js` builds the Comms modal around it: the directory, plus optional extras like Transfer. `public/library.js` is the Library screen and `public/screens.js` switches screens. All of these are shared by the crew console (`public/client.js`, with the station displays in `public/stations.js`) and the ops console (`public/operator.js`). Shared console styles are in `public/console.css`.
-- The library lives on disk. `GET /api/library/<ship>/<file>` downloads from any ship on your data network, and `POST /api/library` (headers `X-Token` and `X-Filename`, the file as the body) uploads to your own ship. The `X-Token` comes from `registered` or `operator-ok`. After every change, the server sends `{type:"library", ships:[{name, own, files:[{name, size, modified}]}]}` to everyone on the data network.
+- The library lives on disk. `GET /api/library/<ship>/<file>` downloads from any ship on your data network, and `POST /api/library` (headers `X-Token` and `X-Filename`, the file as the body) uploads to your own ship, and `DELETE /api/library/<ship>/<file>` deletes (ops only, own ship only). The `X-Token` comes from `registered` or `operator-ok`. After every change, the server sends `{type:"library", ships:[{name, own, files:[{name, size, modified}]}]}` to everyone on the data network.
 - A call can have several people: one `RTCPeerConnection` per other participant, a full mesh, all sharing one microphone stream. For a normal call, the caller sends `call` and the callee sees Accept/Decline; a callee already in a call auto-declines with `busy`. On accept, the callee creates its connection and sends `accept`, and the caller creates its connection and sends the SDP offer. When anyone leaves, the server sends `gone` to everyone, so calls end across ships.
 - Every call-control and signal message carries a call id (`cid`). A client ignores messages whose id doesn't match its current call, so leftovers from a replaced call can't disturb the new one.
 - Data channels are pre-negotiated (`negotiated: true`, ids 0 and 1). `chat` carries text. `files` carries a JSON header `{name, size, mime}` followed by binary chunks, waits on `bufferedAmount`, and queues files per person.
@@ -156,5 +157,5 @@ Operators also send and receive every crew message: they're crew too. The server
 - Only Google's public STUN server is configured, no TURN. Peers behind symmetric NAT or strict firewalls will show `failed`. Add a TURN server (for example coturn) to `ICE_SERVERS` in `public/voice.js` to fix that.
 - Crew place one-to-one calls; only operators make group calls (patch in). Group calls are a full mesh, so each person uploads their audio once per other participant. That's comfortable up to roughly 5 to 8 people. Beyond that, an SFU such as Pion or mediasoup is the next step.
 - Station telemetry is simulated for show; only the duty rosters reflect real crew.
-- Library files can't be renamed or deleted from the consoles (remove them from `data/<ship>/` on the server), and anyone aboard can read and add to their ship's library.
+- Library files can't be renamed from the consoles, and anyone aboard can read and add to their ship's library.
 - No auth: anyone can register any free name on any ship, and with no OPERATOR_KEY anyone can take any ship's ops station. A ship is just a name: it exists while its ops station or any of its crew is online. State is in memory only.
