@@ -255,7 +255,9 @@ function renderShipState() {
   const targets = ships.filter((s) => s.computer && s.name.toLowerCase() !== me.ship.toLowerCase());
   const range = lastNav?.ranges?.transporter;
   const strength = lastNav?.own?.combat?.shield;
-  const sig = JSON.stringify([up, p?.shields, p?.transporter, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields]), strength]);
+  // Where each target is, for the transporter's reach (updates as ships move).
+  const where = (name) => lastNav?.ships?.find((x) => x.name === name)?.distance ?? lastNav?.bases?.find((b) => b.name === name)?.distance;
+  const sig = JSON.stringify([up, p?.shields, p?.transporter, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields, Math.round(where(t.name) ?? -1)]), strength]);
   if (sig === shipStateSig) return;
   shipStateSig = sig;
   stationView.setShields(up);
@@ -279,14 +281,14 @@ function renderShipState() {
   }
 
   const tr = document.querySelector('[data-transporter]');
-  if (tr) renderTransporter(tr, { crew, targets, up, p, range });
+  if (tr) renderTransporter(tr, { crew, targets, up, p, range, where });
 }
 
 // The transporter room: tap who to beam, which ship (this one too: site to
 // site) and which station they arrive at, then push all three energize
 // sliders to the top, as on the old Constitution-class consoles.
 const beamSel = { who: null, ship: null, station: null };
-function renderTransporter(tr, { crew, targets, up, p, range }) {
+function renderTransporter(tr, { crew, targets, up, p, range, where = () => undefined }) {
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   if (!tr.querySelector('.tr-sliders')) {
     const sliders = el('div', { className: 'tr-sliders', id: 'beam-sliders' }, ...[1, 2, 3].map((n) => {
@@ -306,19 +308,30 @@ function renderTransporter(tr, { crew, targets, up, p, range }) {
       el('p', { className: 'ops-hint', id: 'beam-range' }));
   }
   const ships = [{ name: me.ship, here: true }, ...targets];
+  // Only places within reach right now can be picked: in range, shields down.
+  const reach = (x) => {
+    if (x.here) return '';
+    const d = where(x.name);
+    if (d == null) return 'not on sensors';
+    if (range != null && d > range) return `out of range (${Math.round(d)} of ${Math.round(range)})`;
+    if (x.shields) return 'shields up';
+    if (up) return 'our shields up';
+    return '';
+  };
   if (!crew.some((u) => u.id === beamSel.who)) beamSel.who = crew[0]?.id || null;
-  if (!ships.some((x) => x.name === beamSel.ship)) beamSel.ship = targets[0]?.name || me.ship;
+  if (!ships.some((x) => x.name === beamSel.ship && !reach(x))) beamSel.ship = ships.find((x) => !reach(x))?.name || me.ship;
   const stations = ['Same station', ...STATION_NAMES.filter((n) => n !== 'Operations')];
   if (!stations.includes(beamSel.station)) beamSel.station = 'Same station';
-  const taps = (box, items, sel, set) => box.replaceChildren(...items.map(([value, text]) => {
-    const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: text });
+  const taps = (box, items, sel, set) => box.replaceChildren(...items.map(([value, text, why]) => {
+    const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: why ? `${text} · ${why}` : text });
     b.dataset.value = value;
+    if (why) { b.disabled = true; b.title = why; }
     b.setAttribute('aria-pressed', String(value === sel));
-    b.onclick = () => { set(value); renderTransporter(tr, { crew, targets, up, p, range }); };
+    b.onclick = () => { set(value); renderTransporter(tr, { crew, targets, up, p, range, where }); };
     return b;
   }));
   taps(tr.querySelector('#beam-who'), crew.map((u) => [u.id, u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`]), beamSel.who, (v) => { beamSel.who = v; });
-  taps(tr.querySelector('#beam-ship'), ships.map((x) => [x.name, x.here ? `The ${x.name} (site to site)` : `The ${x.name}${x.shields ? ' (shields up)' : ''}`]), beamSel.ship, (v) => { beamSel.ship = v; });
+  taps(tr.querySelector('#beam-ship'), ships.map((x) => [x.name, x.here ? `The ${x.name} (site to site)` : /^(Starbase|Deep Space) /.test(x.name) ? x.name : `The ${x.name}`, reach(x)]), beamSel.ship, (v) => { beamSel.ship = v; });
   taps(tr.querySelector('#beam-station'), stations.map((n) => [n, n]), beamSel.station, (v) => { beamSel.station = v; });
   const noPower = p && p.transporter <= 0;
   const blocked = noPower ? 'No power to the transporter: ask Engineering' : up && beamSel.ship !== me.ship ? `Shields are up aboard the ${me.ship}` : '';

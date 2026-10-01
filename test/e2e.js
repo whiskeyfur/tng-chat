@@ -642,11 +642,12 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.waitForSelector('#shield-state:has-text("Up")', { state: 'attached' });
     await screen(chief, 'st-transporter');
     await chief.click(`#beam-who button[data-value="${id('wes')}"]`);
-    await chief.click('#beam-ship button[data-value="K\'Vatch"]');
-    await energize(chief);
-    await chief.waitForSelector('#beam-status:has-text("cannot beam through the shields of the Enterprise")');
+    // Out of reach, the K'Vatch is listed but greyed out, with the reason.
+    await chief.waitForSelector('#beam-ship button[data-value="K\'Vatch"][disabled]:has-text("our shields up")');
+    assert.equal(await chief.isDisabled('#beam-ship button[data-value="Starbase 47"]'), true, 'a far starbase is out of reach');
+    assert.match(await chief.textContent('#beam-ship button[data-value="Starbase 47"]'), /out of range/);
     assert.equal(await wes.evaluate(() => window.__voice.me.ship), 'Enterprise');
-    step('shields up: the transporter cannot beam anyone off the ship');
+    step("shields up: the transporter's destinations off the ship are greyed out (our shields up; far ones out of range)");
 
     await carol.click('[data-shield-control] button');
     await chief.waitForFunction(() => !document.body.hasAttribute('data-shields-up'));
