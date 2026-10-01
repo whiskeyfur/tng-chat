@@ -137,7 +137,8 @@ function updateSignInMode() {
 function showStation() {
   stationView = renderStation($('station-view'), me.station, { ship: me.ship });
   setHeader(stationView.code, `${me.name} · ${me.ship}`, me.station);
-  document.querySelector('.lcars-elbow--top').style.setProperty('--elbow', `var(--lcars-${stationView.color})`);
+  // The top-left elbow and the header bar running from it share the station's colour.
+  document.querySelector('.lcars-header').style.setProperty('--elbow', `var(--lcars-${stationView.color})`);
   $('sections').replaceChildren(...stationView.sections.map((s) => {
     const b = document.createElement('button');
     b.type = 'button';
@@ -917,7 +918,7 @@ function showOps() {
   $('station-view').replaceChildren();
   $('sections').replaceChildren();
   setHeader('OPS', `${me.name} · ${me.ship}`, 'Operations');
-  document.querySelector('.lcars-elbow--top').style.removeProperty('--elbow');
+  document.querySelector('.lcars-header').style.removeProperty('--elbow');
   for (const t of document.querySelectorAll('.ops-tab')) t.hidden = false;
   $('reassign-tab').hidden = false;
   $('ops-view').hidden = false;

@@ -133,6 +133,8 @@
     .dc-list .lcars-button { min-height: 30px; font-size: 13px; }
     .dc-active { outline: 3px solid #fff; outline-offset: 2px; }
     @media (max-width: 700px) { .st-list.dc-list li.dc-row { grid-template-columns: 1fr 1fr; } }
+    /* The header bar segment left of the name matches the top-left elbow */
+    .lcars-header .lcars-bar__seg--a { background: var(--elbow, var(--lcars-orange)); }
     /* A console without power */
     .lcars-content { position: relative; }
     #console-dark { position: absolute; inset: 0; z-index: 5; background: rgba(0, 0, 0, 0.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-transform: uppercase; }
