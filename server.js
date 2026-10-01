@@ -701,10 +701,14 @@ function coreSignOff(ws) {
 
 // Ranges at full sensor power; sensor power scales all three (Engineering).
 const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
-const SYSTEMS = ['engines', 'shields', 'sensors', 'transporter', 'weapons', 'lifeSupport', 'replicators', 'recreation'];
+const SYSTEMS = ['engines', 'injectors', 'shields', 'sensors', 'transporter', 'weapons', 'lifeSupport', 'replicators', 'recreation'];
+// Each system's power setting is a limit, 0-150: past 100 (its rating) is
+// emergency overdrive, which slowly damages it, faster the further over it runs.
+const POWER_MAX = 150;
+const OVERDRIVE_DAMAGE = 0.02; // damage per second for each point drawn over 100
 const REACTOR = 450; // total power to share, in percent of one system at full
 const MIN_SHIELD_POWER = 20;
-const DEFAULT_POWER = { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 };
+const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
 // actually gets from the power grid (see "the power grid" below): damage caps
 // a system, unarmed weapons draw nothing, and a bus short of power browns out.
@@ -718,14 +722,16 @@ function powerOf(k) {
 // shows up. 450 units drawn or more: seen at full sensor range; power down to run quiet.
 const signatureOf = (k) => (isBase(k) ? 1 : Math.max(0.1, Math.min(1, flow(k).drawn / REACTOR)));
 function rangesOf(k) {
-  const f = Math.max(0, Math.min(100, powerOf(k).sensors)) / 100;
+  const f = Math.max(0, Math.min(POWER_MAX, powerOf(k).sensors)) / 100;
   return { comms: COMMS_RANGE * f, sensors: SENSOR_RANGE * f, transporter: TRANSPORTER_RANGE * f };
 }
 // Top speeds: warp (1-9) needs the warp core online and engine power; impulse
 // (below 1) comes from the running impulse drives, half impulse (0.125) each. maxWarp: the top of whichever the ship has.
 function speedLimits(k) {
   const e = eng.get(k);
-  const eng9 = powerOf(k).engines <= 0 ? 0 : Math.round((powerOf(k).engines / 100) * 9 * 10) / 10;
+  // Warp needs both the engines and their plasma injectors: the weaker sets the top speed.
+  const warpPower = Math.min(100, powerOf(k).engines, powerOf(k).injectors);
+  const eng9 = warpPower <= 0 ? 0 : Math.round((warpPower / 100) * 9 * 10) / 10;
   if (!e || isBase(k)) return { warp: eng9 >= 1 ? eng9 : 0, impulse: 0.25 };
   let warp = e.core === 'online' && eng9 >= 1 ? eng9 : 0;
   if (e.towing) warp = Math.min(warp, TRACTOR.maxWarp); // towing holds a ship back
@@ -806,7 +812,7 @@ function coreNav(c, key, nav) {
   const clean = { x: nav.x, y: nav.y, heading: Number(nav.heading) || 0, warp: Number(nav.warp) || 0, dest: nav.dest || null };
   if (ALERTS.includes(nav.alert)) clean.alert = nav.alert;
   if (nav.lockout) clean.lockout = true;
-  if (nav.power && typeof nav.power === 'object') clean.power = Object.fromEntries(SYSTEMS.map((s) => [s, Math.max(0, Math.min(100, Number(nav.power[s] ?? DEFAULT_POWER[s]) || 0))]));
+  if (nav.power && typeof nav.power === 'object') clean.power = Object.fromEntries(SYSTEMS.map((s) => [s, Math.max(0, Math.min(POWER_MAX, Number(nav.power[s] ?? DEFAULT_POWER[s]) || 0))]));
   // Hull, shields and damage: the relay runs combat, so it only takes the
   // computer's saved copy when it has none of its own.
   // A new ship (nothing saved) starts cold, docked at a starbase, unless its
@@ -916,7 +922,7 @@ function navCommand(ws, msg) {
     const core = primaryCore.get(key);
     if (!core) return note("Engineering: no ship's computer is running the ship");
     const p = allocOf(key);
-    for (const s of SYSTEMS) if (msg.power && Number.isFinite(msg.power[s])) p[s] = Math.max(0, Math.min(100, Math.round(msg.power[s])));
+    for (const s of SYSTEMS) if (msg.power && Number.isFinite(msg.power[s])) p[s] = Math.max(0, Math.min(POWER_MAX, Math.round(msg.power[s])));
     send(core, { type: 'core-power', ship: ws.ship, power: p });
     opLog(key, `Engineering (${ws.name}): power ${SYSTEMS.map((s) => `${s} ${p[s]}%`).join(', ')}`);
     return;
@@ -1107,15 +1113,17 @@ const SOURCE_NODES = { ship: AB, solar: AB, dock: AB, impulsePort: ['EPS'], impu
 // crosslink (the buses checked are one pool). EPS ties are one.
 const isMulti = (k) => k === 'crosslink' || ((['containment', 'ship', 'solar', 'dock', 'battery'].includes(k) || /^(console|system|sub):/.test(k)) && !tieNodes(k).includes('EPS'));
 const SHIP_FEED_MAX = 500; // what Engineering can offer a ship docked with us
-const SYSTEM_BUS = { lifeSupport: 'A', sensors: 'A', replicators: 'B', recreation: 'B', engines: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
+const SYSTEM_BUS = { lifeSupport: 'A', sensors: 'A', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
 const STATION_SYSTEMS = { Helm: ['engines'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors'], Engineering: ['lifeSupport'], Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
 const LOAD_NODES = {
   lifeSupport: AB, sensors: AB, replicators: AB, recreation: AB, // low power
   transporter: AB, tractor: AB,
-  engines: ['EPS'], shields: ['EPS'], weapons: ['EPS'], // high power: EPS only
+  engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], // high power: EPS only
 };
-const SYSTEM_PRIORITY = ['lifeSupport', 'sensors', 'shields', 'engines', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
+const SYSTEM_PRIORITY = ['lifeSupport', 'sensors', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
+// Systems shown under another system in the grid table (Helm > Engines > Plasma injectors).
+const SYSTEM_CHILDREN = { engines: ['injectors'] };
 // Subsystems: low-power loads (A or B) that their parent needs to work.
 const SUBSYSTEMS = {
   constriction: { parent: 'core', ties: ['A'], name: 'magnetic constriction' },
@@ -1254,7 +1262,8 @@ function flow(k) {
   if (cached && Date.now() - cached.at < 200) return cached.f;
   const e = engOf(k), c = combatOf(k), a = allocOf(k);
   const demand = {};
-  for (const s of SYSTEMS) demand[s] = s === 'weapons' && !c.armed ? 0 : Math.min(a[s], Math.max(0, 100 - c.damage[s]));
+  // Damage takes the same share off what a system can draw, overdrive included.
+  for (const s of SYSTEMS) demand[s] = s === 'weapons' && !c.armed ? 0 : Math.min(a[s], Math.max(0, (POWER_MAX * (100 - c.damage[s])) / 100));
   // A ship docked with us: each side offers power (feed); whoever offers more
   // sends the difference, drawn from (or, received, fed into) the docked-ship ties.
   const partner = e.dockedShip && engOf(e.dockedShip).dockedShip === k ? engOf(e.dockedShip) : null;
@@ -1480,7 +1489,7 @@ function gridView(k) {
     towing: e.towing ? shipName(e.towing) : null, towedBy: tower ? shipName(tower) : null,
     selfDestruct: e.selfDestruct ? { seconds: Math.max(0, Math.ceil((e.selfDestruct.at - Date.now()) / 1000)), by: e.selfDestruct.by } : null,
     buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: Math.round(b.need), have: Math.round(b.have), src: r(b.src), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
-    consoleOk: f.consoleOk, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, stationSystems: STATION_SYSTEMS, subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
+    consoleOk: f.consoleOk, systemChildren: SYSTEM_CHILDREN, powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, stationSystems: STATION_SYSTEMS, subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
     tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: BUS_MAX,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
   };
@@ -1767,7 +1776,7 @@ const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 50
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
-const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', lifeSupport: 'life support', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam',
+const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', lifeSupport: 'life support', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
   corePump: "warp core's deuterium pump", injector: 'antimatter injector', portPump: "port impulse drive's deuterium pump", starboardPump: "starboard impulse drive's deuterium pump",
   rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
 // What a hit can damage: the systems, and the subsystems that fail when badly damaged.
@@ -1972,6 +1981,12 @@ setInterval(() => {
       opLog(k, `warp core shut down: no power to its ${coreWhy()}`);
       tellStations(k, ['Engineering', 'Captain'], `Engineering: warp core shut down, no power to its ${coreWhy()}`);
     }
+    // Overdrive: a system drawing past its rating wears itself out.
+    for (const sys of SYSTEMS) if (f.delivered[sys] > 100) {
+      const was = c.damage[sys];
+      c.damage[sys] = Math.min(100, c.damage[sys] + (f.delivered[sys] - 100) * OVERDRIVE_DAMAGE);
+      if (Math.floor(was / 10) !== Math.floor(c.damage[sys] / 10)) tellStations(k, ['Engineering'], `Engineering: ${SYSTEM_NAMES[sys]} overdriven (${Math.round(f.delivered[sys])}%), damage ${Math.ceil(c.damage[sys])}%`);
+    }
     // Impulse drives: starting on bus power for their pumps, then self-sustaining.
     for (const d of DRIVES) {
       const dr = e.drives[d];
@@ -2030,7 +2045,7 @@ setInterval(() => {
     const p = powerOf(k);
     if (c.shield < 100 && p.shields > 0) c.shield = Math.min(100, c.shield + (2 * p.shields) / 100);
     const fast = e.docked ? REPAIR.docked : 1;
-    for (const s of DAMAGEABLE) if (c.damage[s] > 0) c.damage[s] = Math.max(0, c.damage[s] - (c.repair === s ? REPAIR.directed : REPAIR.auto) * fast);
+    for (const s of DAMAGEABLE) if (c.damage[s] > 0 && !(f.delivered[s] > 100)) c.damage[s] = Math.max(0, c.damage[s] - (c.repair === s ? REPAIR.directed : REPAIR.auto) * fast);
     if (c.hull < 100) c.hull = Math.min(100, c.hull + (c.repair === 'hull' ? REPAIR.hullDirected : REPAIR.hull) * fast);
     if (c.repair && (c.repair === 'hull' ? c.hull >= 100 : c.damage[c.repair] <= 0)) {
       tellStations(k, ['Engineering'], `Engineering: ${c.repair === 'hull' ? 'hull' : SYSTEM_NAMES[c.repair]} repaired`);

@@ -893,7 +893,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     const route = async (levels) => {
       for (const [k, v] of Object.entries(levels)) {
         // Light bar: press the segment for the level; 0 is the top lit segment pressed again.
-        const now = Number((await scotty.textContent(`[data-system="${k}"] + .pw-value`)).replace('%', ''));
+        const now = Number((await scotty.textContent(`[data-system="${k}"] + .pw-value`)).split('/').pop().replace('%', '')); // "in use/limit%"
         if (v === 0) { if (now) await scotty.click(`[data-system="${k}"] button[data-level="${Math.ceil(now / 10)}"]`); }
         else if (now !== v) await scotty.click(`[data-system="${k}"] button[data-level="${v / 10}"]`);
       }
@@ -901,8 +901,9 @@ const audioBytes = (page) => page.evaluate(async () => {
     };
     // The sliders set demand, shown per bus before it's routed.
     await scotty.click('[data-system="engines"] button[data-level="10"]');
-    assert.equal(await scotty.locator('[data-system="engines"] button[data-lit]').count(), 10);
-    assert.match(await scotty.textContent('.pw-total'), /EPS 160 .*not routed yet/);
+    assert.equal(await scotty.locator('[data-system="engines"] button[data-allowed]').count(), 10); // limit 100: ten of fifteen
+    assert.equal(await scotty.locator('[data-system="engines"] button[data-overdrive]').count(), 5);
+    assert.match(await scotty.textContent('.pw-total'), /EPS 240 .*not routed yet/);
     await scotty.click('#power-reset');
     // Sensors at 20%: every range drops to a fifth, so the transporter (4 units) can't reach.
     await route({ sensors: 20 });
@@ -916,6 +917,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     odell.send(JSON.stringify({ type: 'beam', who: id('odell'), ship: 'Defiant' }));
     await waitFor(() => odellMsgs.some((m) => m.type === 'notice' && /out of transporter range/.test(m.text) && /within 4/.test(m.text)));
     step('Engineering cut sensors to 20%: sensor, subspace and transporter range all fell to a fifth, and beaming fell short');
+    // Overdrive: sensors past their rating reach further but wear out.
+    await route({ sensors: 120 }); // (150 would overload Bus A and trip its breaker)
+    await spock.waitForFunction(() => Math.round(window.__nav.last.ranges.sensors) > 600 && window.__nav.last.own.combat.damage.sensors > 0, null, { timeout: 15000 });
+    step(`sensors overdriven to 120%: range ${Math.round(await spock.evaluate(() => window.__nav.last.ranges.sensors))} (past 600), and the overdrive damaged them`);
 
     // No engine power: no warp. No shield power: Tactical can't raise shields. Low life support: everyone is warned.
     await route({ sensors: 100, engines: 0, shields: 0, lifeSupport: 40 });
@@ -1054,7 +1059,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     const hit = kira.nav().own;
     const damaged = Object.entries(hit.combat.damage).find(([, d]) => d > 0);
     assert.ok(damaged, 'a system should be damaged');
-    assert.ok(!(damaged[0] in hit.power) || hit.power[damaged[0]] <= 100 - damaged[1] + 1, 'damage should cap the system\'s power'); // subsystems have no power level: they fail at 50%
+    assert.ok(!(damaged[0] in hit.power) || hit.power[damaged[0]] <= 1.5 * (100 - damaged[1]) + 1, 'damage should cap the system\'s power'); // subsystems have no power level: they fail at 50%
     await waitFor(() => obrien.msgs.some((m) => m.type === 'notice' && /^Engineering: .* damaged/.test(m.text)));
     step(`with shields down a phaser hit the hull (${hit.combat.hull}%) and damaged the ${damaged[0]}, capping its power`);
 
@@ -1070,13 +1075,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     helm({ dest: { x: 250, y: 500 }, warp: 5 });
     await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); return n?.own.warp === 0 && n.own.x < 260; }, 30000);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
-    obrien.send({ type: 'power', power: { engines: 0, shields: 0, sensors: 20, transporter: 0, weapons: 0, lifeSupport: 60, replicators: 0, recreation: 0 } });
+    obrien.send({ type: 'power', power: { engines: 0, injectors: 0, shields: 0, sensors: 20, transporter: 0, weapons: 0, lifeSupport: 60, replicators: 0, recreation: 0 } });
     await nog.waitForSelector('[data-readout="Replicators"]:has-text("Offline")', { state: 'attached' });
     await waitFor(() => obrien.nav()?.own.signature < 0.42);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'detached' });
     await carol.waitForSelector('#weapons-lock-state:has-text("No weapons lock")');
     step(`the Defiant powered down (replicators and holodecks too: its Crew consoles show them offline) to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 250 units away, and the weapons lock was lost`);
-    obrien.send({ type: 'power', power: { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 } });
+    obrien.send({ type: 'power', power: { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 } });
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     step('powered up again, the Defiant showed up on sensors');
     kira.close();

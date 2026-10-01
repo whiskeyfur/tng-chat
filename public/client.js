@@ -230,7 +230,7 @@ const ownShip = () => ships.find((s) => me && s.name.toLowerCase() === me.ship.t
 
 // Shields (footer, displays, Tactical's control) and the transporter controls.
 // Power as Engineering has routed it (from the ship's computer, via 'nav').
-const POWER = [['engines', 'Engines'], ['shields', 'Shields'], ['sensors', 'Sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['lifeSupport', 'Life support'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
+const POWER = [['engines', 'Engines'], ['injectors', 'Plasma injectors'], ['shields', 'Shields'], ['sensors', 'Sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['lifeSupport', 'Life support'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
 const ownPower = () => lastNav?.own?.power || null;
 
 // Shields (footer, displays, Tactical's control), the transporter controls and
@@ -614,10 +614,12 @@ function renderCombat() {
       for (const key of Object.keys(grid.tieNodes).filter((x) => x.startsWith('console:'))) {
         const st = key.slice(8), n = crewAt(st);
         rows.push(ties(key, `${st} console`, key, { note: n ? (grid.consoleOk[st] ? `${n} aboard` : `${n} aboard · DARK`) : 'unmanned' }));
-        for (const sys of grid.stationSystems[st] || []) {
+        const sysRow = (sys, level) => {
           const want = sys === 'tractor' ? (grid.towing ? 30 : 0) : grid.demand[sys], got = sys === 'tractor' ? want : grid.delivered[sys];
-          rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { level: 1, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}` : 'off' }));
-        }
+          rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { level, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}${got > 100 ? ' · OVERDRIVE' : ''}` : 'off' }));
+          for (const child of grid.systemChildren[sys] || []) sysRow(child, level + 1);
+        };
+        for (const sys of grid.stationSystems[st] || []) sysRow(sys, 1);
         if (st === 'Engineering') rows.push(...engineeringRows());
         if (st === 'Communications') rows.push(...['rf', 'radio', 'subspace'].map((x) => subRow(x, 1)));
       }
@@ -783,26 +785,32 @@ setInterval(updateWeaponTimers, 250);
 // A light bar: ten LCARS buttons for a level from 0 to max. Pressing button
 // N sets N tenths of max (buttons up to N light up); pressing the top lit
 // button again turns it off (0).
-function lightBar(label, max, onset) {
+// As a limiter (power): `segments` past ten run into overdrive (orange), and
+// set(limit, used) shows what's drawn fully lit, the rest of the allowance dim.
+function lightBar(label, max, onset, { segments = 10, rated = max } = {}) {
   const bar = document.createElement('div');
   bar.className = 'light-bar';
+  bar.style.gridTemplateColumns = `repeat(${segments}, minmax(0, 1fr))`;
   bar.setAttribute('role', 'group');
   bar.setAttribute('aria-label', label);
   let value = 0;
-  const step = max / 10;
-  for (let n = 1; n <= 10; n++) {
+  const step = max / segments;
+  for (let n = 1; n <= segments; n++) {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'light-bar__seg', title: `${n * step}` });
     b.dataset.level = n;
+    if (n * step > rated) b.dataset.overdrive = '';
     b.setAttribute('aria-label', `${label}: ${n * step}`);
     b.onclick = () => onset(Math.round(value) === n * step ? 0 : n * step);
     bar.append(b);
   }
-  bar.set = (v) => {
+  bar.set = (v, used = v) => {
     value = v;
     for (const b of bar.children) {
-      const lit = Number(b.dataset.level) * step <= v + 1e-9;
-      b.toggleAttribute('data-lit', lit);
-      b.setAttribute('aria-pressed', String(lit));
+      const top = Number(b.dataset.level) * step;
+      const allowed = top <= v + 1e-9;
+      b.toggleAttribute('data-lit', allowed && top - step < used - 1e-9); // in use
+      b.toggleAttribute('data-allowed', allowed); // allowed (dim when not drawn)
+      b.setAttribute('aria-pressed', String(allowed));
     }
   };
   return bar;
@@ -826,7 +834,7 @@ function renderPower() {
         const row = document.createElement('div');
         row.className = 'pw-row';
         row.append(Object.assign(document.createElement('span'), { className: 'pw-label', textContent: label }),
-          lightBar(`${label} power`, 100, (v) => { powerDraft = { ...(powerDraft || ownAllocation()), [k]: v }; renderPower(); }),
+          lightBar(`${label} power`, 150, (v) => { powerDraft = { ...(powerDraft || ownAllocation()), [k]: v }; renderPower(); }, { segments: 15, rated: 100 }),
           Object.assign(document.createElement('b'), { className: 'pw-value' }));
         row.querySelector('.light-bar').dataset.system = k;
         return row;
@@ -842,8 +850,10 @@ function renderPower() {
   }
   for (const [k] of POWER) {
     const bar = root.querySelector(`[data-system="${k}"]`);
-    bar.set(draft[k]);
-    bar.parentElement.querySelector('.pw-value').textContent = `${draft[k]}%`;
+    const used = ownPower()?.[k] ?? 0;
+    bar.set(draft[k], Math.min(used, draft[k]));
+    bar.parentElement.querySelector('.pw-value').textContent = `${used}/${draft[k]}%`;
+    bar.parentElement.toggleAttribute('data-overdrive', draft[k] > 100);
   }
   // The light bars set each system's demand; the grid (Power grid screen) decides what it gets.
   const grid = lastNav.own.grid;
