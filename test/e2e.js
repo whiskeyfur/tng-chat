@@ -34,6 +34,11 @@ function startComputer(folder, ...ships) {
 startComputer.cold = (folder, ship) => startComputer(folder, ship, { cold: true });
 const stopComputer = (proc) => new Promise((r) => { proc.once('exit', r); proc.kill(); });
 const stored = (folder, ship, name) => { try { return fs.readFileSync(path.join(DATA_DIR, folder, ship, name), 'utf8'); } catch { return null; } };
+// Each column of the grid table balances: what the sources give (and the
+// EPS taps bring down) is what the loads and charging batteries take. Cells
+// are rounded for display, so allow a unit or two. Returns the columns that don't.
+const GRID_SOURCES = ['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'core', 'battery', 'taps'];
+const unbalanced = (g) => ['A', 'B', 'C', 'EPS'].map((n) => [n, Object.entries(g.cells).reduce((sum, [k, c]) => sum + (GRID_SOURCES.includes(k) ? c[n] || 0 : k === 'feed' ? 0 : -(c[n] || 0)), 0)]).filter(([, v]) => Math.abs(v) > 2);
 const SYSTEMS_SHORT = (own) => Object.keys(own.grid.demand).filter((k) => own.grid.delivered[k] < own.grid.demand[k]);
 // The transporter's TOS energize sliders: all three to the top.
 const energize = async (page) => { await page.waitForSelector('#beam-slider-1:not([disabled])'); await page.waitForFunction(() => [...document.querySelectorAll('.tr-slider')].every((r) => Number(r.value) === 0)); for (const n of [1, 2, 3]) await page.$eval(`#beam-slider-${n}`, (r) => { r.value = 100; r.dispatchEvent(new Event('input', { bubbles: true })); }); };
@@ -950,7 +955,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     step(`sensors overdriven to 120%: range ${Math.round(await spock.evaluate(() => window.__nav.last.ranges.sensors))} (past 600), and the overdrive damaged them`);
 
     // No engine power: no warp. No shield power: Tactical can't raise shields. Low life support: everyone is warned.
-    await route({ sensors: 100, engines: 0, shields: 0, lifeSupport: 40 });
+    await route({ sensors: 100, engines: 0, shields: 0, atmosphere: 40 });
     await waitFor(async () => (await spock.evaluate(() => window.__nav.last.speed.warp)) === 0);
     helm({ dest: { ship: 'Defiant' }, warp: 5 });
     await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /no power to the engines/.test(m.text)));
@@ -959,7 +964,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await carol.waitForSelector('[data-shield-control] button:has-text("Raise shields"):disabled');
     await bob.waitForSelector('.bcast--alert:has-text("Life support at 40%")', { state: 'attached' });
     step('no engine power refused warp, no shield power disabled Raise shields, and low life support warned the crew');
-    await route({ engines: 80, shields: 60, lifeSupport: 100 });
+    await route({ engines: 80, shields: 60, atmosphere: 100 });
     await bob.waitForFunction(() => !document.querySelector('.bcast--alert'));
     odell.close();
     await scotty.close();
@@ -1128,13 +1133,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     helm({ dest: { x: 250, y: 500 }, warp: 5 });
     await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); return n?.own.warp === 0 && n.own.x < 260; }, 30000);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
-    obrien.send({ type: 'power', power: { engines: 0, injectors: 0, shields: 0, sensors: 20, transporter: 0, weapons: 0, lifeSupport: 60, replicators: 0, recreation: 0 } });
+    obrien.send({ type: 'power', power: { engines: 0, injectors: 0, shields: 0, sensors: 20, transporter: 0, weapons: 0, atmosphere: 60, thermal: 60, gravity: 0, replicators: 0, recreation: 0 } });
     await nog.waitForSelector('[data-readout="Replicators"]:has-text("Offline")', { state: 'attached' });
     await waitFor(() => obrien.nav()?.own.signature < 0.42);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'detached' });
     await carol.waitForSelector('#weapons-lock-state:has-text("No weapons lock")');
     step(`the Defiant powered down (replicators and holodecks too: its Crew consoles show them offline) to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 250 units away, and the weapons lock was lost`);
-    obrien.send({ type: 'power', power: { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 } });
+    obrien.send({ type: 'power', power: { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, replicators: 40, recreation: 10 } });
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     step('powered up again, the Defiant showed up on sensors');
     kira.close();
@@ -1489,6 +1494,21 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => { const c = barclay.nav()?.own.grid.cells.solar; return c?.A === 25 && c.C === 0; });
     barclay.send({ type: 'grid', ties: { solar: [] } });
     step('solar tied to Bus A (short) and Bus C (no load): Bus A got all 25, not half');
+    // Life support is three systems with their own ties: solar alone runs the
+    // atmospheric processors (10) and thermal regulation (8), not gravity (20) too.
+    barclay.send({ type: 'grid', ties: { solar: ['C'], 'system:atmosphere': ['C'], 'system:thermal': ['C'], 'system:gravity': ['A'] } });
+    await waitFor(() => { const g = barclay.nav()?.own.grid; return g?.cells['system:atmosphere'].C === 10 && g.cells['system:thermal'].C === 8 && g.cells.solar.C === 18; });
+    assert.equal(barclay.nav().own.power.lifeSupport, 100, 'atmosphere and thermal at full: life support 100%');
+    barclay.send({ type: 'grid', ties: { solar: [], battery: ['C'] } }); // run down the battery a little first
+    await waitFor(() => barclay.nav()?.own.grid.battery.charge <= 99);
+    barclay.send({ type: 'grid', ties: { solar: ['C'] } });
+    await waitFor(() => { const g = barclay.nav()?.own.grid; return g?.battery.charging > 0 && g.cells.solar.C === 25; });
+    assert.deepEqual(unbalanced(barclay.nav().own.grid), [], 'solar 25 = atmosphere 10 + thermal 8 + battery charging 7');
+    barclay.send({ type: 'grid', ties: { battery: [], 'system:gravity': ['C'] } });
+    await waitFor(() => { const p = barclay.nav()?.own.power; return p && p.gravity < 100 && p.gravity > 0; });
+    assert.deepEqual(unbalanced(barclay.nav().own.grid), []);
+    barclay.send({ type: 'grid', ties: { solar: [], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'system:gravity': ['A'] } });
+    step('life support as three systems: solar alone on Bus C ran the atmospheric processors (10) and thermal regulation (8), but gravity (20) on top fell short');
     ro.send({ type: 'lock', ship: 'Enterprise' });
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /console offline/.test(m.text)));
     barclay.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'] } }); // dock power on Bus A, shared with B
@@ -1529,12 +1549,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     // the EPS are short (Bus A is served, and its batteries charged, first).
     barclay.send({ type: 'grid', ties: { dock: ['A'], battery: ['B'], crosslink: [] } }); // Bus B on the battery alone: drain it a little
     await waitFor(() => barclay.nav()?.own.grid.battery.charge <= 97, 15000);
-    barclay.send({ type: 'power', power: { engines: 100, shields: 100, transporter: 100 } });
+    barclay.send({ type: 'power', power: { engines: 100, injectors: 100, shields: 100, replicators: 100, recreation: 100 } });
     barclay.send({ type: 'grid', ties: { battery: ['A'], core: ['EPS'], dock: [] } });
     barclay.send({ type: 'grid', tap: { bus: 'A', on: true } });
     barclay.send({ type: 'grid', tap: { bus: 'B', on: true } });
     await waitFor(() => { const n = barclay.nav()?.own; return n && n.grid.battery.charging > 0 && SYSTEMS_SHORT(n).length > 0; });
-    step(`with the warp core overloaded (short: ${SYSTEMS_SHORT(barclay.nav().own).join(', ')}), the battery on Bus A still charged from Bus A's share`);
+    assert.deepEqual(unbalanced(barclay.nav().own.grid), [], 'the columns balance, the EPS taps included');
+    step(`with the warp core overloaded (short: ${SYSTEMS_SHORT(barclay.nav().own).join(', ')}), the battery on Bus A still charged from Bus A's share; every column balanced`);
 
     // Breakers: tie more than Bus B carries (300) and it trips loads off at random.
     barclay.send({ type: 'power', power: { replicators: 100, recreation: 100, transporter: 100 } });
@@ -1544,9 +1565,9 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // A low-power system tied to two buses splits its load evenly between them.
     barclay.send({ type: 'power', power: { engines: 40, shields: 40, transporter: 40, replicators: 20, recreation: 10 } }); // plenty to go round
-    barclay.send({ type: 'grid', ties: { 'system:lifeSupport': ['A', 'C'] }, tap: { bus: 'C', amount: 300 } });
-    await waitFor(() => { const c = barclay.nav()?.own.grid.cells['system:lifeSupport']; return c && c.A === 50 && c.C === 50; });
-    step('life support tied to Bus A and Bus C drew half its load from each');
+    barclay.send({ type: 'grid', ties: { 'system:sensors': ['A', 'C'] }, tap: { bus: 'C', amount: 300 } });
+    await waitFor(() => { const c = barclay.nav()?.own.grid.cells['system:sensors']; return c && c.A === 50 && c.C === 50; });
+    step('sensors tied to Bus A and Bus C drew half their load from each');
 
     // A source tied to two buses shares its output evenly: solar on A and C.
     barclay.send({ type: 'grid', ties: { solar: ['A', 'C'] } });

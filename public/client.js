@@ -307,7 +307,7 @@ const ownShip = () => ships.find((s) => me && s.name.toLowerCase() === me.ship.t
 
 // Shields (footer, displays, Tactical's control) and the transporter controls.
 // Power as Engineering has routed it (from the ship's computer, via 'nav').
-const POWER = [['engines', 'Engines'], ['injectors', 'Plasma injectors'], ['shields', 'Shields'], ['sensors', 'Sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['lifeSupport', 'Life support'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
+const POWER = [['engines', 'Engines'], ['injectors', 'Plasma injectors'], ['shields', 'Shields'], ['sensors', 'Sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['atmosphere', 'Atmospheric processors'], ['thermal', 'Thermal regulation'], ['gravity', 'Gravity generators'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
 const ownPower = () => lastNav?.own?.power || null;
 
 // Shields (footer, displays, Tactical's control), the transporter controls and
@@ -736,7 +736,12 @@ function renderCombat() {
       return tr;
     };
     const tapRows = () => [
-      spanRow('eps-taps', 'EPS taps', 1, null, 'EPS power down into each low bus, up to the level set'),
+      // What's flowing down the taps: out of the EPS, into each bus.
+      (() => {
+        const tr = parentRow('eps-taps', 'EPS taps', 1, 'EPS power down into each low bus, up to the level set');
+        COLS.forEach((n, i) => { const v = grid.cells.taps?.[n] || 0; tr.children[i + 1].replaceChildren(el('span', { className: `grid-flow${v > 0 ? ' grid-flow--in' : ''}`, textContent: v > 0 ? `+${v}` : v < 0 ? `−${-v}` : '' })); });
+        return tr;
+      })(),
       ...['A', 'B', 'C'].map((X) => {
         const bar = lightBar(`EPS tap to Bus ${X}`, grid.busMax[X], (v) => send({ type: 'grid', tap: { bus: X, amount: v } }));
         bar.id = `tap-${X}`;
@@ -776,6 +781,13 @@ function renderCombat() {
         const n = crewAt(st), rows = [];
         rows.push(ties(`console:${st}`, `${st} console`, `console:${st}`, { note: n ? (grid.consoleOk[st] ? `${n} aboard` : `${n} aboard · DARK`) : 'unmanned' }));
         const sysRow = (sys, level) => {
+          // A parent (Life support): no ties of its own, its systems under it.
+          if (grid.systemParents?.[sys]) {
+            const kids = grid.systemChildren[sys] || [];
+            rows.push(parentRow(`ties-system-${sys}`, grid.systemParents[sys], level, kids.some((x) => grid.delivered[x] < grid.demand[x]) ? 'SHORT' : ''));
+            for (const child of kids) sysRow(child, level + 1);
+            return;
+          }
           const want = sys === 'tractor' ? (grid.towing ? 30 : 0) : grid.demand[sys], got = sys === 'tractor' ? want : grid.delivered[sys];
           rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { level, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}${got > 100 ? ' · OVERDRIVE' : ''}` : 'off' }));
           for (const child of grid.systemChildren[sys] || []) sysRow(child, level + 1);
@@ -1110,7 +1122,7 @@ function renderPower() {
   // The light bars set each system's demand; the grid (Power grid screen) decides what it gets.
   const grid = lastNav.own.grid;
   // Each system's demand shown on the first bus (or the EPS) it's tied to.
-  const busDemand = (X) => POWER.filter(([k]) => grid?.ties[`system:${k}`]?.[0] === X).reduce((n, [k]) => n + (k === 'weapons' && !lastNav.own.combat?.phaser.armed ? 0 : draft[k]), 0);
+  const busDemand = (X) => POWER.filter(([k]) => grid?.ties[`system:${k}`]?.[0] === X).reduce((n, [k]) => n + (k === 'weapons' && !lastNav.own.combat?.phaser.armed ? 0 : Math.round((draft[k] * (grid.ratings?.[k] ?? 100)) / 100)), 0);
   const short = grid ? POWER.filter(([k]) => grid.delivered[k] < grid.demand[k]).map(([, label]) => label.toLowerCase()) : [];
   const over = false;
   root.querySelector('.pw-total').textContent = grid
@@ -1122,7 +1134,8 @@ function renderPower() {
     `Sensors ${Math.round(600 * f)} · subspace ${Math.round(400 * f)} · transporter ${Math.round(20 * f)} units`,
     draft.shields < 20 ? 'Shields: too little power to hold them' : 'Shields: can be raised',
     draft.transporter <= 0 ? 'Transporter: no power' : 'Transporter: ready',
-    draft.lifeSupport < 50 ? `Life support: ${draft.lifeSupport}%, crew warned` : 'Life support: nominal',
+    Math.min(draft.atmosphere, draft.thermal) < 50 ? `Life support: ${Math.min(draft.atmosphere, draft.thermal)}%, crew warned` : 'Life support: nominal',
+    draft.gravity < 50 ? `Gravity: ${draft.gravity}%` : 'Gravity: nominal',
     draft.replicators <= 0 ? 'Replicators: offline' : draft.replicators < 20 ? 'Replicators: rationed' : 'Replicators: online',
     draft.recreation <= 0 ? 'Recreation and holodecks: closed' : 'Recreation and holodecks: open',
     // The more power the ship uses, the further off other ships' sensors see it.

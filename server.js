@@ -744,21 +744,31 @@ function coreSignOff(ws) {
 
 // Ranges at full sensor power; sensor power scales all three (Engineering).
 const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
-const SYSTEMS = ['engines', 'injectors', 'shields', 'sensors', 'transporter', 'weapons', 'lifeSupport', 'replicators', 'recreation'];
+const SYSTEMS = ['engines', 'injectors', 'shields', 'sensors', 'transporter', 'weapons', 'atmosphere', 'thermal', 'gravity', 'replicators', 'recreation'];
+// Life support is three systems: atmospheric processors, thermal regulation
+// and gravity generators. Small ones: solar (25) runs the first two, with a
+// little over to charge batteries, but not gravity as well.
+const LIFE_SUPPORT = ['atmosphere', 'thermal', 'gravity'];
+// What a system draws at 100% (most: 100).
+const RATING = { atmosphere: 10, thermal: 8, gravity: 20 };
+const ratingOf = (s) => RATING[s] ?? 100;
 // Each system's power setting is a limit, 0-150: past 100 (its rating) is
 // emergency overdrive, which slowly damages it, faster the further over it runs.
 const POWER_MAX = 150;
 const OVERDRIVE_DAMAGE = 0.02; // damage per second for each point drawn over 100
 const REACTOR = 450; // total power to share, in percent of one system at full
 const MIN_SHIELD_POWER = 20;
-const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 };
+const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
 // actually gets from the power grid (see "the power grid" below): damage caps
 // a system, unarmed weapons draw nothing, and a bus short of power browns out.
-const allocOf = (k) => ({ ...DEFAULT_POWER, ...(navState.get(k)?.power || {}) });
+// (Older saves had one life support setting: it goes to all three.)
+const allocOf = (k) => { const p = navState.get(k)?.power || {}; return { ...DEFAULT_POWER, ...(p.lifeSupport != null ? Object.fromEntries(LIFE_SUPPORT.map((x) => [x, p.lifeSupport])) : {}), ...p }; };
 function powerOf(k) {
   const f = flow(k);
-  return Object.fromEntries(SYSTEMS.map((s) => [s, Math.floor(f.delivered[s] + 1e-9)]));
+  const p = Object.fromEntries(SYSTEMS.map((s) => [s, Math.floor(f.delivered[s] + 1e-9)]));
+  p.lifeSupport = Math.min(p.atmosphere, p.thermal); // what keeps the crew alive (gravity is a comfort)
+  return p;
 }
 // How visible a ship is to other ships' sensors: the more power it uses (all
 // of it: systems, consoles, the warp core's containment), the further off it
@@ -1296,17 +1306,19 @@ const PORTS = ['port', 'starboard']; // docking ports (starbases take any number
 // The port a ship is docked to us at (or null), and the ships docked with us (both sides agreeing).
 const portFor = (k, other) => PORTS.find((p) => engOf(k).shipDocks[p] === other) || null;
 const shipsDocked = (k) => PORTS.map((p) => [p, engOf(k).shipDocks[p]]).filter(([, o]) => o && portFor(o, k));
-const SYSTEM_BUS = { lifeSupport: 'A', sensors: 'A', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
+const SYSTEM_BUS = { atmosphere: 'A', thermal: 'A', gravity: 'A', sensors: 'A', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
-const STATION_SYSTEMS = { Helm: ['engines'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors'], Engineering: ['lifeSupport'], Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
+const STATION_SYSTEMS = { Helm: ['engines'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors'], Engineering: ['lifeSupport'] /* a parent row: its systems carry the ties */, Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
 const LOAD_NODES = {
-  lifeSupport: AB, sensors: AB, replicators: AB, recreation: AB, // low power
+  atmosphere: AB, thermal: AB, gravity: AB, sensors: AB, replicators: AB, recreation: AB, // low power
   transporter: AB,
   engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], tractor: ['EPS'], // high power: EPS only
 };
-const SYSTEM_PRIORITY = ['lifeSupport', 'sensors', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
+const SYSTEM_PRIORITY = ['atmosphere', 'thermal', 'gravity', 'sensors', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
 // Systems shown under another system in the grid table (Helm > Engines > Plasma injectors).
-const SYSTEM_CHILDREN = { engines: ['injectors'] };
+const SYSTEM_CHILDREN = { engines: ['injectors'], lifeSupport: LIFE_SUPPORT };
+// Rows with no ties of their own, only their systems' (Engineering > Life support > ...).
+const SYSTEM_PARENTS = { lifeSupport: 'Life support' };
 // Subsystems: low-power loads (A or B) that their parent needs to work.
 const SUBSYSTEMS = {
   constriction: { parent: 'core', ties: ['A'], name: 'magnetic constriction' },
@@ -1408,7 +1420,8 @@ function freshEng(saved, { cold = false } = {}) {
   const amount = (v, cap) => (Number.isFinite(v) ? Math.max(0, Math.min(cap, v)) : v === false ? 0 : cap);
   const antimatter = amount(s.antimatter, FUEL.antimatter), deuterium = amount(s.deuterium, FUEL.deuterium);
   if (!ties.containment.length && antimatter > 0) ties.containment = DEFAULT_TIES.containment; // never no feed with antimatter aboard
-  for (const [k, d] of Object.entries(DEFAULT_LOAD_TIES)) ties[k] = tiesOf(k, s.ties?.[k], d);
+  // (Older saves: life support was one load; its ties go to all three of its systems.)
+  for (const [k, d] of Object.entries(DEFAULT_LOAD_TIES)) ties[k] = tiesOf(k, s.ties?.[k] ?? (LIFE_SUPPORT.includes(k.slice(7)) ? s.ties?.['system:lifeSupport'] : undefined), d);
   const core = s.core === 'ejected' || s.antimatter === false ? 'ejected' : s.core === 'offline' || !antimatter || !deuterium ? 'offline' : 'online';
   return {
     core, antimatter, deuterium, start: 0, // a startup in progress starts over
@@ -1565,7 +1578,7 @@ function flow(k) {
     ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
     ['sub:forcefields', e.forcefields.length * GRID.forcefield],
     ...PORTS.map((p) => [`feed:${p}`, Math.max(0, conns.find((cn) => cn.p === p)?.net || 0)]),
-    ...SYSTEM_PRIORITY.map((sys) => [`system:${sys}`, sys === 'tractor' ? (e.towing ? TRACTOR.draw : 0) : demand[sys]]),
+    ...SYSTEM_PRIORITY.map((sys) => [`system:${sys}`, sys === 'tractor' ? (e.towing ? TRACTOR.draw : 0) : (demand[sys] * ratingOf(sys)) / 100]),
   ];
   // Each bus serves the loads tied to it alone first (priority order), then
   // its batteries charge, then loads split over two buses, then over three.
@@ -1591,6 +1604,7 @@ function flow(k) {
       buses[X].need += t; buses[X].have += t;
       if (!direct) { viaEps += t; let rest = t; for (const y of sides) { const u = Math.min(rest, Math.max(0, e.taps[y] - buses[y].tapUsed)); buses[y].tapUsed += u; rest -= u; } }
       cells.battery[X] -= t; // shown as a draw on the battery row
+      cells[x.name][direct ? via : 'EPS'] += t; // and as what the source gave
     }
   };
   const order = [];
@@ -1613,9 +1627,12 @@ function flow(k) {
   const consoleOk = Object.fromEntries(Object.keys(CONSOLE_BUS).map((st) => [st, full(`console:${st}`)]));
   const fed = PORTS.reduce((n, p) => n + (got[`feed:${p}`] || 0), 0);
   for (const p of PORTS) e.fed[p] = got[`feed:${p}`] || 0;
+  // Power down the EPS taps: out of the EPS column, into each bus's (so every column balances).
+  cells.taps = blank();
+  for (const X of BUSES) { cells.taps[X] = buses[X].tapUsed; cells.taps.EPS -= buses[X].tapUsed; }
   cells.feed = blank();
   for (const p of PORTS) for (const n of NODES) cells.feed[n] += cells[`feed:${p}`]?.[n] || 0;
-  const delivered = Object.fromEntries(SYSTEMS.map((sys) => [sys, got[`system:${sys}`] || 0]));
+  const delivered = Object.fromEntries(SYSTEMS.map((sys) => [sys, ((got[`system:${sys}`] || 0) * 100) / ratingOf(sys)]));
   const tractorOk = !e.towing || full('system:tractor');
   for (const X of BUSES) {
     const sys = SYSTEMS.filter((x) => e.ties[`system:${x}`]?.includes(X));
@@ -1716,7 +1733,7 @@ function gridView(k) {
     towing: e.towing ? shipName(e.towing) : null, towedBy: tower ? shipName(tower) : null,
     selfDestruct: e.selfDestruct ? { seconds: Math.max(0, Math.ceil((e.selfDestruct.at - Date.now()) / 1000)), by: e.selfDestruct.by } : null,
     buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: Math.round(b.need), have: Math.round(b.have), src: r(b.src), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
-    consoleOk: f.consoleOk, systemChildren: SYSTEM_CHILDREN, powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, stationSystems: STATION_SYSTEMS, subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
+    consoleOk: f.consoleOk, systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, stationSystems: STATION_SYSTEMS, subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
     tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: BUS_MAX,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
   };
@@ -2091,7 +2108,7 @@ const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 50
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
-const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', lifeSupport: 'life support', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
+const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'sensors', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
   corePump: "warp core's deuterium pump", injector: 'antimatter injector', portPump: "port impulse drive's deuterium pump", starboardPump: "starboard impulse drive's deuterium pump",
   conduits: 'power transfer conduits', rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
 // What a hit can damage: the systems, and the subsystems that fail when badly damaged.
@@ -2103,7 +2120,7 @@ function freshCombat(saved) {
   const num = (v, d, max = 100) => (Number.isFinite(v) ? Math.max(0, Math.min(max, v)) : d);
   return {
     hull: num(s.hull, 100) || 100, shield: num(s.shield, 100),
-    damage: Object.fromEntries(DAMAGEABLE.map((k) => [k, num(s.damage?.[k], 0)])),
+    damage: Object.fromEntries(DAMAGEABLE.map((k) => [k, num(s.damage?.[k] ?? (LIFE_SUPPORT.includes(k) ? s.damage?.lifeSupport : undefined), 0)])),
     torpedoes: num(s.torpedoes, TORPEDO.carried, TORPEDO.carried),
     repair: s.repair === 'hull' || DAMAGEABLE.includes(s.repair) ? s.repair : null,
     lock: null, armed: false, phaserCharge: 0, torpedoAt: 0, restockAt: Date.now(), hitAt: 0, hitBy: null, dirty: false,
