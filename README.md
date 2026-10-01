@@ -37,8 +37,8 @@ Each crew member gets an LCARS console for their station, styled with `public/lc
 
 | Station | Displays |
 | --- | --- |
-| Captain | ship status, tactical plot, department readiness, senior staff on duty, captain's log |
-| First Officer | duty roster (who is actually aboard), department readiness, ship status, duty log |
+| Captain | ship status, tactical plot, **department readiness** (how many are on duty at each station aboard: green when manned, red when not), senior staff on duty, captain's log |
+| First Officer | duty roster (who is actually aboard), department readiness (real, as for the Captain), ship status, duty log |
 | Helm | forward view starfield, course, helm systems |
 | Tactical | shield grid, weapons, **shield control** (raise/lower the ship's shields), targeting scan |
 | Security | internal sensors deck grid, force fields, security log |

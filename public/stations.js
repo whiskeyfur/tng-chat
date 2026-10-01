@@ -1,8 +1,9 @@
 // Station displays for the crew consoles. Each station gets LCARS panels that
 // suit the post: Medical has vitals and an ECG, Engineering a side view of the
 // ship with the warp core, Helm a navigation starfield, and so on. The data is
-// simulated (a gentle random walk), except the duty roster (who is actually
-// aboard) and the shields, which follow the ship's real shield state. The
+// simulated (a gentle random walk), except the duty roster and department
+// readiness (who is actually aboard, at which station) and the shields, which
+// follow the ship's real shield state. The
 // Transporter and Tactical stations have live controls that client.js fills
 // in (elements marked data-transporter and data-shield-control), and
 // Communications has live comm traffic (data-traffic).
@@ -310,16 +311,14 @@
         live(readout('Hull integrity', 'gold', '%'), drift(99, 96, 100, 0.4), (v) => v.toFixed(1)),
         live(readout('Velocity', 'orange'), drift(6, 5.5, 6.5, 0.1), (v) => `Warp ${v.toFixed(1)}`))),
       panel('st-tactical', 'Tactical plot', 'red', false, sweep(240, 'red', 4, 'Tactical plot')),
-      panel('st-dept', 'Department readiness', 'blue', false,
-        ...['Engineering', 'Medical', 'Science', 'Security'].map((d) => live(gauge(d, 'blue'), drift(0.9, 0.7, 1, 0.03)))),
+      panel('st-dept', 'Department readiness', 'blue', false, h('ul', { class: 'st-depts', 'data-depts': '' })),
       panel('st-roster', 'Senior staff on duty', 'lilac', true, h('ul', { class: 'st-roster', 'data-roster': '' })),
       panel('st-log', "Captain's log", 'peach', true, logView([
         [`${ship}: holding position, all departments reporting`], ['Long range sensors: no contacts of note'], ['Science: survey of system complete'], ['Engineering: warp core at optimum efficiency']])),
     ] }),
     'First Officer': (ship) => ({ code: 'XO 02', color: 'red', panels: [
       panel('st-roster', 'Duty roster', 'gold', true, h('ul', { class: 'st-roster', 'data-roster': '' })),
-      panel('st-dept', 'Department readiness', 'blue', false,
-        ...['Engineering', 'Medical', 'Science', 'Security', 'Operations'].map((d) => live(gauge(d, 'blue'), drift(0.88, 0.7, 1, 0.03)))),
+      panel('st-dept', 'Department readiness', 'blue', false, h('ul', { class: 'st-depts', 'data-depts': '' })),
       panel('st-status', 'Ship status', 'orange', false,
         live(readout('Crew complement', 'gold'), drift(1012, 1008, 1014, 1), Math.round),
         live(readout('Shift', 'sky'), () => ['Alpha', 'Beta', 'Gamma'][Math.floor(new Date().getHours() / 8)]),
@@ -438,6 +437,8 @@
   };
 
   window.STATION_NAMES = Object.keys(STATIONS);
+  // The duty stations counted for department readiness.
+  const DEPARTMENTS = ['Operations', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter'];
 
   window.renderStation = function renderStation(container, station, { ship }) {
     timers.splice(0).forEach(clearInterval);
@@ -462,9 +463,19 @@
       sections,
       // Rosters list who is actually aboard, by station.
       setCrew(users) {
+        const aboard = users.filter((u) => u.ship.toLowerCase() === ship.toLowerCase());
         for (const ul of container.querySelectorAll('[data-roster]')) {
-          const aboard = users.filter((u) => u.ship.toLowerCase() === ship.toLowerCase());
           ul.replaceChildren(...(aboard.length ? aboard : [{ name: 'No one else aboard', station: '' }]).map((u) => h('li', {}, u.name, h('span', {}, u.station))));
+        }
+        // Department readiness: how many are at each duty station; the label is
+        // green when manned, red when not.
+        for (const ul of container.querySelectorAll('[data-depts]')) {
+          ul.replaceChildren(...DEPARTMENTS.map((d) => {
+            const n = aboard.filter((u) => u.station === d).length;
+            return h('li', { 'data-dept': d, 'data-manned': n > 0 },
+              h('span', { class: 'st-dept-label' }, d),
+              h('span', { class: 'st-dept-count' }, n ? `${n} on duty` : 'Unmanned'));
+          }));
         }
       },
     };

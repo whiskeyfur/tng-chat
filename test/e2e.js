@@ -403,6 +403,12 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await alice.locator('#users li:has-text("martok")').count(), 0, 'alice can see another ship\'s crew');
     await martok.waitForSelector('#users li:has-text("kor")', { state: 'attached' });
     assert.equal(await martok.locator('#st-tactical canvas').count(), 1, 'captain console has a tactical plot');
+    // Department readiness counts who is at each station aboard: kor
+    // (Engineering) and the K'Vatch's operator are on duty; Medical isn't.
+    await martok.waitForSelector('#st-dept li[data-dept="Engineering"][data-manned]:has-text("1 on duty")', { state: 'attached' });
+    await martok.waitForSelector('#st-dept li[data-dept="Operations"][data-manned]', { state: 'attached' });
+    assert.match(await martok.textContent('#st-dept li[data-dept="Medical"]'), /Unmanned/);
+    assert.equal(await martok.locator('#st-dept li[data-dept="Medical"][data-manned]').count(), 0);
     assert.equal(await kor.locator('#st-ship .st-ship').count(), 1, 'engineering console has the ship schematic');
     step('each ship sees only its own crew; ops see the other ship; stations get their own displays');
 
