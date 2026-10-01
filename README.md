@@ -74,7 +74,7 @@ File names are cleaned up: folders, control characters and leading dots are remo
 Pick **Operations** at sign-in, or open `?station=Operations&name=O'Brien&ship=Enterprise` (or the old `operator.html` link). The page remembers the last sign-in. Ops is assumed to be on the bridge. The operator is aboard as crew at the **Operations** station and has the same Comms menu as everyone. It adds **Transfer to**: hand the call you're in to anyone aboard or on the data network, or to another ship by hail, and drop off the line. A call with several people is handed over whole.
 
 - **Hail · ship to ship:** hail another ship on behalf of one of your crew, yourself included. That ship's operator routes the hail to someone aboard (it defaults to their Captain, and can be themselves), or declines. You can cancel while it's pending. For example: Picard on the Enterprise, via Enterprise ops, via K'Vatch ops, to Martok, Captain of the K'Vatch.
-- **Data link:** request a link with another ship. Their operator accepts or declines, and either side can close the link later. Linked ships form a data network (links chain, so three or more ships can share one network). Everyone on it sees everyone on every ship in the Comms directory and can call them directly.
+- **Data link:** request a link with another ship. Their operator accepts or declines, and either side can close the link later. Linked ships form a data network (links chain, so three or more ships can share one network). Everyone on it sees everyone on every ship in the Comms directory and can call them directly. The **data network map** beside the controls shows every ship (crew aboard, shields, ops on duty) and who is linked to whom: solid lines are data links, dashed lines pending requests, and colours mark this ship, the ships on its network, other ships and ships without ops. Click a ship to pick it for a link request.
 - **Intercom:** connect two of your crew immediately, without ringing, ending any calls they're in.
 - **Conference · patch in:** bring one of your crew into the call another crew member is in, even if it spans ships.
 - **Crew roster:** your crew's stations and call status, with Call and Disconnect buttons.
@@ -101,7 +101,7 @@ Starts the server and drives headless Chromium pages with a fake microphone thro
 - **Operator actions:** intercom, moving someone, patching a third person in (everyone hears everyone, chat and files reach everyone), one person leaving a three-way call, disconnect.
 - **Calls with ops:** crew calling ops, ops transferring the call aboard, ops calling crew.
 - **Ship to ship:** each ship sees only its own crew, and stations get their own displays. Then a hail routed to the Captain, a declined hail, a cancelled hail, and an off-ship transfer that the other ship's ops answers and passes on.
-- **Data links:** a call across a data link, closing the link, and the link dropping with ops.
+- **Data links:** the map showing a pending request then the open link, a call across a data link, closing the link, and the link dropping with ops.
 - **Stations, transporter, shields:** changing station; shields up blocking the transporter; shields down and a crew member beamed to the K'Vatch.
 - **Hosting elsewhere:** the library endpoints answer cross-origin preflight requests.
 - **Library delete:** crew and other ships' ops are refused; ops delete from their own ship and the file is gone from disk and from everyone's library.

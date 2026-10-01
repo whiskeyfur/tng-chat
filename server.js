@@ -167,8 +167,19 @@ function broadcastOps(key) {
     network: [...network(key)].filter((k) => k !== key).map(shipName).sort(),
     linkIncoming: requests.filter((r) => r.to === key).map(({ id, fromShip }) => ({ id, fromShip })),
     linkOutgoing: requests.filter((r) => r.from === key).map(({ id, toShip }) => ({ id, toShip })),
+    graph: networkGraph(),
   };
   for (const op of ops) send(op, msg);
+}
+
+// The whole picture for the ops data link map: every ship, its crew count and
+// shields, every open data link and every pending link request.
+function networkGraph() {
+  return {
+    ships: shipList().map((sh) => ({ ...sh, crew: crewOf(shipKey(sh.name)).length })),
+    links: [...links].map((l) => l.split('|').map(shipName)),
+    requests: [...linkRequests.values()].map((r) => [shipName(r.fromShip), shipName(r.toShip)]),
+  };
 }
 
 // Ships crew can report aboard: those with an ops station on duty, plus those
@@ -182,6 +193,7 @@ function shipList() {
 function broadcastShips() {
   const list = shipList();
   for (const ws of sockets) send(ws, { type: 'ships', ships: list });
+  broadcastAllOps(); // the data link map shows every ship
 }
 
 const broadcastAllOps = () => new Set([...operators].map((op) => op.shipKey)).forEach(broadcastOps);
@@ -322,8 +334,7 @@ function operatorMessage(op, msg) {
       const req = { id: newId('l-'), fromShip: op.shipKey, toShip: target };
       linkRequests.set(req.id, req);
       opLog(target, `the ${shipName(op.shipKey)} requests a data link`);
-      broadcastOps(target);
-      broadcastOps(op.shipKey);
+      broadcastAllOps();
       return ok(`requesting a data link with the ${shipName(target)}`);
     }
     case 'link-accept':
@@ -339,12 +350,12 @@ function operatorMessage(op, msg) {
         links.add(linkKey(req.fromShip, req.toShip));
         opLog(other, `the ${shipName(op.shipKey)} accepted: data link open`);
         refreshNetworks([op.shipKey]);
+        broadcastAllOps();
         console.log(`data link open: ${shipName(req.fromShip)} - ${shipName(req.toShip)}`);
         return ok(`data link with the ${shipName(other)} open`);
       }
       opLog(other, msg.type === 'link-decline' ? `the ${shipName(op.shipKey)} declined the data link` : `the ${shipName(op.shipKey)} withdrew its data link request`);
-      broadcastOps(other);
-      broadcastOps(op.shipKey);
+      broadcastAllOps();
       return ok(msg.type === 'link-decline' ? `declined the data link from the ${shipName(other)}` : `withdrew the data link request to the ${shipName(other)}`);
     }
     case 'link-close': {
@@ -352,6 +363,7 @@ function operatorMessage(op, msg) {
       if (!links.delete(linkKey(op.shipKey, other))) return fail(`no data link with the ${clean(msg.ship)}`);
       opLog(other, `the ${shipName(op.shipKey)} closed the data link`);
       refreshNetworks([op.shipKey, other]);
+      broadcastAllOps();
       return ok(`closed the data link with the ${shipName(other)}`);
     }
     case 'decline-hail':

@@ -424,8 +424,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     await screen(kops, 'link');
     await op.selectOption('#link-ship', "K'Vatch");
     await op.click('#link-form button');
+    // The data network map: a pending request is a dashed line, then solid.
+    await kops.waitForSelector('#net-map line[stroke-dasharray="10 8"]', { state: 'attached' });
+    assert.equal(await kops.locator('#net-map .net-node').count(), 2);
     await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await op.waitForFunction(() => window.__operator.network.includes("K'Vatch"));
+    await op.waitForFunction(() => window.__operator.graph.links.some((l) => l.includes('Enterprise') && l.includes("K'Vatch")));
+    await op.waitForSelector('#net-map line[stroke-dasharray="none"]', { state: 'attached' });
     await bob.waitForSelector('#users li:has-text("kor")', { state: 'attached' });
     await kor.waitForSelector('#users li:has-text("bob")', { state: 'attached' });
     assert.match(await bob.textContent('#comms-net'), /Enterprise.*K'Vatch/);
@@ -436,7 +441,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await Promise.all([connected(bob), connected(kor)]);
     await bob.click('.v-hangup');
     await kor.waitForFunction(() => window.__voice.state === 'idle');
-    step('ops opened a data link; bob called kor on the K\'Vatch directly');
+    step('ops opened a data link (shown on the data network map); bob called kor on the K\'Vatch directly');
 
     // Library: alice uploads to the Enterprise's computer; shipmates see it,
     // it is stored as data/Enterprise/<file>, and the K'Vatch (linked) can

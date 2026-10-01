@@ -14,6 +14,7 @@
     const voice = comms.voice;
     let roster = [], ships = [], incoming = [], outgoing = [];
     let links = [], network = [], linkIncoming = [], linkOutgoing = [];
+    let graph = { ships: [], links: [], requests: [] };
     let me = getMe(), ship = me.ship;
 
     function stardate() {
@@ -34,6 +35,7 @@
           logRosterChanges(roster, msg.users);
           logShipChanges(ships, msg.ships);
           ({ users: roster, ships, incoming, outgoing, links, network, linkIncoming, linkOutgoing } = msg);
+          graph = msg.graph || graph;
           render();
           return true;
         case 'op-ok':
@@ -83,7 +85,57 @@
       }
     }
 
+    // The data network map: every ship around a circle (ours at the top),
+    // solid lines for data links, dashed for pending requests. Clicking a
+    // ship picks it in the "request a data link" form.
+    function renderMap() {
+      const svg = $('net-map');
+      if (!svg) return;
+      const NS = 'http://www.w3.org/2000/svg';
+      const node = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; };
+      const color = (n) => `var(--lcars-${n})`;
+      const own = ship.toLowerCase();
+      const onNet = new Set([own, ...network.map((n) => n.toLowerCase())]);
+      const list = [...graph.ships].sort((a, b) => (b.name.toLowerCase() === own) - (a.name.toLowerCase() === own) || a.name.localeCompare(b.name));
+      const W = 600, H = 400, cx = W / 2, cy = H / 2 + 6, R = list.length > 1 ? 145 : 0;
+      const pos = new Map(list.map((sh, i) => {
+        const a = -Math.PI / 2 + (i * 2 * Math.PI) / list.length;
+        return [sh.name.toLowerCase(), { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) }];
+      }));
+      svg.replaceChildren();
+      const edge = ([a, b], pending) => {
+        const p = pos.get(a.toLowerCase()), q = pos.get(b.toLowerCase());
+        if (!p || !q) return;
+        svg.append(node('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: color(pending ? 'gold' : 'sky'), 'stroke-width': pending ? 3 : 5,
+          'stroke-dasharray': pending ? '10 8' : 'none', 'stroke-linecap': 'round', opacity: pending ? 0.8 : 1 }));
+      };
+      graph.links.forEach((l) => edge(l, false));
+      graph.requests.forEach((l) => edge(l, true));
+      for (const sh of list) {
+        const key = sh.name.toLowerCase();
+        const { x, y } = pos.get(key);
+        const fill = key === own ? 'gold' : !sh.ops ? 'tan' : onNet.has(key) ? 'sky' : 'lilac';
+        const label = sh.name.toUpperCase();
+        const w = Math.max(120, label.length * 11 + 36), h = 52;
+        const g = node('g', { class: 'net-node', transform: `translate(${x - w / 2} ${y - h / 2})`, tabindex: 0, role: 'button', 'aria-label': `The ${sh.name}` });
+        g.append(
+          node('rect', { width: w, height: h, rx: h / 2, fill: color(fill), opacity: sh.ops ? 1 : 0.6 }),
+          node('text', { x: w / 2, y: 22, 'text-anchor': 'middle', 'font-size': 18, fill: '#000' }, label),
+          node('text', { x: w / 2, y: 40, 'text-anchor': 'middle', 'font-size': 12, fill: '#000' },
+            `${sh.crew} aboard${sh.shields ? ' · shields up' : ''}${sh.ops ? '' : ' · no ops'}`));
+        if (sh.shields) g.append(node('rect', { x: -5, y: -5, width: w + 10, height: h + 10, rx: h / 2 + 5, fill: 'none', stroke: color('red'), 'stroke-width': 2 }));
+        if (key !== own) {
+          const pick = () => { const sel = $('link-ship'); if ([...sel.options].some((o) => o.value === sh.name)) { sel.value = sh.name; sel.focus(); } };
+          g.addEventListener('click', pick);
+          g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+        }
+        svg.append(g);
+      }
+      if (!list.length) svg.append(node('text', { x: cx, y: cy, 'text-anchor': 'middle', fill: color('tan'), 'font-size': 18 }, 'No ships'));
+    }
+
     function render() {
+      renderMap();
       // Transfer (in the Comms modal) shows while you are in a call: anyone
       // aboard or on the data network, or a hail to a ship off the network.
       const inMyCall = voice.state === 'in-call';
@@ -249,6 +301,7 @@
       get links() { return links; },
       get network() { return network; },
       get linkIncoming() { return linkIncoming; },
+      get graph() { return graph; },
     };
   };
 })();

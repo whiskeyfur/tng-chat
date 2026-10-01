@@ -61,6 +61,15 @@
     .ops-hail__text { flex: 1 1 220px; color: var(--accent); font-size: 20px; }
     .ops-hail--incoming .ops-hail__text { animation: lcars-blink 1.2s steps(2) infinite; }
     .ops-hails .empty { color: var(--lcars-tan); font-size: 16px; text-transform: uppercase; }
+    .net-map { display: block; flex: 1 1 0; min-height: 160px; width: 100%; }
+    .net-map .net-node { cursor: pointer; }
+    .net-map .net-node:hover rect { filter: brightness(1.25); }
+    .net-map text { font-family: var(--font); text-transform: uppercase; letter-spacing: 0.06em; }
+    .net-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; text-transform: uppercase; color: var(--lcars-tan); }
+    .net-legend li { display: flex; align-items: center; gap: 6px; }
+    .net-legend i { display: inline-block; width: 22px; height: 12px; border-radius: 999px; }
+    .net-legend__line { height: 0 !important; border-top: 4px solid var(--lcars-sky); border-radius: 0 !important; }
+    .net-legend__line--pending { border-top: 3px dashed var(--lcars-gold); }
     .ops-network { margin: 0; color: var(--lcars-sky); text-transform: uppercase; font-size: 18px; }
 
     /* Phones: roster rows stack (name + buttons, then station and channel). */
@@ -174,22 +183,38 @@
         </div>
 
         <div class="screen" data-screen="link" hidden>
-          <section class="lcars-panel" id="link-panel" style="--accent: var(--lcars-sky)">
-            <h2 class="lcars-panel__title"><span>Data link</span></h2>
-            <div class="lcars-panel__body">
-              <p class="ops-network" id="network">Not linked</p>
-              <form class="ops-form" id="link-form">
-                <span>Request a data link with</span>
-                <select class="ops-select" id="link-ship" aria-label="ship to link with"></select>
-                <button class="lcars-button lcars-button--pill">Request link</button>
-              </form>
-              <p class="ops-hint">Both operators must agree. Everyone on linked ships sees and can call everyone on the data network, and sees each other's libraries.</p>
-              <h3 class="ops-subhead">Open links</h3>
-              <ul class="ops-hails" id="links"></ul>
-              <h3 class="ops-subhead">Link requests</h3>
-              <ul class="ops-hails" id="link-requests"></ul>
-            </div>
-          </section>
+          <div class="screen-row">
+            <section class="lcars-panel" id="map-panel" style="--accent: var(--lcars-violet)">
+              <h2 class="lcars-panel__title"><span>Data network map</span></h2>
+              <div class="lcars-panel__body">
+                <svg id="net-map" class="net-map" viewBox="0 0 600 400" role="img" aria-label="Ships and the data links between them"></svg>
+                <ul class="net-legend">
+                  <li><i style="background: var(--lcars-gold)"></i>This ship</li>
+                  <li><i style="background: var(--lcars-sky)"></i>On our data network</li>
+                  <li><i style="background: var(--lcars-lilac)"></i>Other ships</li>
+                  <li><i style="background: var(--lcars-tan)"></i>No ops on duty</li>
+                  <li><i class="net-legend__line"></i>Data link</li>
+                  <li><i class="net-legend__line net-legend__line--pending"></i>Link requested</li>
+                </ul>
+              </div>
+            </section>
+            <section class="lcars-panel" id="link-panel" style="--accent: var(--lcars-sky)">
+              <h2 class="lcars-panel__title"><span>Data link</span></h2>
+              <div class="lcars-panel__body">
+                <p class="ops-network" id="network">Not linked</p>
+                <form class="ops-form" id="link-form">
+                  <span>Request a data link with</span>
+                  <select class="ops-select" id="link-ship" aria-label="ship to link with"></select>
+                  <button class="lcars-button lcars-button--pill">Request link</button>
+                </form>
+                <p class="ops-hint">Both operators must agree. Everyone on linked ships sees and can call everyone on the data network, and sees each other's libraries.</p>
+                <h3 class="ops-subhead">Open links</h3>
+                <ul class="ops-hails" id="links"></ul>
+                <h3 class="ops-subhead">Link requests</h3>
+                <ul class="ops-hails" id="link-requests"></ul>
+              </div>
+            </section>
+          </div>
         </div>
 
         <div class="screen" data-screen="intercom" hidden>
