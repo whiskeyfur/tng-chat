@@ -1239,8 +1239,21 @@ const audioBytes = (page) => page.evaluate(async () => {
     const ent = laforge.nav().own;
     ezri.send({ type: 'helm', dest: { x: ent.x, y: ent.y - 3 }, warp: 1 });
     await waitFor(() => { const n = ezri.nav()?.own; return n && Math.hypot(n.x - ent.x, n.y - (ent.y - 3)) < 1 && n.warp === 0 && n.grid.nearShip === 'Enterprise'; }, 20000);
+    // The Enterprise is crewed with working thrusters: docking is a request its Helm answers.
     ezri.send({ type: 'dock', ship: 'Enterprise' });
+    await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /the Defiant requests to dock/.test(m.text)));
+    sulu.send(JSON.stringify({ type: 'dock', answer: 'decline' }));
+    await waitFor(() => ezri.msgs.some((m) => m.type === 'notice' && /the Enterprise declined to dock/.test(m.text)));
+    const asked = suluMsgs.filter((m) => m.type === 'notice' && /requests to dock/.test(m.text)).length;
+    ezri.send({ type: 'dock', ship: 'Enterprise', port: 'starboard' });
+    await waitFor(() => suluMsgs.filter((m) => m.type === 'notice' && /requests to dock/.test(m.text)).length > asked);
+    sulu.send(JSON.stringify({ type: 'dock', answer: 'accept' }));
     await waitFor(() => laforge.nav()?.own.grid.dockedShip === 'Defiant');
+    // Two ports: Starbase 12 on one, the Defiant on the other.
+    const ports = laforge.nav().own.grid.ports;
+    assert.equal(Object.values(ports).filter((v) => v?.base === 'Starbase 12').length, 1);
+    assert.equal(Object.values(ports).filter((v) => v?.ship === 'Defiant').length, 1);
+    step("the Defiant asked to dock: the Enterprise's Helm declined, then accepted; the Enterprise has Starbase 12 on one port and the Defiant on the other");
     // Docked together across a restart of the Defiant's computer.
     await new Promise((r) => setTimeout(r, 5500));
     await stopComputer(coreD);
@@ -1254,7 +1267,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Power across the dock: the Defiant offers 100 from its Bus B, the Enterprise 30; 70 flows to the Enterprise's Bus A.
     rom.send({ type: 'grid', ties: { ship: ['B'] }, feed: 100 });
     laforge.send({ type: 'grid', ties: { ship: ['A'] }, feed: 30 });
-    await waitFor(() => laforge.nav()?.own.grid.shipIn === 70 && rom.nav()?.own.grid.fed === 70); // (the Enterprise's A and B are crosslinked: it lands on either)
+    await waitFor(() => laforge.nav()?.own.grid.shipIn === 70 && Object.values(rom.nav()?.own.grid.ports || {}).find((v) => v?.ship === 'Enterprise')?.fed === 70); // (the Enterprise's A and B are crosslinked: it lands on either)
     // Across the dock: the Station screen offers the Defiant's stations, and
     // the Defiant's engineer walks over to the Enterprise's Science console.
     await screen(spock, 'reassign');

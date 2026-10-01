@@ -147,13 +147,38 @@
           return b;
         }), ...(own.autopilot ? [button('Autopilot off', 'autopilot-off', () => send({ type: 'autopilot', target: null }), true)] : [])));
     }
-    // Docking at a starbase (within 10 units, at all stop).
-    const dockBtn = button('Dock', 'helm-dock', () => {
+    // Docking: two ports, port and starboard. Pick a port, then dock at the
+    // starbase or with the ship in range; undock a port; answer a request.
+    let dockPort = 'port';
+    const dockBox = el('div', { className: 'nav-dock', id: 'helm-dock-box' });
+    let dockSig = '';
+    function renderDock() {
       const g = nav?.own?.grid;
-      if (g?.docked || g?.dockedShip) send({ type: 'dock', undock: true });
-      else if (g?.near) send({ type: 'dock' });
-      else if (g?.nearShip) send({ type: 'dock', ship: g.nearShip });
-    });
+      if (!g) return;
+      const sig = JSON.stringify([g.ports, g.near, g.nearShip, g.dockRequest, g.thrustersOk, dockPort, g.docked]);
+      if (sig === dockSig) return;
+      dockSig = sig;
+      const portTap = (pt) => {
+        const v = g.ports[pt];
+        const b = button(`${pt[0].toUpperCase()}${pt.slice(1)}: ${v?.base || (v?.ship ? `the ${v.ship}` : 'free')}`, `dock-port-${pt}`, () => { dockPort = pt; dockSig = ''; renderDock(); });
+        b.classList.add('tr-tap');
+        b.setAttribute('aria-pressed', String(dockPort === pt));
+        return b;
+      };
+      const free = !g.ports[dockPort];
+      const why = !g.thrustersOk ? 'no maneuvering thrusters (start an impulse drive)' : !free ? `the ${dockPort} dock is in use` : '';
+      const act = [];
+      if (g.near && !g.docked) act.push(button(`Dock at ${g.near}`, 'helm-dock', () => send({ type: 'dock', port: dockPort })));
+      if (g.nearShip && !Object.values(g.ports).some((v) => v?.ship === g.nearShip)) act.push(button(`Dock with the ${g.nearShip}`, 'helm-dock-ship', () => send({ type: 'dock', ship: g.nearShip, port: dockPort })));
+      for (const b of act) { b.disabled = !!why; if (why) b.title = why; }
+      const undock = Object.entries(g.ports).filter(([, v]) => v).map(([pt, v]) => button(`Undock ${pt} (${v.base || `the ${v.ship}`})`, `helm-undock-${pt}`, () => send({ type: 'dock', undock: true, port: pt }), true));
+      dockBox.replaceChildren(
+        el('div', { className: 'tr-taps' }, portTap('port'), portTap('starboard')),
+        el('div', { className: 'ops-form' }, ...act, ...undock),
+        el('span', { className: 'ops-hint', id: 'helm-dock-state', textContent: why && act.length ? `Can't dock: ${why}` : act.length ? '' : (g.near || g.nearShip ? '' : 'Nothing in docking range') }),
+        ...(g.dockRequest ? [el('div', { className: 'ops-form', id: 'dock-request' }, el('span', { textContent: `The ${g.dockRequest.from} requests to dock (${g.dockRequest.seconds} s)` }),
+          button('Accept', 'dock-accept', () => send({ type: 'dock', answer: 'accept', port: dockPort })), button('Decline', 'dock-decline', () => send({ type: 'dock', answer: 'decline' }), true))] : []));
+    }
     const contacts = el('ul', { className: 'nav-contacts' });
     const scanOut = el('div', { className: 'nav-scan' });
 
@@ -181,7 +206,8 @@
             send({ type: 'helm', warp: Number(speedSel.value), ...(dest ? { dest } : {}) });
           }),
           button('All stop', 'helm-stop', () => send({ type: 'helm', warp: 0 }), true)),
-        el('div', { className: 'ops-form' }, el('span', { id: 'helm-dock-state' }), dockBtn),
+        el('h3', { className: 'ops-subhead', textContent: 'Docking' }),
+        dockBox,
         el('h3', { className: 'ops-subhead', textContent: 'Autopilot' }),
         autoBox,
         plotted);
@@ -218,11 +244,7 @@
         if (speedSel.selectedOptions[0]?.disabled) speedSel.value = [...speedSel.options].filter((o) => !o.disabled).pop().value;
         // Show what Helm picked, or else where the ship is actually heading.
         const keep = destSel.value.startsWith('base:') ? destSel.value : selected ? `ship:${selected}` : waypoint ? 'waypoint' : own?.dest?.name ? `${(nav.bases || []).some((b) => b.name === own.dest.name) ? 'base' : 'ship'}:${own.dest.name}` : '';
-        const g2 = own?.grid;
-        dockBtn.textContent = g2?.docked || g2?.dockedShip ? 'Undock' : g2?.near ? 'Dock' : g2?.nearShip ? `Dock with the ${g2.nearShip}` : 'Dock';
-        dockBtn.disabled = !g2?.docked && !g2?.dockedShip && !g2?.near && !g2?.nearShip;
-        root.querySelector('#helm-dock-state').textContent = [g2?.docked && `Docked at ${g2.docked}`, g2?.dockedShip && `Docked with the ${g2.dockedShip}`].filter(Boolean).join(' · ')
-          || (g2?.near ? `${g2.near}: in docking range` : g2?.nearShip ? `The ${g2.nearShip}: in docking range` : 'Nothing in docking range');
+        renderDock();
         destSel.replaceChildren(new Option('Hold current heading', ''),
           ...(waypoint ? [new Option(`Waypoint ${waypoint.x}, ${waypoint.y}`, 'waypoint')] : []),
           ...others.map((s) => new Option(`The ${s.name} (${Math.round(s.distance)} units)`, `ship:${s.name}`)),

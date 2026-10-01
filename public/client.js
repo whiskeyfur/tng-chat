@@ -693,8 +693,12 @@ function renderCombat() {
       ...tapRows(),
       ties('battery', `Batteries ${grid.battery.charge}%`, 'battery', { level: 1, note: grid.battery.charging ? 'charging' : grid.battery.supplying ? 'supplying' : '' }),
       ties('solar', 'Solar', 'solar', { level: 1 }),
-      ties('dock', grid.docked ? `Dock power (${grid.docked})` : 'Dock power (not docked)', 'dock', { level: 1 }),
-      ...(grid.dockedShip ? [ties('ship', `From the ${grid.dockedShip}`, 'ship', { level: 1 }), Object.assign(ties('ship', `To the ${grid.dockedShip}`, 'feed', { level: 1, sign: false }), { id: 'ties-ship-feed' })] : []),
+      ties('dock', grid.docked ? `Dock power (${grid.docked}, ${grid.dockedPort} dock)` : 'Dock power (not docked)', 'dock', { level: 1 }),
+      // Each ship docked with us, by port: power in from it, and out to it (one set of ties for both).
+      ...Object.entries(grid.ports).filter(([, v]) => v?.ship).flatMap(([pt, v]) => [
+        Object.assign(ties('ship', `${pt[0].toUpperCase()}${pt.slice(1)} dock: from the ${v.ship}`, 'ship', { level: 1 }), { id: `ties-ship-${pt}` }),
+        Object.assign(ties('ship', `${pt[0].toUpperCase()}${pt.slice(1)} dock: to the ${v.ship}`, `feed:${pt}`, { level: 1, sign: false }), { id: `ties-ship-feed-${pt}` }),
+      ]),
     ];
     const table = () => {
       const SYS = { ...Object.fromEntries(POWER), tractor: 'Tractor beam' };
@@ -730,14 +734,17 @@ function renderCombat() {
     };
     // Power offered to a ship docked with us (they may offer some back: the difference flows).
     const feedControl = () => {
-      if (!grid.dockedShip) return el('span');
-      const bar = lightBar(`Power offered to the ${grid.dockedShip}`, grid.feedMax, (v) => send({ type: 'grid', feed: v }));
-      bar.id = 'feed-bar';
-      bar.set(grid.feed);
-      const net = grid.feed - grid.partnerFeed;
-      return el('div', { className: 'ops-form' },
-        el('span', { textContent: `Offer the ${grid.dockedShip}: ${grid.feed}` }), bar,
-        el('span', { className: 'ops-hint', id: 'feed-state', textContent: `They offer ${grid.partnerFeed}. ${net > 0 ? `We send ${grid.fed} of ${net}` : net < 0 ? `We receive ${grid.shipIn} of ${-net}` : 'Nothing flows'}${grid.ties.ship.length ? '' : ' (tie the docked-ship rows to a bus or the EPS)'}` }));
+      // Per docked ship: the power we offer (they may offer some back: the difference flows).
+      const rows = Object.entries(grid.ports).filter(([, v]) => v?.ship).map(([pt, v]) => {
+        const bar = lightBar(`Power offered to the ${v.ship}`, grid.feedMax, (x) => send({ type: 'grid', feed: x, port: pt }));
+        bar.id = `feed-bar-${pt}`;
+        bar.set(v.feed);
+        const net = v.feed - v.theirFeed;
+        return el('div', { className: 'ops-form' },
+          el('span', { textContent: `Offer the ${v.ship} (${pt} dock): ${v.feed}` }), bar,
+          el('span', { className: 'ops-hint', textContent: `They offer ${v.theirFeed}. ${net > 0 ? `We send ${v.fed} of ${net}` : net < 0 ? `We receive up to ${-net}` : 'Nothing flows'}${grid.ties.ship.length ? '' : ' (tie the docked-ship rows to a bus)'}` }));
+      });
+      return el('div', { id: 'feed-control' }, ...rows);
     };
     // Antimatter and deuterium aboard, and moving them: refuel or offload at a
     // starbase, or send ours to a ship docked with us.
@@ -745,15 +752,19 @@ function renderCombat() {
       const res = el('select', { className: 'ops-select', id: 'transfer-resource', ariaLabel: 'resource' }, new Option('Antimatter', 'antimatter'), new Option('Deuterium', 'deuterium'));
       const amt = el('input', { className: 'ops-input', id: 'transfer-amount', type: 'number', min: 1, value: 200, ariaLabel: 'amount' });
       amt.style.width = '7em';
-      const partner = grid.docked || (grid.dockedShip && `the ${grid.dockedShip}`);
+      const shipsHere = Object.values(grid.ports).filter((v) => v?.ship).map((v) => v.ship);
+      const partner = grid.docked || (shipsHere.length && `the ${shipsHere.join(', the ')}`);
       const t = grid.transfer;
       return el('div', { className: 'grid-supplies' },
         el('p', { className: 'st-state', id: 'supplies', textContent: `Antimatter ${grid.antimatter} / ${grid.fuelCaps.antimatter} · Deuterium ${grid.deuterium} / ${grid.fuelCaps.deuterium}` }),
         t ? el('div', { className: 'ops-form' }, el('span', { id: 'transfer-state', textContent: `${t.dir === 'in' ? 'Taking on' : 'Sending'} ${t.resource}: ${t.left} to go (${t.with})` }), button('Stop transfer', 'transfer-stop', () => send({ type: 'grid', transfer: null }), 'lcars-button--alert'))
           : partner ? el('div', { className: 'ops-form' }, el('span', { textContent: `Docked with ${partner}:` }), res, amt,
             ...(grid.docked ? [button('Refuel', 'transfer-in', () => send({ type: 'grid', transfer: { resource: res.value, dir: 'in', amount: Number(amt.value) } }))] : []),
-            button(grid.docked ? 'Offload' : `Send to the ${grid.dockedShip}`, 'transfer-out', () => send({ type: 'grid', transfer: { resource: res.value, dir: 'out', amount: Number(amt.value) } })))
-          : el('p', { className: 'ops-hint', textContent: 'Dock at a starbase to refuel or offload, or with another ship to send it supplies.' }));
+            ...(grid.docked ? [button('Offload', 'transfer-out', () => send({ type: 'grid', transfer: { resource: res.value, dir: 'out', amount: Number(amt.value) } }))] : []),
+            ...shipsHere.map((n) => button(`Send to the ${n}`, `transfer-to-${n}`, () => send({ type: 'grid', transfer: { resource: res.value, dir: 'out', amount: Number(amt.value), ship: n } }))))
+          : el('p', { className: 'ops-hint', textContent: 'Dock at a starbase to refuel or offload, or with another ship to send it supplies.' }),
+        el('div', { className: 'ops-form' }, button(`Auto refuel: ${grid.autoRefuel ? 'on' : 'off'}`, 'auto-refuel', () => send({ type: 'grid', autoRefuel: !grid.autoRefuel }), grid.autoRefuel ? '' : 'lcars-button--alert'),
+          el('span', { className: 'ops-hint', textContent: grid.autoRefuel ? (grid.docked ? (grid.ties.containment.length ? 'topping off antimatter and deuterium from the starbase' : 'topping off deuterium; antimatter needs a containment feed set') : 'tops off antimatter and deuterium when docked at a starbase') : 'top off antimatter and deuterium automatically while docked at a starbase' })));
     };
     const coreText = grid.core === 'online' ? `Online · ${grid.coreOutput} to ${feeds(grid.ties.core)}` : grid.core === 'starting' ? `Starting · ${grid.start} of ${grid.startSecs} s on Bus A power` : grid.core === 'ejected' ? 'Ejected · solar and batteries only' : 'Offline';
     gp.replaceChildren(
@@ -809,7 +820,7 @@ function renderCombat() {
   if (ss) {
     const up = !!ownShip()?.shields;
     const damaged = POWER.filter(([k]) => c.damage[k] > 0).map(([k]) => NAMES[k].toLowerCase());
-    const speed = grid.towedBy ? `Towed by the ${grid.towedBy}` : own.warp <= 0 ? (grid.docked ? `Docked at ${grid.docked}` : 'All stop') : `${own.warp < 1 ? 'Impulse' : `Warp ${+own.warp.toFixed(1)}`}${grid.towing ? `, towing the ${grid.towing}` : ''}`;
+    const speed = grid.towedBy ? `Towed by the ${grid.towedBy}` : own.warp <= 0 ? (grid.docked ? `Docked at ${grid.docked}` : grid.dockedShip ? `Docked with the ${grid.dockedShip}` : 'All stop') : `${own.warp < 1 ? 'Impulse' : `Warp ${+own.warp.toFixed(1)}`}${grid.towing ? `, towing the ${grid.towing}` : ''}`;
     const items = [
       ['Alert status', own.alert && own.alert !== 'green' ? `${own.alert[0].toUpperCase()}${own.alert.slice(1)} alert` : 'Condition green', 'sky'],
       ['Shields', up ? `Up · ${c.shield}%` : c.shield < 100 ? `Down (generators ${c.shield}%)` : 'Down', 'sky'],
