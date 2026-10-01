@@ -13,6 +13,7 @@ let ws, me = null;  // me: { id, name, ship, station } once registered
 let token = null;   // proves who we are to the library's HTTP endpoints
 let stationView = null;
 let ops = null;     // the ops screens, when signed in at Operations
+let traffic = [];   // calls in progress on our data network (Communications)
 let ships = [];     // [{ name, ops, shields }]
 let stations = STATION_NAMES; // what the relay accepts (from its hello); all we know until then
 
@@ -139,10 +140,40 @@ function showStation() {
   }));
   stationView.setCrew(comms.users);
   renderShipState();
-  $('assignment').textContent = `${me.name}: ${me.station}, the ${me.ship}`;
-  $('new-station').replaceChildren(...stations.filter((n) => n !== me.station).map((n) => new Option(n, n)));
+  fillReassign();
+  renderTraffic();
   showScreen(stationView.sections[0].id);
 }
+
+// The Station screen: any other station, Operations included.
+function fillReassign() {
+  $('assignment').textContent = `${me.name}: ${me.station}, the ${me.ship}`;
+  $('new-station').replaceChildren(...['Operations', ...stations].filter((n) => n !== me.station).map((n) => new Option(n, n)));
+  $('reassign-error').textContent = '';
+  $('reassign-key').value = '';
+  $('reassign-key').hidden = $('new-station').value !== 'Operations';
+}
+
+// Communications: every call in progress on our data network, who's in it
+// and for how long. Metadata only; nobody listens in.
+function renderTraffic() {
+  const box = document.querySelector('[data-traffic]');
+  if (!box) return;
+  const ul = document.createElement('ul');
+  ul.className = 'traffic';
+  const fmt = (ms) => { const t = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+  for (const c of traffic) {
+    const li = document.createElement('li');
+    li.append(
+      Object.assign(document.createElement('span'), { className: `traffic-state${c.state === 'in-call' ? '' : ' traffic-state--ringing'}`, textContent: c.state === 'in-call' ? 'Open' : 'Ringing' }),
+      Object.assign(document.createElement('span'), { className: 'traffic-who', textContent: c.members.map((m) => comms.voice.label(m)).join('  ⟷  ') }),
+      Object.assign(document.createElement('span'), { className: 'traffic-time', textContent: fmt(Date.now() - c.since) }));
+    ul.append(li);
+  }
+  if (!traffic.length) ul.append(Object.assign(document.createElement('li'), { className: 'empty', textContent: 'No comm traffic' }));
+  box.replaceChildren(ul);
+}
+setInterval(renderTraffic, 1000);
 
 const ownShip = () => ships.find((s) => me && s.name.toLowerCase() === me.ship.toLowerCase());
 
@@ -201,10 +232,20 @@ function showOps() {
   setHeader('OPS', `${me.name} · ${me.ship}`, 'Operations');
   document.querySelector('.lcars-elbow--top').style.removeProperty('--elbow');
   for (const t of document.querySelectorAll('.ops-tab')) t.hidden = false;
-  $('reassign-tab').hidden = true;
+  $('reassign-tab').hidden = false;
   $('ops-view').hidden = false;
+  $('ops-log').replaceChildren();
   ops = createOps({ send, comms, me: () => me });
+  fillReassign();
   showScreen('status');
+}
+
+// Leaving the ops station for another one.
+function hideOps() {
+  ops = null;
+  $('ops-view').hidden = true;
+  $('transfer-form').hidden = true;
+  for (const t of document.querySelectorAll('.ops-tab')) t.hidden = true;
 }
 
 async function onMessage(msg) {
@@ -224,6 +265,7 @@ async function onMessage(msg) {
     case 'registered':
       me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station };
       token = msg.token;
+      if (ops) hideOps();
       if (msg.beamedFrom) log(`beamed from the ${msg.beamedFrom} to the ${me.ship}`);
       document.title = `LCARS: ${me.station} · ${me.ship}`;
       $('home').hidden = false;
@@ -256,6 +298,13 @@ async function onMessage(msg) {
     case 'operator-failed':
       $('register-error').textContent = `Access denied: ${msg.reason}`;
       $('register-form').querySelector('button').disabled = false;
+      break;
+    case 'station-failed':
+      $('reassign-error').textContent = `Access denied: ${msg.reason}`;
+      break;
+    case 'traffic':
+      traffic = msg.calls;
+      renderTraffic();
       break;
     case 'hello': {
       // Offer only the stations this relay accepts. If it lacks some this page
@@ -327,9 +376,11 @@ $('register-form').onsubmit = (e) => {
   if (opsSelected()) send({ type: 'operator', name: $('name').value.trim(), ship: $('ops-ship').value.trim(), key: $('key').value });
   else send({ type: 'register', name: $('name').value.trim(), ship: $('ship').value, station: $('station').value });
 };
+$('new-station').onchange = () => { $('reassign-key').hidden = $('new-station').value !== 'Operations'; };
 $('reassign-form').onsubmit = (e) => {
   e.preventDefault();
-  send({ type: 'change-station', station: $('new-station').value });
+  $('reassign-error').textContent = '';
+  send({ type: 'change-station', station: $('new-station').value, key: $('reassign-key').value });
 };
 
 // Comm relay: shown on the sign-in screen; changing it reconnects.

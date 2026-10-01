@@ -35,6 +35,13 @@
     .st-control .st-state[data-up] { color: var(--lcars-red); }
     .st-control .st-state:not([data-up]) { color: var(--lcars-sky); }
     .relay-form { margin-top: 6px; }
+    .traffic { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; text-transform: uppercase; }
+    .traffic li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 4px 0; border-bottom: 2px solid #1a1a1a; }
+    .traffic .traffic-state { padding: 2px 12px; border-radius: 999px; background: var(--lcars-sky); color: #000; font-size: 13px; }
+    .traffic .traffic-state--ringing { background: var(--lcars-gold); animation: lcars-blink 1.2s steps(2) infinite; }
+    .traffic .traffic-who { color: var(--lcars-gold); font-size: 19px; overflow-wrap: anywhere; }
+    .traffic .traffic-time { color: var(--lcars-tan); font-variant-numeric: tabular-nums; }
+    .traffic .empty { display: block; color: var(--lcars-tan); border: 0; }
     .relay-form .ops-input { min-width: 260px; flex: 1 1 260px; font-size: 15px; }
     /* ---------- ops screens (Operations station) ---------- */
     /* Roster table */
@@ -270,9 +277,11 @@
             <form class="ops-form" id="reassign-form">
               <span>Report to</span>
               <select class="ops-select" id="new-station" aria-label="new station"></select>
+              <input class="ops-input" id="reassign-key" type="password" placeholder="Authorization code (if required)" autocomplete="off" aria-label="operator authorization code" hidden>
               <button class="lcars-button lcars-button--pill">Change station</button>
             </form>
-            <p class="ops-hint">Moves you to another station aboard this ship. Calls in progress carry on. To change ships, ask the transporter room.</p>
+            <p class="lcars-note" id="reassign-error"></p>
+            <p class="ops-hint">Moves you to another station aboard this ship, Operations included. Calls in progress carry on. To change ships, ask the transporter room.</p>
           </div>
         </section>
       </div>

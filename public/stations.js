@@ -4,7 +4,8 @@
 // simulated (a gentle random walk), except the duty roster (who is actually
 // aboard) and the shields, which follow the ship's real shield state. The
 // Transporter and Tactical stations have live controls that client.js fills
-// in (elements marked data-transporter and data-shield-control).
+// in (elements marked data-transporter and data-shield-control), and
+// Communications has live comm traffic (data-traffic).
 //
 // renderStation(container, station, { ship }) -> { sections: [{ id, title, color }], setCrew(users), setShields(up) }
 // Each panel becomes its own screen (data-screen = panel id) that fills the window.
@@ -409,6 +410,7 @@
         ['Stellar cartography updated'], ['Class M planet catalogued'], ['Ion storm tracked at bearing 210', 'warn'], ['Spectrometer recalibrated']])),
     ] }),
     Communications: (ship) => ({ code: 'COM 09', color: 'peach', panels: [
+      panel('st-traffic', 'Comm traffic', 'sky', true, h('div', { 'data-traffic': '' })),
       panel('st-bands', 'Subspace bands', 'peach', true, spectrum(140, ['peach', 'orange', 'gold'], 48, 'Subspace band activity')),
       panel('st-signal', 'Carrier signal', 'sky', false, trace(110, 'sky', (t) => 0.7 * Math.sin(t * 14) * (0.7 + 0.3 * Math.sin(t * 0.7)) + rand(-0.04, 0.04), 160, 'Carrier signal'),
         live(gauge('Signal strength', 'sky'), drift(0.86, 0.7, 0.98, 0.03)),

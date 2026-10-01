@@ -44,7 +44,7 @@ Each crew member gets an LCARS console for their station, styled with `public/lc
 | Engineering | side view of the ship with the warp core, warp field harmonics, power distribution |
 | Medical | patient monitor with ECG and vitals, neural activity, sickbay, cellular analysis |
 | Science | long range sensors, spectral analysis, anomaly readings, science log |
-| Communications | subspace bands, carrier signal, message traffic |
+| Communications | **comm traffic** (every call in progress or ringing on the ship and its data network: who, and for how long; no listening in), subspace bands, carrier signal, message traffic |
 | Transporter | transporter controls (beam crew to another ship), transporter pad, pattern buffer |
 | Crew | ship schematic, ship status, deck status |
 
@@ -59,7 +59,7 @@ Comms opens an LCARS modal, the same for every role, ops included:
 
 ## Stations, transporters and shields
 
-- **Change station:** the **Station** screen moves you to another station aboard the same ship. Your console changes to the new station; calls in progress carry on. (The ops console always stays at Operations.)
+- **Change station:** the **Station** screen moves you to another station aboard the same ship, **Operations** included (with the authorization code if the relay requires one), and operators can move from Operations to any other station. Your console changes to the new station; calls in progress carry on. A ship can have several operators on duty, and any of them can route hails, manage data links, transfer calls and so on; the ship only loses off-ship comms when the last one leaves.
 - **Transporter:** the Transporter station beams anyone aboard (themselves included, but not the ops station) to another ship in the list. The person's call ends, they leave this ship's comm net and report aboard the other ship with the same name and station; both ships' ops see them leave and arrive. Beaming is refused if someone with that name is already aboard the destination.
 - **Shields:** the Tactical station raises and lowers the ship's shields. While a ship's shields are up, nobody can be beamed off it or onto it. Shield state shows on Tactical's shield grid, in the transporter's ship list and on the ops Status screen.
 
@@ -102,7 +102,7 @@ Starts the server and drives headless Chromium pages with a fake microphone thro
 - **Calls with ops:** crew calling ops, ops transferring the call aboard, ops calling crew.
 - **Ship to ship:** each ship sees only its own crew, and stations get their own displays. Then a hail routed to the Captain, a declined hail, a cancelled hail, and an off-ship transfer that the other ship's ops answers and passes on.
 - **Data links:** the map showing a pending request then the open link, a call across a data link, closing the link, and the link dropping with ops.
-- **Stations, transporter, shields:** changing station; shields up blocking the transporter; shields down and a crew member beamed to the K'Vatch.
+- **Stations, transporter, shields:** changing station (Transporter to Helm, Helm to Operations as a second operator who manages a data link with the first, back to Crew); Communications seeing a call in comm traffic without joining; shields up blocking the transporter; shields down and a crew member beamed to the K'Vatch.
 - **Hosting elsewhere:** the library endpoints answer cross-origin preflight requests.
 - **Library delete:** crew and other ships' ops are refused; ops delete from their own ship and the file is gone from disk and from everyone's library.
 - **Library:** an upload lands in `data/Enterprise/`, a shipmate sees it, a K'Vatch crew member downloads it over the data link, and access ends when the link closes.
@@ -127,7 +127,7 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 | `{type:"signal", to, cid, data}` | relay `{sdp}` or `{candidate}` |
 | `{type:"status", state, peers, cid}` | your call state and the ids in your call, shown to operators |
 | `{type:"merge", caller}` | call waiting, Join: bring user id `caller` (who is calling you) into your call |
-| `{type:"change-station", station}` | move to another station aboard your ship; reply `registered` with the new station |
+| `{type:"change-station", station, key?}` | move to another station aboard your ship; reply `registered`, or `operator-ok` for Operations (`station-failed` if the key is wrong) |
 | `{type:"shields", up}` | Tactical only: raise or lower the ship's shields |
 | `{type:"beam", who, ship}` | Transporter only: beam user id `who` (aboard your ship) to `ship`; they get `registered` with `beamedFrom` |
 
@@ -140,6 +140,7 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 | `{type:"connect", peers, role, cid}` | an operator connected you with `peers`; `role:"caller"` means you send the offers |
 | `{type:"add-peer", peer, cid}` | an operator is patching `peer` into your call; wait for their offer |
 | `{type:"force-hangup", reason?}` | an operator disconnected you, or your transfer went through (ops) |
+| `{type:"traffic", calls}` | Communications only: calls on your data network, `[{state, since, members}]` |
 | `{type:"notice", text}` | hail progress, for example "Ops is hailing the K'Vatch for you" |
 
 | Message (operator → server) | Meaning |

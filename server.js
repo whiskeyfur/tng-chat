@@ -127,6 +127,7 @@ const sameNetwork = (a, b) => network(a).has(b);
 // Crew see everyone aboard ships on their data network (just their own ship
 // when unlinked). `ops` says whether their own ship has ops on duty.
 function broadcastCrew(key) {
+  queueMicrotask(broadcastTraffic);
   const net = network(key);
   const list = [...net].flatMap(crewOf).map(info)
     .sort((a, b) => a.ship.localeCompare(b.ship) || a.name.localeCompare(b.name));
@@ -543,6 +544,63 @@ async function libraryRequest(req, res, urlPath) {
   await pipeline(fs.createReadStream(file), res);
 }
 
+// --- ops station on and off duty --------------------------------------------------
+
+// Someone takes (or moves to) a ship's ops station. Several can be on duty;
+// any of them can route hails, manage links and so on.
+function joinOps(ws) {
+  ws.operator = true;
+  ws.station = OPS_STATION;
+  operators.add(ws);
+  send(ws, { type: 'operator-ok', ...info(ws), token: ws.token });
+  broadcastAllOps();          // other ships now see this one
+  broadcastShips();           // crew can report aboard
+  broadcastCrew(ws.shipKey);  // crew aboard: ops is on duty and callable
+}
+
+// An operator leaves the ops station (signs off or moves to another station).
+// If they were the last one, the ship loses off-ship comms: pending hails and
+// link requests are dropped and its data links close. Calls in progress go on.
+function leaveOps(ws) {
+  operators.delete(ws);
+  ws.operator = false;
+  console.log(`${ws.name} left the ops station on the ${ws.ship}`);
+  if (!opsOf(ws.shipKey).length) {
+    dropHails((h) => h.toShip === ws.shipKey || h.fromShip === ws.shipKey, `no operator on duty aboard the ${ws.ship}`);
+    const formerNet = [...network(ws.shipKey)];
+    for (const k of linkedTo(ws.shipKey)) { links.delete(linkKey(ws.shipKey, k)); opLog(k, `data link with the ${ws.ship} lost: no operator on duty`); }
+    for (const req of [...linkRequests.values()]) if (req.fromShip === ws.shipKey || req.toShip === ws.shipKey) linkRequests.delete(req.id);
+    refreshNetworks(formerNet);
+  }
+  broadcastAllOps();
+  broadcastShips();
+}
+
+// --- comm traffic (Communications station) ------------------------------------
+
+// Every call in progress (or ringing) that involves someone on this ship's data
+// network: who is in it and since when. Metadata only; nobody listens in.
+function trafficFor(key) {
+  const net = network(key);
+  const involved = [...users.values()].filter((u) => u.state !== 'idle' && u.cid);
+  const calls = new Map();
+  for (const u of involved) {
+    const others = u.peers.map((id) => users.get(id)).filter(Boolean);
+    if (![u, ...others].some((m) => net.has(m.shipKey))) continue;
+    const c = calls.get(u.cid) || { state: u.state === 'in-call' ? 'in-call' : 'ringing', since: u.callSince || Date.now(), members: new Map() };
+    for (const m of [u, ...others]) c.members.set(m.id, info(m));
+    if (u.state === 'in-call') c.state = 'in-call';
+    c.since = Math.min(c.since, u.callSince || Date.now());
+    calls.set(u.cid, c);
+  }
+  return [...calls.values()].map((c) => ({ state: c.state, since: c.since, members: [...c.members.values()] }))
+    .sort((a, b) => a.since - b.since);
+}
+
+function broadcastTraffic() {
+  for (const u of users.values()) if (u.station === 'Communications') send(u, { type: 'traffic', calls: trafficFor(u.shipKey) });
+}
+
 // --- connections -------------------------------------------------------------
 
 wss.on('connection', (ws) => {
@@ -565,29 +623,26 @@ wss.on('connection', (ws) => {
       if (!NAME_RE.test(ship)) return send(ws, { type: 'operator-failed', reason: 'enter your ship name (letters, digits, spaces, \' . -)' });
       const id = userId(name, ship);
       if (users.has(id)) return send(ws, { type: 'operator-failed', reason: `${name} is already aboard the ${shipName(shipKey(ship))}` });
-      ws.operator = true;
       ws.id = id;
       ws.name = name;
       ws.shipKey = registerShip(ship);
       ws.ship = shipName(ws.shipKey);
-      ws.station = OPS_STATION;
-      operators.add(ws);
       users.set(id, ws);
       ws.token = crypto.randomBytes(16).toString('hex');
       tokens.set(ws.token, ws);
-      send(ws, { type: 'operator-ok', ...info(ws), token: ws.token });
       console.log(`${name} took the ops station on the ${ws.ship}`);
-      broadcastAllOps();          // other ships now see this one
-      broadcastShips();           // crew can report aboard
-      broadcastCrew(ws.shipKey);  // crew aboard: ops is on duty and callable
+      joinOps(ws);
       return;
     }
     if (ws.operator && OP_COMMANDS.has(msg.type)) return operatorMessage(ws, msg);
 
     if (msg.type === 'status' && ws.id && STATES.has(msg.state)) {
+      const cid = typeof msg.cid === 'string' ? msg.cid : null;
+      if (cid !== ws.cid) ws.callSince = cid ? Date.now() : null;
       ws.state = msg.state;
       ws.peers = Array.isArray(msg.peers) ? msg.peers.filter((n) => typeof n === 'string').slice(0, 50) : [];
-      ws.cid = typeof msg.cid === 'string' ? msg.cid : null;
+      ws.cid = cid;
+      broadcastTraffic();
       // Everyone this person is talking to may be on other ships' rosters too.
       new Set([ws.shipKey, ...ws.peers.map((id) => users.get(id)?.shipKey).filter(Boolean)]).forEach(broadcastOps);
       return;
@@ -618,13 +673,24 @@ wss.on('connection', (ws) => {
     }
 
     // Move to another station aboard the same ship.
-    if (msg.type === 'change-station' && ws.id && !ws.operator) {
-      if (!STATIONS.includes(msg.station)) return send(ws, { type: 'notice', text: 'No such station' });
+    // Moving to Operations takes an ops station (with the key, if one is set);
+    // an operator moving elsewhere leaves it.
+    if (msg.type === 'change-station' && ws.id) {
+      if (msg.station !== OPS_STATION && !STATIONS.includes(msg.station)) return send(ws, { type: 'notice', text: 'No such station' });
       if (msg.station === ws.station) return;
       const was = ws.station;
+      if (msg.station === OPS_STATION) {
+        if (OPERATOR_KEY && msg.key !== OPERATOR_KEY) return send(ws, { type: 'station-failed', reason: 'wrong operator key' });
+        opLog(ws.shipKey, `${ws.name} moved from ${was} to the ops station`);
+        joinOps(ws);
+        broadcastTraffic();
+        return;
+      }
+      if (ws.operator) leaveOps(ws);
       ws.station = msg.station;
       send(ws, { type: 'registered', ...info(ws), token: ws.token });
       broadcastCrew(ws.shipKey);
+      broadcastTraffic();
       opLog(ws.shipKey, `${ws.name} moved from ${was} to ${ws.station}`);
       return;
     }
@@ -683,21 +749,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     sockets.delete(ws);
     tokens.delete(ws.token);
-    if (ws.operator) {
-      operators.delete(ws);
-      console.log(`ops station on the ${ws.ship} offline`);
-      if (!opsOf(ws.shipKey).length) {
-        // Pending hails to or from this ship can no longer start a call.
-        // Other calls already in progress are untouched.
-        dropHails((h) => h.toShip === ws.shipKey || h.fromShip === ws.shipKey, `no operator on duty aboard the ${ws.ship}`);
-        // ...and its data links close (calls already going over them continue).
-        const formerNet = [...network(ws.shipKey)];
-        for (const k of linkedTo(ws.shipKey)) { links.delete(linkKey(ws.shipKey, k)); opLog(k, `data link with the ${ws.ship} lost: no operator on duty`); }
-        for (const req of [...linkRequests.values()]) if (req.fromShip === ws.shipKey || req.toShip === ws.shipKey) linkRequests.delete(req.id);
-        refreshNetworks(formerNet);
-      }
-      broadcastAllOps();
-    }
+    if (ws.operator) leaveOps(ws);
     if (ws.id) signOut(ws);
   });
 

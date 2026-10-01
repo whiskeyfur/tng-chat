@@ -538,6 +538,44 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await chief.locator('[data-transporter]').count(), 0);
     await op.waitForFunction(() => window.__operator.roster.find((u) => u.name === 'chief')?.station === 'Helm');
     step('signed in as Transporter, then changed station to Helm');
+
+    // Moving to Operations: chief becomes a second Enterprise operator, and
+    // either operator can manage data links.
+    await screen(chief, 'reassign');
+    await chief.selectOption('#new-station', 'Operations');
+    await chief.click('#reassign-form button');
+    await chief.waitForSelector('[data-screen="status"]:not([hidden])');
+    await op.waitForFunction(() => window.__operator.roster.find((u) => u.name === 'chief')?.station === 'Operations');
+    await screen(chief, 'link');
+    await chief.selectOption('#link-ship', "K'Vatch");
+    await chief.click('#link-form button');
+    await op.waitForSelector('#link-requests li:has-text("Requesting a data link with the K\'Vatch")', { state: 'attached' });
+    await screen(kops, 'link');
+    await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
+    await chief.waitForFunction(() => window.__operator.network.includes("K'Vatch"));
+    await screen(op, 'link');
+    await op.click('#links li:has-text("K\'Vatch") button'); // the other operator closes it
+    await chief.waitForFunction(() => window.__operator.network.length === 0);
+    step('chief moved to Operations; two operators on duty, either one manages data links');
+
+    // And back from Operations to a crew station.
+    await screen(chief, 'reassign');
+    assert.equal(await chief.locator('#new-station option[value="Operations"]').count(), 0);
+    await chief.selectOption('#new-station', 'Crew');
+    await chief.click('#reassign-form button');
+    await chief.waitForFunction(() => window.__voice.me.station === 'Crew' && !window.__operator.roster);
+    assert.equal(await chief.locator('.ops-tab:not([hidden])').count(), 0);
+    await op.waitForFunction(() => window.__operator.roster.find((u) => u.name === 'chief')?.station === 'Crew');
+    step('chief left Operations for Crew; the Enterprise still has ops on duty');
+
+    // Communications sees the calls going on without joining them.
+    const uhura = await openAs(browser, 'uhura', 'uhura', 'Enterprise', 'Communications');
+    await uhura.waitForSelector('[data-traffic] li:has-text("alice"):has-text("martok")', { state: 'attached' });
+    assert.match(await uhura.textContent('[data-traffic]'), /Open/);
+    assert.deepEqual(await alice.evaluate(() => window.__voice.peerNames()), ['martok'], 'Communications joined the call');
+    assert.equal(await uhura.evaluate(() => window.__voice.state), 'idle');
+    await uhura.close();
+    step('Communications sees alice and martok\'s call in comm traffic without joining it');
     for (const page of [chief, wes]) await page.close();
 
     // Pages hosted elsewhere (GitHub Pages) can use this server as their relay.
