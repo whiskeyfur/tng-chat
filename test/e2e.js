@@ -14,6 +14,7 @@ const { chromium } = require('playwright');
 process.env.PORT = process.env.PORT || '8099';
 // Ship's computers keep their libraries in a scratch folder for the test.
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-test-'));
+process.env.STATE_FILE = path.join(DATA_DIR, 'relay-state.json'); // remembered ship names
 const computers = new Set();
 // Start a ship's computer (tools/shipcore.js) for some ships, with its own folder.
 function startComputer(folder, ...ships) {
@@ -577,7 +578,24 @@ const audioBytes = (page) => page.evaluate(async () => {
     await lobby2.close();
     await stopComputer(voyager);
     await op.waitForFunction(() => !window.__operator.graph.ships.some((s) => s.name === 'Voyager'));
-    step("a ship's computer kept the Voyager in the ship list with nobody aboard, until it stopped");
+    step("a ship's computer kept the Voyager alive with nobody aboard, until it stopped");
+
+    // The relay remembers the Voyager and still offers it.
+    const lobby3 = await (await browser.newContext()).newPage();
+    await lobby3.goto(URL);
+    await lobby3.waitForSelector('#ship option[value="Voyager"]:has-text("no one aboard")', { state: 'attached' });
+    // No OPERATOR_KEY on this relay, so no authorization code field.
+    await lobby3.selectOption('#station', 'Operations');
+    assert.equal(await lobby3.isVisible('#key'), false, 'code field shown with no key required');
+    assert.ok((await lobby3.$$eval('#known-ships option', (o) => o.map((x) => x.value))).includes('Voyager'));
+    await lobby3.selectOption('#station', 'Crew');
+    await lobby3.fill('#name', 'kim');
+    await lobby3.selectOption('#ship', 'Voyager');
+    await lobby3.click('#register-form button');
+    await lobby3.waitForFunction(() => window.__voice.me?.ship === 'Voyager');
+    await lobby3.close();
+    assert.ok(JSON.parse(fs.readFileSync(process.env.STATE_FILE, 'utf8')).ships.includes('Voyager'));
+    step('the relay remembers past ships (saved to its state file) and offers them; kim reported aboard the empty Voyager');
 
     // Changing station aboard the same ship.
     await closeComms(carol);

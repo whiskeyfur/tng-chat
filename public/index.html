@@ -131,7 +131,8 @@
           <form class="ops-form" id="register-form">
             <input class="ops-input" id="name" placeholder="Your name" autocomplete="off" required>
             <select class="ops-select" id="ship" aria-label="ship"></select>
-            <input class="ops-input" id="ops-ship" placeholder="Ship (new or existing)" autocomplete="off" aria-label="ship" hidden>
+            <input class="ops-input" id="ops-ship" placeholder="Ship (new or existing)" autocomplete="off" aria-label="ship" list="known-ships" hidden>
+            <datalist id="known-ships"></datalist>
             <select class="ops-select" id="station" aria-label="station" required></select>
             <input class="ops-input" id="key" type="password" placeholder="Authorization code (if required)" autocomplete="off" aria-label="operator authorization code" hidden>
             <button class="lcars-button lcars-button--pill">Report aboard</button>

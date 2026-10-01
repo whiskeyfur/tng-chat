@@ -17,7 +17,7 @@ Everyone uses the same page, http://localhost:8080:
 
 `operator.html` still works as a link to the Operations sign-in.
 
-The relay stores nothing on disk. Libraries live on ship's computers (see below). `MAX_UPLOAD_MB` changes the upload limit (default 200).
+The relay remembers the names of every ship it has seen in `relay-state.json` (set `STATE_FILE` to move it, or to an empty string to keep them in memory only), and offers them all at sign-in even when nobody is aboard: ships without ops show "(ops offline)", empty ones "(no one aboard)". It stores nothing else on disk; libraries live on ship's computers (see below). `MAX_UPLOAD_MB` changes the upload limit (default 200).
 
 ### Hosting the pages elsewhere (GitHub Pages)
 
@@ -94,7 +94,7 @@ Pick **Operations** at sign-in, or open `?station=Operations&name=O'Brien&ship=E
 
 The ops menu has Comms, Status (channel readouts and the comm log), Hail, Data link, Intercom (intercom and conference), Crew roster and, at the bottom, Library.
 
-By default anyone can take an ops station. To require a key, start the server with `OPERATOR_KEY=yourkey npm start` and enter it as the authorization code.
+**Authorization code:** by default anyone can take an ops station, and the code field doesn't appear. Start the relay with `OPERATOR_KEY=yourkey npm start` and taking an ops station (at sign-in or on the Station screen) asks for that code, as does running a ship's computer (`--key`). Ops can force-connect people, disconnect them, transfer calls, open data links and all-hands broadcasts and delete library files, so the code keeps crew from making themselves ops. To require a key, start the server with `OPERATOR_KEY=yourkey npm start` and enter it as the authorization code.
 
 ### When ops drops out
 

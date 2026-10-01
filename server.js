@@ -43,6 +43,8 @@ const PORT = process.env.PORT || 8080;
 const OPERATOR_KEY = process.env.OPERATOR_KEY || '';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const RELAY_NAME = process.env.RELAY_NAME || 'Subspace Relay Station 47';
+// Ship names the relay has seen, remembered across restarts (names only).
+const STATE_FILE = process.env.STATE_FILE ?? path.join(__dirname, 'relay-state.json');
 const MAX_UPLOAD = Number(process.env.MAX_UPLOAD_MB || 200) * 1024 * 1024;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, ...
@@ -107,8 +109,26 @@ function send(ws, msg) {
 
 function registerShip(name) {
   const key = shipKey(name);
-  if (!ships.has(key)) ships.set(key, name);
+  if (!ships.has(key)) { ships.set(key, name); saveState(); }
   return key;
+}
+
+// Remember every ship ever seen, so it's offered even when nobody's aboard.
+function loadState() {
+  if (!STATE_FILE) return;
+  try {
+    for (const name of JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')).ships || []) {
+      if (typeof name === 'string' && NAME_RE.test(name)) ships.set(shipKey(name), name);
+    }
+  } catch { /* first run */ }
+}
+let saveTimer = null;
+function saveState() {
+  if (!STATE_FILE || saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    fs.writeFile(STATE_FILE, JSON.stringify({ ships: [...ships.values()].sort() }, null, 2), (err) => { if (err) console.error('could not save relay state:', err.message); });
+  }, 200);
 }
 
 // --- broadcasts --------------------------------------------------------------
@@ -183,19 +203,19 @@ function broadcastOps(key) {
 // shields, every open data link and every pending link request.
 function networkGraph() {
   return {
-    ships: shipList().map((sh) => ({ ...sh, crew: crewOf(shipKey(sh.name)).length })),
+    ships: shipList().filter((sh) => sh.active).map((sh) => ({ ...sh, crew: crewOf(shipKey(sh.name)).length })),
     links: [...links].map((l) => l.split('|').map(shipName)),
     requests: [...linkRequests.values()].map((r) => [shipName(r.fromShip), shipName(r.toShip)]),
   };
 }
 
-// Ships crew can report aboard: those with an ops station on duty or a ship's
-// computer online, plus those whose ops dropped out while crew are still
-// aboard (no off-ship comms there).
+// Every ship the relay knows. `active`: someone (ops, crew or a ship's
+// computer) is there right now; the others are remembered from before.
 function shipList() {
-  const keys = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys()]);
-  return [...keys].map((k) => ({ name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: cores.has(k) }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys()]);
+  return [...new Set([...ships.keys(), ...live])].map((k) => ({
+    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: cores.has(k), active: live.has(k),
+  })).sort((a, b) => a.name.localeCompare(b.name));
 }
 // Everyone gets the ship list: the sign-in pull-down, transporter targets,
 // and shield status.
@@ -1052,9 +1072,10 @@ wss.on('connection', (ws) => {
 
   // The relay's own station list, so pages only offer stations it accepts
   // (and can tell when the relay is older than the pages).
-  send(ws, { type: 'hello', relay: RELAY_NAME, stations: STATIONS, version: require('./package.json').version });
+  send(ws, { type: 'hello', relay: RELAY_NAME, stations: STATIONS, opsKey: !!OPERATOR_KEY, version: require('./package.json').version });
   send(ws, { type: 'ships', ships: shipList() });
 });
 
+loadState();
 server.listen(PORT, () => console.log(`${RELAY_NAME} on http://localhost:${PORT}`));
 module.exports = server;

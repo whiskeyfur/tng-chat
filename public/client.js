@@ -16,6 +16,7 @@ let ops = null;     // the ops screens, when signed in at Operations
 let traffic = [];   // calls in progress on our data network (Communications)
 let ships = [];     // [{ name, ops, shields }]
 let relayName = 'Comm relay';   // the relay's name, from its hello
+let opsKeyRequired = true;      // whether the relay asks ops for an authorization code (from its hello)
 let stations = STATION_NAMES; // what the relay accepts (from its hello); all we know until then
 
 const $ = (id) => document.getElementById(id);
@@ -103,14 +104,16 @@ function setHeader(code, sub, title) {
   $('station-title').textContent = title;
 }
 
-// Ships come from their ops stations: [{ name, ops }]. A ship whose ops
-// dropped out is still listed while crew are aboard, marked "ops offline".
+// Every ship the relay knows: [{ name, ops, active }]. Ships without ops on
+// duty are marked; remembered ships with nobody there say so.
 function renderShips(ships) {
   const sel = $('ship');
   const keep = sel.value || savedReg?.ship || '';
   const placeholder = new Option(ships.length ? 'Ship' : 'No ships with ops on duty', '');
   placeholder.disabled = true;
-  sel.replaceChildren(placeholder, ...ships.map((s) => new Option(s.ops ? s.name : `${s.name} (ops offline)`, s.name)));
+  sel.replaceChildren(placeholder, ...ships.map((s) => new Option(s.ops ? s.name : s.active ? `${s.name} (ops offline)` : `${s.name} (no one aboard)`, s.name)));
+  // Suggestions when typing a ship for an ops station.
+  $('known-ships').replaceChildren(...ships.map((s) => new Option(s.name)));
   const match = ships.find((s) => s.name.toLowerCase() === keep.toLowerCase());
   sel.value = match?.name || '';
   updateSignInMode();
@@ -123,7 +126,7 @@ function updateSignInMode() {
   const isOps = opsSelected();
   $('ship').hidden = isOps;
   $('ops-ship').hidden = !isOps;
-  $('key').hidden = !isOps;
+  $('key').hidden = !isOps || !opsKeyRequired;
   $('register-form').querySelector('button').disabled = !isOps && $('ship').options.length <= 1;
   $('register-form').querySelector('button').textContent = isOps ? 'Take ops station' : 'Report aboard';
 }
@@ -155,7 +158,7 @@ function fillReassign() {
   $('new-station').replaceChildren(...['Operations', ...stations].filter((n) => n !== me.station).map((n) => new Option(n, n)));
   $('reassign-error').textContent = '';
   $('reassign-key').value = '';
-  $('reassign-key').hidden = $('new-station').value !== 'Operations';
+  $('reassign-key').hidden = $('new-station').value !== 'Operations' || !opsKeyRequired;
 }
 
 // Communications: every call in progress on our data network, who's in it
@@ -318,6 +321,8 @@ async function onMessage(msg) {
       renderTraffic();
       break;
     case 'hello': {
+      opsKeyRequired = msg.opsKey !== false; // older relays don't say: show it
+      updateSignInMode();
       if (msg.relay) {
         relayName = msg.relay;
         setLink('online', `${relayName} online`);
@@ -392,7 +397,7 @@ $('register-form').onsubmit = (e) => {
   if (opsSelected()) send({ type: 'operator', name: $('name').value.trim(), ship: $('ops-ship').value.trim(), key: $('key').value });
   else send({ type: 'register', name: $('name').value.trim(), ship: $('ship').value, station: $('station').value });
 };
-$('new-station').onchange = () => { $('reassign-key').hidden = $('new-station').value !== 'Operations'; };
+$('new-station').onchange = () => { $('reassign-key').hidden = $('new-station').value !== 'Operations' || !opsKeyRequired; };
 $('reassign-form').onsubmit = (e) => {
   e.preventDefault();
   $('reassign-error').textContent = '';
