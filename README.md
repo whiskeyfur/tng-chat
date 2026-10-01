@@ -54,6 +54,7 @@ Comms opens an LCARS modal, the same for every role, ops included:
 
 - **Directory:** everyone you can call. That's your ship (ops first, as **Call ops**), plus every ship on your data network.
 - **Call panel:** incoming calls with Accept and Decline, then mute, hang up, chat and files (any size, sent in 16 KB chunks). The microphone is only requested once a call connects.
+- **Subspace radio:** search internet radio stations (the free, community-run [Radio Browser](https://www.radio-browser.info/) directory) or tune any stream URL, and listen on your console. During a call, **Patch into call** mixes the station into what you send, alongside your mic (Mute still mutes just your mic), so everyone on the call hears it; the call's chat notes when someone patches radio in or out. Patching needs the station's server to allow cross-site access (CORS), which many Icecast servers do; stations that don't still play locally, with Patch disabled. Pages served over https can only play https streams. The radio search and streams go straight from the browser to radio-browser.info and the station's own servers.
 - **Call waiting:** while you're in a call, a second caller shows up as "call waiting" with three choices. **Ignore** tells them you're busy. **Switch** hangs up your current call and answers them. **Join** brings them into the call you're in, so everyone hears everyone. If your call ends while someone's waiting, their call rings. Anyone else calling while you're busy, ringing or dialling hears busy.
 - The modal opens by itself for an incoming or waiting call, or when an operator puts you through. Calls carry on while it's closed, and the Comms button shows the call state.
 
@@ -97,6 +98,7 @@ npm test
 Starts the server and drives headless Chromium pages with a fake microphone through crew consoles and ops consoles:
 
 - **Crew calls:** decline; accept with audio both ways; chat; a 300 KB file arrives byte-for-byte; hang-up; a peer going offline.
+- **Subspace radio:** a local test station (a tone) tuned by URL and patched into a call (the outgoing track switches to the mix, the other side sees the note, the call stays up), unpatched back to the mic; a station without CORS plays locally with Patch disabled.
 - **Call waiting:** ignore (the caller hears busy), the caller giving up, join (three-way), switch, and a waiting call ringing once the current one ends.
 - **Operator actions:** intercom, moving someone, patching a third person in (everyone hears everyone, chat and files reach everyone), one person leaving a three-way call, disconnect.
 - **Calls with ops:** crew calling ops, ops transferring the call aboard, ops calling crew.
@@ -113,6 +115,7 @@ If Playwright can't find its browser, set `CHROMIUM_PATH` to a Chromium binary.
 ## How it works
 
 - `server.js` keeps everyone online by id (`name@ship`, lowercased), with their ship and station. It sends each person the crew list for their data network (just their ship when unlinked), relays call-control and signal messages to a user id, and adds `from` and `fromInfo`. A `call` to someone off your network is refused with `unavailable`. Each ship's ops consoles get a roster of that ship's crew, the ships in range, their links and network, and the open hails and link requests. Hails and link requests live on the server until answered or until a party goes away.
+- `public/radio.js` is Subspace radio; patching uses `voice.setRadio()`, which mixes mic and radio with Web Audio and swaps the outgoing track on every connection (`RTCRtpSender.replaceTrack`, no renegotiation).
 - `public/relay.js` finds the comm relay (same server by default, or `config.js`, `?relay=`, or the sign-in field).
 - `public/voice.js` is the call engine and call panel. `public/comms.js` builds the Comms modal around it: the directory, plus optional extras like Transfer. `public/library.js` is the Library screen and `public/screens.js` switches screens. All of these are shared by the crew console (`public/client.js`, with the station displays in `public/stations.js`) and, at the Operations station, the ops screens (`public/ops.js`), all on the one console page. Shared console styles are in `public/console.css`.
 - The library lives on disk. `GET /api/library/<ship>/<file>` downloads from any ship on your data network, and `POST /api/library` (headers `X-Token` and `X-Filename`, the file as the body) uploads to your own ship, and `DELETE /api/library/<ship>/<file>` deletes (ops only, own ship only). The `X-Token` comes from `registered` or `operator-ok`. After every change, the server sends `{type:"library", ships:[{name, own, files:[{name, size, modified}]}]}` to everyone on the data network.
