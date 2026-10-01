@@ -1483,6 +1483,12 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(cold.core, 'offline');
     assert.equal(cold.antimatter + cold.deuterium, 0);
     assert.ok(['solar', 'dock', 'ship', 'core', 'battery', 'containment', 'crosslink'].every((k) => !cold.ties[k].length), 'a new ship should start with no power source tied in'); assert.ok(Object.values(cold.drives).every((d) => d.state === 'off') && Object.values(cold.taps).every((t) => t === 0), 'drives off and taps closed');
+    // A source tied to two buses splits evenly, but what one bus can't use goes to the other:
+    // solar (25) on Bus A (short) and Bus C (nothing tied to it) gives A all 25.
+    barclay.send({ type: 'grid', ties: { solar: ['A', 'C'] } });
+    await waitFor(() => { const c = barclay.nav()?.own.grid.cells.solar; return c?.A === 25 && c.C === 0; });
+    barclay.send({ type: 'grid', ties: { solar: [] } });
+    step('solar tied to Bus A (short) and Bus C (no load): Bus A got all 25, not half');
     ro.send({ type: 'lock', ship: 'Enterprise' });
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /console offline/.test(m.text)));
     barclay.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'] } }); // dock power on Bus A, shared with B

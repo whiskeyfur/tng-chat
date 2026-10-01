@@ -1500,7 +1500,7 @@ function flow(k) {
   const maxOf = (X) => BUS_MAX[X] * Math.max(0, 1 - (c.damage[`bus${X}`] || 0) / 100);
   const busRoom = (node) => pool(node).reduce((n, X) => n + maxOf(X) - buses[X].have, 0);
   const tapRoom = (node) => pool(node).reduce((n, X) => n + Math.max(0, e.taps[X] - buses[X].tapUsed), 0);
-  const take = (node, amt) => {
+  const take = (node, amt, topUp = false) => {
     let got = 0;
     const bus = buses[node];
     const pull = (s, eps, side = node) => {
@@ -1519,7 +1519,7 @@ function flow(k) {
       for (const side of sides) for (const s of srcs) if ((s.name === 'battery') === last && s.ties.includes(side)) pull(s, node === 'EPS', side);
       if (bus) for (const s of srcs) if ((s.name === 'battery') === last && s.ties.includes('EPS')) pull(s, true);
     }
-    if (bus) { bus.need += amt; bus.have += got; }
+    if (bus) { if (!topUp) bus.need += amt; bus.have += got; }
     return got;
   };
   // What's tied to each node, for the breakers (a split load counts its share on each).
@@ -1531,12 +1531,15 @@ function flow(k) {
   const tiesFor = (key) => (key.startsWith('feed:') ? e.ties.ship : e.ties[key]) || [];
   // A load tied to several buses is split evenly across them (each bus
   // serves its share); its cell row records where its power came from.
-  const serve = (key, amt) => {
+  // topUp: a second go at what a load is still short, once each source's even
+  // split is lifted (its share a tied bus didn't use goes to the others).
+  const serve = (key, amt, topUp = false) => {
     const row = cells[key] || (cells[key] = blank());
     const ties = tiesFor(key);
     if (!ties.length || amt <= 0) return 0;
-    const part = amt / ties.length, counted = sustained(key, amt) / ties.length;
     let got = 0;
+    if (topUp) { for (const n of ties) { const t = take(n, amt - got, true); row[n] += t; got += t; } return got; }
+    const part = amt / ties.length, counted = sustained(key, amt) / ties.length;
     for (const n of ties) {
       if (counted > 0) { tied[n] += counted; if (!NEVER_TRIP.has(key)) trippable.push({ key, node: n, amt: counted }); }
       const t = take(n, part); row[n] += t; got += t;
@@ -1570,11 +1573,13 @@ function flow(k) {
   const bt = e.ties.battery;
   const usedOf = (name) => { const src = srcs.find((x) => x.name === name); return src.ties.length ? cap[name] - src.left : 0; };
   let charging = 0;
-  const chargeFrom = (X) => {
+  // split: whether sources tied to several buses may charge it yet (only
+  // once their unused shares have gone to the buses still short).
+  const chargeFrom = (X, split) => {
     if (!bt.includes(X) || usedOf('battery') > 0) return;
     const room = Math.min(GRID.batteryCharge, GRID.batteryCap - e.battery.charge);
     for (const x of srcs) {
-      if (x.name === 'battery' || charging >= room) continue;
+      if (x.name === 'battery' || charging >= room || (!split && x.ties.length > 1)) continue;
       const sides = pool(X);
       const direct = sides.some((y) => x.ties.includes(y));
       if (!(direct || (tapRoom(X) > 0 && x.ties.includes('EPS')))) continue;
@@ -1588,11 +1593,18 @@ function flow(k) {
       cells.battery[X] -= t; // shown as a draw on the battery row
     }
   };
+  const order = [];
   for (const X of NODES) {
-    for (const [key, amt] of loads) if (tiesFor(key).length === 1 && tiesFor(key)[0] === X) got[key] = serve(key, amt);
-    if (X !== 'EPS') chargeFrom(X);
+    for (const l of loads) if (tiesFor(l[0]).length === 1 && tiesFor(l[0])[0] === X) { order.push(l); got[l[0]] = serve(...l); }
+    if (X !== 'EPS') chargeFrom(X, false);
   }
-  for (const n of [2, 3]) for (const [key, amt] of loads) if (tiesFor(key).length === n) got[key] = serve(key, amt);
+  for (const n of [2, 3]) for (const l of loads) if (tiesFor(l[0]).length === n) { order.push(l); got[l[0]] = serve(...l); }
+  // A source tied to several buses splits evenly, but a share one bus can't
+  // use goes to the others that are still short; only then is it surplus,
+  // and charges the batteries.
+  for (const x of srcs) x.share = null;
+  for (const [key, amt] of order) if ((got[key] || 0) < amt - 1e-9) got[key] += serve(key, amt - (got[key] || 0), true);
+  for (const X of BUSES) chargeFrom(X, true);
   const amtOf = Object.fromEntries(loads);
   const full = (key) => (got[key] || 0) >= amtOf[key] - 1e-9;
   const subOk = {};
