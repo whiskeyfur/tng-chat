@@ -419,25 +419,6 @@ function renderCrewPanels() {
     for (const b of cmd.querySelectorAll('#alert-buttons button')) b.setAttribute('aria-pressed', String(b.dataset.level === level));
   }
 
-  // Orders (Captain, First Officer): the form, and who has acknowledged each order given.
-  for (const box of document.querySelectorAll('[data-orders], [data-command]')) {
-    let tally = box.querySelector('.order-tally');
-    if (box.matches('[data-orders]') && !box.firstChild) {
-      const text = el('input', { className: 'ops-input', id: 'order-text', placeholder: 'Orders to the crew aboard', autocomplete: 'off' });
-      const form = el('form', { className: 'ops-form' }, text, el('button', { className: 'lcars-button lcars-button--pill', id: 'order-send', textContent: 'Issue order' }));
-      form.onsubmit = (e) => { e.preventDefault(); if (text.value.trim()) send({ type: 'order', text: text.value.trim() }); text.value = ''; };
-      box.append(form, el('p', { className: 'ops-hint', textContent: 'Everyone aboard but you and the Captain is asked to acknowledge.' }));
-    }
-    if (!tally) { tally = el('ul', { className: 'st-list order-tally' }); box.append(tally); }
-    if (changed(tally, [...sentOrders.values()])) {
-      tally.replaceChildren(...[...sentOrders.values()].slice(-5).reverse().map((o) => {
-        const li = el('li', {}, o.text, el('span', { textContent: o.pending.length ? `${o.acked.length} acknowledged · waiting for ${o.pending.join(', ')}` : o.acked.length ? `all ${o.acked.length} acknowledged` : 'nobody to acknowledge' }));
-        li.dataset.order = o.id;
-        return li;
-      }));
-    }
-  }
-
   // First Officer: reassign crew.
   const ra = document.querySelector('[data-reassign]');
   if (ra && changed(ra, crewSig, stations)) {
@@ -448,7 +429,8 @@ function renderCrewPanels() {
     ra.replaceChildren(
       el('div', { className: 'ops-form' }, el('span', { textContent: 'Reassign' }), who, el('span', { textContent: 'to' }), st,
         button('Reassign', () => send({ type: 'reassign', who: who.value, station: st.value }))),
-      el('p', { className: 'ops-hint', textContent: 'Covers unmanned departments: the crew member\'s console switches to the new station.' }));
+      el('p', { className: 'ops-hint', textContent: 'Sent as an order: the crew member moves when they acknowledge it (or declines it). Force fields hold, as for walking.' }),
+      el('ul', { className: 'st-list order-tally' }));
   }
 
   // Security: transporter lockout, confinement, beam-in alerts.
@@ -496,6 +478,25 @@ function renderCrewPanels() {
       })),
       el('p', { className: 'ops-hint', textContent: 'Crew in sickbay are off duty: they don\'t count in department readiness.' }));
   }
+  // Orders (Captain, First Officer): the form, and who has acknowledged each order given.
+  for (const box of document.querySelectorAll('[data-orders], [data-command], [data-reassign]')) {
+    let tally = box.querySelector('.order-tally');
+    if (box.matches('[data-orders]') && !box.firstChild) {
+      const text = el('input', { className: 'ops-input', id: 'order-text', placeholder: 'Orders to the crew aboard', autocomplete: 'off' });
+      const form = el('form', { className: 'ops-form' }, text, el('button', { className: 'lcars-button lcars-button--pill', id: 'order-send', textContent: 'Issue order' }));
+      form.onsubmit = (e) => { e.preventDefault(); if (text.value.trim()) send({ type: 'order', text: text.value.trim() }); text.value = ''; };
+      box.append(form, el('p', { className: 'ops-hint', textContent: 'Everyone aboard but you and the Captain is asked to acknowledge.' }));
+    }
+    if (!tally) { tally = el('ul', { className: 'st-list order-tally' }); box.append(tally); }
+    if (changed(tally, [...sentOrders.values()])) {
+      tally.replaceChildren(...[...sentOrders.values()].slice(-5).reverse().map((o) => {
+        const li = el('li', {}, o.text, el('span', { textContent: o.declined ? `declined by ${o.declined}` : o.pending.length ? `${o.acked.length} acknowledged · waiting for ${o.pending.join(', ')}` : o.acked.length ? `all ${o.acked.length} acknowledged` : 'nobody to acknowledge' }));
+        li.dataset.order = o.id;
+        return li;
+      }));
+    }
+  }
+
 }
 
 // Remote control: buttons top right of the station screens, one per vessel
@@ -1107,7 +1108,7 @@ async function onMessage(msg) {
     }
     case 'order':
       log(`Captain's orders (${msg.from.name}): ${msg.text}`);
-      bc.addOrder(msg.from, msg.text, msg.id);
+      bc.addOrder(msg.from, msg.text, msg.id, msg.reassign);
       break;
     case 'destroyed':
       log(`The ${msg.ship} was destroyed (${msg.cause}). Rebuilt and docked at ${msg.base}.`, 'warn');

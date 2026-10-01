@@ -1109,7 +1109,7 @@ const orders = new Map(); // id -> { id, ship, by, from, text, at, pending, acke
 function orderStatus(o) {
   const by = users.get(o.by);
   const names = (ids) => [...ids].map((id) => users.get(id)?.name).filter(Boolean);
-  if (by) send(by, { type: 'order-status', id: o.id, text: o.text, at: o.at, acked: names(o.acked), pending: names(o.pending) });
+  if (by) send(by, { type: 'order-status', id: o.id, text: o.text, at: o.at, acked: names(o.acked), pending: names(o.pending), ...(o.declined ? { declined: o.declined } : {}) });
 }
 
 function crewCommand(ws, msg) {
@@ -1151,7 +1151,19 @@ function crewCommand(ws, msg) {
     }
     case 'order-ack': {
       const o = orders.get(msg.id);
-      if (!o || !o.pending.delete(ws.id)) return;
+      if (!o || !o.pending.has(ws.id)) return;
+      // A reassignment: move now, as walking would (force fields hold).
+      if (o.reassign) {
+        const to = o.reassign.station;
+        if (sealed(key, ws.station)) return note(`A Security force field isolates ${ws.station}: you can't leave to report to ${to}`);
+        if (sealed(key, to)) return note(`A Security force field isolates ${to}: you can't report there`);
+        const was = ws.station;
+        ws.station = to;
+        send(ws, { type: 'registered', ...info(ws), token: ws.token });
+        broadcastCrew(key);
+        opLog(key, `${ws.name} reported to ${to} (from ${was}), as ordered`);
+      }
+      o.pending.delete(ws.id);
       o.acked.add(ws.id);
       orderStatus(o);
       return;
@@ -1163,13 +1175,23 @@ function crewCommand(ws, msg) {
       if (u.operator) return note('The ops station can only be left by the operator');
       if (!STATIONS.includes(msg.station)) return note('No such station');
       if (u.station === msg.station) return;
-      const was = u.station;
-      u.station = msg.station;
-      send(u, { type: 'registered', ...info(u), token: u.token });
-      send(u, { type: 'notice', text: `${ws.name} (First Officer) reassigned you from ${was} to ${u.station}` });
-      broadcastCrew(key);
-      opLog(key, `${ws.name} reassigned ${u.name} from ${was} to ${u.station}`);
-      return note(`${u.name} reassigned to ${u.station}`);
+      // An order to the crewman: they move when they acknowledge (or decline it).
+      const o = { id: newId('o-'), ship: key, by: ws.id, from: info(ws), text: `${u.name}: report to ${msg.station}`, at: Date.now(), pending: new Set([u.id]), acked: new Set(), reassign: { who: u.id, station: msg.station } };
+      orders.set(o.id, o);
+      send(u, { type: 'order', id: o.id, from: o.from, text: `Report to ${msg.station}`, at: o.at, reassign: msg.station });
+      orderStatus(o);
+      opLog(key, `${ws.name} ordered ${u.name} to report to ${msg.station}`);
+      return note(`${u.name} ordered to ${msg.station}: waiting for them to acknowledge`);
+    }
+    case 'order-decline': {
+      const o = orders.get(msg.id);
+      if (!o || !o.reassign || !o.pending.delete(ws.id)) return;
+      o.declined = ws.name;
+      orderStatus(o);
+      const by = users.get(o.by);
+      if (by) send(by, { type: 'notice', text: `${ws.name} declined the order to report to ${o.reassign.station}` });
+      opLog(key, `${ws.name} declined the order to report to ${o.reassign.station}`);
+      return;
     }
     case 'lockout': {
       if (ws.station !== 'Security') return note('Only Security controls the transporter lockout');
@@ -2268,7 +2290,8 @@ function stationCommand(ws, msg) {
   if (t === 'beam') return beamCommand(ws, msg), true;
   if (['helm', 'autopilot', 'scan', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
-  if (['alert', 'order', 'order-ack', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(t)) return gate(crewCommand);
+  if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
+  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(t)) return gate(crewCommand);
   if (['lock', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
   if (t === 'grid') return gridCommand(ws, msg), true; // emergency power: works with the console dark
   if (t === 'tractor') return gate(tractorCommand);
@@ -2758,7 +2781,7 @@ wss.on('connection', (ws) => {
     // Remote control: this console runs the same station aboard another vessel.
     if (msg.type === 'control' && ws.id) return controlCommand(ws, msg);
     // Station commands act on the vessel this console is controlling (else its own ship).
-    if (ws.id && stationCommand(ws.controlling && msg.type !== 'order-ack' ? actorFor(ws) : ws, msg)) return;
+    if (ws.id && stationCommand(ws.controlling && msg.type !== 'order-ack' && msg.type !== 'order-decline' ? actorFor(ws) : ws, msg)) return;
 
     // Text messages, no call needed: to one person or several, anyone the
     // sender could call (aboard, or on the data network). Local RF carries

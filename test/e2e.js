@@ -1011,6 +1011,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     await riker.selectOption('#xo-who', id('bob'));
     await riker.selectOption('#xo-station', 'Medical');
     await riker.click('[data-reassign] button:has-text("Reassign")');
+    // Sent as an order: bob moves when he acknowledges it.
+    await bob.waitForSelector('.bcast--order:has-text("Report to Medical")', { state: 'attached' });
+    assert.notEqual(await bob.evaluate(() => window.__voice.me.station), 'Medical', 'reassigned before acknowledging');
+    await riker.waitForSelector('[data-reassign] .order-tally li:has-text("bob: report to Medical"):has-text("waiting for bob")', { state: 'attached' });
+    await bob.$eval('.bcast--order', (p) => [...p.querySelectorAll('button')].find((b) => b.textContent === 'Acknowledge').click());
     await bob.waitForFunction(() => window.__voice.me.station === 'Medical');
     const picard = await openAs(browser, 'picard', 'picard', 'Enterprise', 'Captain');
     await picard.waitForSelector('#st-dept li[data-dept="Tactical"][data-manned]', { state: 'attached' });
@@ -1020,7 +1025,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await picard.waitForSelector('#st-dept li[data-dept="Tactical"]:not([data-manned])', { state: 'attached' });
     await bob.click('.st-patients li[data-crew="carol@enterprise"] button:has-text("Discharge")');
     await picard.waitForSelector('#st-dept li[data-dept="Tactical"][data-manned]', { state: 'attached' });
-    step('the First Officer reassigned bob to Medical; carol in sickbay left Tactical unmanned until discharged');
+    step('the First Officer ordered bob to Medical (he moved on acknowledging); carol in sickbay left Tactical unmanned until discharged');
 
     // The Captain: orders to every console, red alert (shields up, frames red), then green.
     await screen(picard, 'st-command');
