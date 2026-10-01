@@ -2364,11 +2364,12 @@ wss.on('connection', (ws) => {
       const there = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey;
       if (there !== ws.shipKey) {
         if (!dockedWith(ws.shipKey).includes(there)) return send(ws, { type: 'station-failed', reason: `not docked with the ${clean(msg.ship)}` });
-        if (msg.station === OPS_STATION) return send(ws, { type: 'station-failed', reason: 'walk over first, then take the ops station there' });
+        if (msg.station === OPS_STATION && OPERATOR_KEY && msg.key !== OPERATOR_KEY) return send(ws, { type: 'station-failed', reason: 'wrong operator key' });
         if (users.has(userId(ws.name, shipName(there)))) return send(ws, { type: 'station-failed', reason: `someone called ${ws.name} is already aboard the ${shipName(there)}` });
         if (ws.operator) leaveOps(ws);
         opLog(ws.shipKey, `${ws.name} (${ws.station}) went across the dock to the ${shipName(there)}`);
-        beam(ws, there, msg.station, 'walked');
+        beam(ws, there, msg.station === OPS_STATION ? 'Crew' : msg.station, 'walked');
+        if (msg.station === OPS_STATION) { opLog(there, `${ws.name} took the ops station`); joinOps(ws); }
         return;
       }
       if (msg.station === ws.station) return;

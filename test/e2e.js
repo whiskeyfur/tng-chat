@@ -703,7 +703,7 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // And back from Operations to a crew station.
     await screen(chief, 'reassign');
-    assert.equal(await chief.locator('#station-taps button[data-station="Operations"]').count(), 0);
+    assert.equal(await chief.isDisabled('#station-taps button[data-station="Operations"]'), true, 'the station you are at is greyed out');
     await chief.click('#station-taps button[data-station="Crew"]');
     await chief.waitForFunction(() => window.__voice.me.station === 'Crew' && !window.__operator.roster);
     assert.equal(await chief.locator('.ops-tab:not([hidden])').count(), 0);
@@ -1188,7 +1188,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Across the dock: the Station screen offers the Defiant's stations, and
     // the Defiant's engineer walks over to the Enterprise's Science console.
     await screen(spock, 'reassign');
-    await spock.waitForSelector('#dock-stations [data-vessel="Defiant"] button[data-station="Helm"]');
+    await spock.waitForSelector('#dock-stations [data-vessel="Defiant"] button[data-station="Operations"]');
+    assert.equal(await spock.isDisabled('#station-taps button[data-station="Science"]'), true, 'the station you are at is greyed out');
     rom.send({ type: 'change-station', station: 'Science', ship: 'Enterprise' });
     await waitFor(() => rom.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && m.station === 'Science'));
     step('docked together, the Station screen offered the Defiant\'s stations, and the Defiant\'s engineer walked across to the Enterprise\'s Science console');

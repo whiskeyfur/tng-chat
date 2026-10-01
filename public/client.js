@@ -171,18 +171,21 @@ let dockSig = '';
 function fillReassign() {
   if (!me) return;
   $('assignment').textContent = `${me.name}: ${me.station}, the ${me.ship}`;
+  // Every vessel lists every station, Operations included; where you are now is greyed out.
   const tap = (name, ship) => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: name });
     b.dataset.station = name;
     if (ship) b.dataset.ship = ship;
+    if (!ship && name === me.station) { b.disabled = true; b.title = 'You are here'; b.setAttribute('aria-current', 'true'); }
     b.onclick = () => {
       $('reassign-error').textContent = '';
-      if (!ship && name === 'Operations' && opsKeyRequired) { $('reassign-form').hidden = false; $('reassign-key').focus(); return; }
+      if (name === 'Operations' && opsKeyRequired) { $('reassign-form').hidden = false; $('reassign-form').dataset.ship = ship || ''; $('reassign-key').focus(); return; }
       send({ type: 'change-station', station: name, ...(ship ? { ship } : {}) });
     };
     return b;
   };
-  $('station-taps').replaceChildren(...['Operations', ...stations].filter((n) => n !== me.station).map((n) => tap(n)));
+  const all = ['Operations', ...stations];
+  $('station-taps').replaceChildren(...all.map((n) => tap(n)));
   const across = lastNav?.own?.grid?.dockedWith || [];
   dockSig = JSON.stringify(across);
   $('dock-stations').replaceChildren(...across.map((v) => {
@@ -191,7 +194,7 @@ function fillReassign() {
     box.dataset.vessel = v;
     box.append(Object.assign(document.createElement('h3'), { className: 'ops-subhead', textContent: `Across the dock: ${/^(Starbase|Deep Space) /.test(v) ? v : `the ${v}`}` }),
       Object.assign(document.createElement('div'), { className: 'tr-taps' }));
-    box.lastChild.append(...stations.map((n) => tap(n, v)));
+    box.lastChild.append(...all.map((n) => tap(n, v)));
     return box;
   }));
   $('reassign-form').hidden = true;
@@ -1066,7 +1069,8 @@ $('register-form').onsubmit = (e) => {
 $('reassign-form').onsubmit = (e) => {
   e.preventDefault();
   $('reassign-error').textContent = '';
-  send({ type: 'change-station', station: 'Operations', key: $('reassign-key').value });
+  const ship = $('reassign-form').dataset.ship;
+  send({ type: 'change-station', station: 'Operations', key: $('reassign-key').value, ...(ship ? { ship } : {}) });
 };
 
 // Comm relay: shown on the sign-in screen; changing it reconnects.
