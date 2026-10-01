@@ -1090,15 +1090,15 @@ function crewCommand(ws, msg) {
     case 'forcefield': {
       // Seal a console (or release it): nobody can use it while the field holds.
       if (ws.station !== 'Security') return note('Only Security controls the force fields');
-      if (!STATIONS.includes(msg.station) || msg.station === 'Security') return note('Pick another station\'s console');
+      if (!STATIONS.includes(msg.station)) return note('No such station');
       const e = engOf(key);
       e.forcefields = msg.on ? [...new Set([...e.forcefields, msg.station])] : e.forcefields.filter((st) => st !== msg.station);
       e.dirty = true;
       flowCache.delete(key);
-      for (const u of crewOf(key)) if (u.station === msg.station) send(u, { type: 'notice', text: msg.on ? `Security: a force field seals the ${msg.station} console` : `Security: the force field around the ${msg.station} console is down` });
-      opLog(key, `${ws.name}: force field ${msg.on ? 'up around' : 'down from'} the ${msg.station} console`);
+      for (const u of crewOf(key)) if (u.station === msg.station) send(u, { type: 'notice', text: msg.on ? `Security: a force field isolates ${msg.station} (nobody walks in or out)` : `Security: the force field around ${msg.station} is down` });
+      opLog(key, `${ws.name}: force field ${msg.on ? 'up around' : 'down from'} ${msg.station}`);
       scheduleNav();
-      return note(`Force field ${msg.on ? 'up around' : 'down from'} the ${msg.station} console`);
+      return note(`Force field ${msg.on ? 'up around' : 'down from'} ${msg.station}`);
     }
     case 'confine': {
       if (ws.station !== 'Security') return note('Only Security confines crew to quarters');
@@ -1300,7 +1300,7 @@ function freshEng(saved, { cold = false } = {}) {
     taps: Object.fromEntries(BUSES.map((X) => { const t = s.taps?.[X]; return [X, typeof t === 'number' ? Math.max(0, Math.min(BUS_MAX[X], t)) : t === false ? 0 : t === true || X !== 'C' ? BUS_MAX[X] : 0]; })), ties,
 
     transfer: null, feed: 0, fed: 0, // power offered to a ship docked with us, and what actually went
-    forcefields: Array.isArray(s.forcefields) ? s.forcefields.filter((st) => STATIONS.includes(st) && st !== 'Security') : [], // consoles Security has sealed
+    forcefields: Array.isArray(s.forcefields) ? s.forcefields.filter((st) => STATIONS.includes(st)) : [], // stations Security has isolated
     // Docked with another ship: kept across restarts (it's checked once both are back).
     dockedShip: typeof s.dockedShip === 'string' ? shipKey(s.dockedShip) : null, partnerGoneAt: typeof s.dockedShip === 'string' ? Date.now() : 0,
     battery: { charge: Number.isFinite(s.battery?.charge) ? Math.max(0, Math.min(GRID.batteryCap, s.battery.charge)) : GRID.batteryCap },
@@ -1494,10 +1494,12 @@ function flow(k) {
 }
 const gridChanged = (k) => { flowCache.delete(k); scheduleNav(); };
 // A console with no power on its bus is dark (ops and Engineering's grid controls aside).
-// A console Security has sealed with a force field (while the emitters have power).
+// A station Security has isolated with a force field (while the emitters have
+// power): nobody walks in or out (the Station menu, across a dock); whoever
+// is inside keeps using its console. Transporters get through.
 const sealed = (k, station) => engOf(k).forcefields.includes(station) && flow(k).subOk.forcefields !== false;
-const consoleDark = (ws) => sealed(ws.shipKey, ws.station) || flow(ws.shipKey).consoleOk[ws.station] === false;
-const darkNote = (ws) => send(ws, { type: 'notice', text: sealed(ws.shipKey, ws.station) ? `${ws.station}: console sealed by a Security force field` : `${ws.station}: console offline, no power on its bus` });
+const consoleDark = (ws) => { flowCache.delete(ws.shipKey); return flow(ws.shipKey).consoleOk[ws.station] === false; }; // fresh: who's aboard may have just changed
+const darkNote = (ws) => send(ws, { type: 'notice', text: `${ws.station}: console offline, no power on its bus` });
 // Communications' subsystems: local RF (calls aboard), radio (hails, calls
 // between ships), subspace relay (data links). Starbases always have them.
 const commsUp = (k, name) => isBase(k) || !present(k) || flow(k).subOk[name] !== false;
@@ -1567,7 +1569,6 @@ function gridCommand(ws, msg) {
   const key = ws.shipKey, e = engOf(key);
   const note = (text) => send(ws, { type: 'notice', text: `Engineering: ${text}` });
   if (ws.station !== 'Engineering') return send(ws, { type: 'notice', text: 'Only Engineering runs the power grid' });
-  if (sealed(key, 'Engineering')) return note('the console is sealed by a Security force field');
   const said = [];
   const NAME = { core: 'power transfer conduits', thrustersPort: 'port maneuvering thrusters', thrustersStarboard: 'starboard maneuvering thrusters', crosslink: 'bus crosslink', solar: 'solar', dock: 'dock power', ship: 'docked-ship power', core: 'warp core', battery: 'batteries', containment: 'antimatter containment', impulsePort: 'port impulse drive', impulseStarboard: 'starboard impulse drive' };
   const feeds = (list) => (list.length ? list.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(' + ') : 'off');
@@ -2450,6 +2451,10 @@ wss.on('connection', (ws) => {
     // an operator moving elsewhere leaves it.
     if (msg.type === 'change-station' && ws.id) {
       if (msg.station !== OPS_STATION && !STATIONS.includes(msg.station)) return send(ws, { type: 'notice', text: 'No such station' });
+      // Force fields: nobody walks out of an isolated station, or into one (aboard here or across a dock).
+      const target = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey;
+      if (!ws.operator && sealed(ws.shipKey, ws.station)) return send(ws, { type: 'station-failed', reason: `a Security force field isolates ${ws.station}: nobody walks out (the transporter can beam you)` });
+      if (msg.station !== OPS_STATION && present(target) && sealed(target, msg.station) && !(msg.remote)) return send(ws, { type: 'station-failed', reason: `a Security force field isolates ${msg.station}${target !== ws.shipKey ? ` aboard the ${shipName(target)}` : ''}: nobody walks in` });
       // Across the dock: walk over to a station aboard a vessel docked with this one.
       const there = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey;
       // By data link: take a station aboard a crewless ship by remote control
@@ -2578,7 +2583,7 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if ((msg.type === 'helm' || msg.type === 'autopilot' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return (msg.type === 'power' ? sealed(ws.shipKey, ws.station) : consoleDark(ws)) ? darkNote(ws) : navCommand(ws, msg);
+    if ((msg.type === 'helm' || msg.type === 'autopilot' || msg.type === 'scan' || msg.type === 'plot-course' || msg.type === 'power') && ws.id) return consoleDark(ws) && msg.type !== 'power' ? darkNote(ws) : navCommand(ws, msg);
     if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : crewCommand(ws, msg);
     if (['lock', 'fire', 'repair', 'arm'].includes(msg.type) && ws.id) return consoleDark(ws) ? darkNote(ws) : combatCommand(ws, msg);
     if (msg.type === 'grid' && ws.id) return gridCommand(ws, msg); // emergency power: works with the console dark

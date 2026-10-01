@@ -954,14 +954,20 @@ const audioBytes = (page) => page.evaluate(async () => {
     await worf.waitForSelector('.bcast--alert:has-text("Security: rand")', { state: 'attached' });
     step('Security: the force field refused a beam-in; with it down, Security was alerted when rand beamed aboard');
 
-    // Security seals the Helm console with a force field: Helm's orders are refused until it drops.
+    // Security isolates Helm with a force field: nobody walks in or out, but
+    // Helm keeps its console.
     await worf.click('#sec-fields button[data-station="Helm"]');
     await worf.waitForSelector('#sec-fields button[data-station="Helm"][aria-pressed="true"]');
+    sulu.send(JSON.stringify({ type: 'change-station', station: 'Crew' }));
+    await waitFor(() => suluMsgs.some((m) => m.type === 'station-failed' && /force field isolates Helm: nobody walks out/.test(m.reason)));
+    rand.send(JSON.stringify({ type: 'change-station', station: 'Helm' }));
+    await waitFor(() => randMsgs.some((m) => m.type === 'station-failed' && /force field isolates Helm: nobody walks in/.test(m.reason)));
     helm({ warp: 0 });
-    await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /console sealed by a Security force field/.test(m.text)));
+    await new Promise((r) => setTimeout(r, 500));
+    assert.ok(!suluMsgs.some((m) => m.type === 'notice' && /console/.test(m.text) && /sealed|offline/.test(m.text)), 'Helm keeps its console inside the field');
     await worf.click('#sec-fields button[data-station="Helm"]');
     await worf.waitForSelector('#sec-fields button[data-station="Helm"][aria-pressed="false"]');
-    step('Security sealed the Helm console with a force field (its orders refused), then dropped it');
+    step('Security isolated Helm with a force field: Helm could not walk out nor anyone walk in, but kept the console; then dropped it');
 
     // Security confines alice to quarters: she can call Security, not the First Officer.
     const riker = await openAs(browser, 'riker', 'riker', 'Enterprise', 'First Officer');
@@ -1131,6 +1137,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     laforge.send({ type: 'grid', ties: { containment: [] } });
     await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /containment can't be switched off/.test(m.text)));
     step('batteries tied to Bus A and B and the A-B crosslink on; the warp core (EPS only) and batteries (no EPS) refused other ties; containment could not be left without a feed');
+
+    // Every subsystem is listed under its console in the grid table, Security's emitters included.
+    const geordi = await openAs(browser, 'geordi', 'geordi', 'Enterprise', 'Engineering');
+    await screen(geordi, 'st-grid');
+    for (const row of ['sub-forcefields', 'sub-rf', 'sub-radio', 'sub-subspace', 'sub-constriction', 'sub-portPump', 'thrustersPort', 'core']) await geordi.waitForSelector(`#ties-${row}`, { state: 'attached' });
+    await geordi.close();
+    step("the grid table lists every subsystem under its console (Security's force field emitters, Communications' RF, radio and relay, the reactors')");
 
     // Engineering ejects the warp core: no antimatter, no core power.
     laforge.send({ type: 'grid', eject: true });
