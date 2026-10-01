@@ -384,8 +384,11 @@ function renderCombat() {
   // This console goes dark when its bus has no power (comms still work).
   const bus = grid.consoleBus[me.station] || 'B';
   const dark = !grid.buses[bus].consolesOk;
+  // Engineering's power grid runs on emergency power, so it's never covered.
+  const emergency = dark && me.station === 'Engineering';
+  bc.setAlert('emergency', emergency ? `Console on emergency power (no power on Bus ${bus}): Power grid controls only` : null, { level: 'yellow' });
   const cover = $('console-dark');
-  cover.hidden = !dark;
+  cover.hidden = !dark || emergency;
   if (dark) cover.querySelector('p').textContent = `Console offline · no power on Bus ${bus}`;
   document.body.toggleAttribute('data-console-dark', dark);
   if (!stationView) return;
@@ -436,8 +439,10 @@ function renderCombat() {
 
   // Engineering: the power grid.
   const gp = document.querySelector('[data-grid]');
-  if (gp && changed(gp, grid, own.power)) {
+  // Not while someone's typing an amount or picking a resource there.
+  if (gp && !gp.contains(document.activeElement?.closest?.('input[type=number], select') || null) && changed(gp, grid, own.power)) {
     const status = gp.querySelector('#grid-status')?.textContent || '';
+    const keepRes = gp.querySelector('#transfer-resource')?.value, keepAmt = gp.querySelector('#transfer-amount')?.value;
     // A source's ties: any of Bus A, Bus B and the EPS (checkboxes).
     const ties = (key, label) => el('div', { className: 'grid-ties', id: `ties-${key}` },
       el('span', { className: 'grid-ties-label', textContent: label }),
@@ -447,6 +452,22 @@ function renderCombat() {
         box.onchange = () => send({ type: 'grid', ties: { [key]: ['A', 'B', 'EPS'].filter((m) => (m === n ? box.checked : grid.ties[key].includes(m))) } });
         return el('label', { className: 'grid-tie' }, box, el('span', { textContent: n === 'EPS' ? 'EPS' : `Bus ${n}` }));
       }));
+    // Antimatter and deuterium aboard, and moving them: refuel or offload at a
+    // starbase, or send ours to a ship docked with us.
+    const supplies = () => {
+      const res = el('select', { className: 'ops-select', id: 'transfer-resource', ariaLabel: 'resource' }, new Option('Antimatter', 'antimatter'), new Option('Deuterium', 'deuterium'));
+      const amt = el('input', { className: 'ops-input', id: 'transfer-amount', type: 'number', min: 1, value: 200, ariaLabel: 'amount' });
+      amt.style.width = '7em';
+      const partner = grid.docked || (grid.dockedShip && `the ${grid.dockedShip}`);
+      const t = grid.transfer;
+      return el('div', { className: 'grid-supplies' },
+        el('p', { className: 'st-state', id: 'supplies', textContent: `Antimatter ${grid.antimatter} / ${grid.fuelCaps.antimatter} · Deuterium ${grid.deuterium} / ${grid.fuelCaps.deuterium}` }),
+        t ? el('div', { className: 'ops-form' }, el('span', { id: 'transfer-state', textContent: `${t.dir === 'in' ? 'Taking on' : 'Sending'} ${t.resource}: ${t.left} to go (${t.with})` }), button('Stop transfer', 'transfer-stop', () => send({ type: 'grid', transfer: null }), 'lcars-button--alert'))
+          : partner ? el('div', { className: 'ops-form' }, el('span', { textContent: `Docked with ${partner}:` }), res, amt,
+            ...(grid.docked ? [button('Refuel', 'transfer-in', () => send({ type: 'grid', transfer: { resource: res.value, dir: 'in', amount: Number(amt.value) } }))] : []),
+            button(grid.docked ? 'Offload' : `Send to the ${grid.dockedShip}`, 'transfer-out', () => send({ type: 'grid', transfer: { resource: res.value, dir: 'out', amount: Number(amt.value) } })))
+          : el('p', { className: 'ops-hint', textContent: 'Dock at a starbase to refuel or offload, or with another ship to send it supplies.' }));
+    };
     const coreText = grid.core === 'online' ? `Online · ${grid.coreOutput} to ${feeds(grid.ties.core)}` : grid.core === 'starting' ? `Starting · ${grid.start} of ${grid.startSecs} s on Bus A power` : grid.core === 'ejected' ? 'Ejected · solar and batteries only' : 'Offline';
     const busRow = (X) => {
       const b = grid.buses[X];
@@ -469,19 +490,23 @@ function renderCombat() {
           grid.core === 'ejected' ? button('Install new warp core', 'core-refit', () => send({ type: 'grid', refit: true }))
             : grid.core === 'offline' ? button('Start warp core', 'core-start', () => send({ type: 'grid', core: 'start' })) : button('Shut down warp core', 'core-stop', () => send({ type: 'grid', core: 'stop' }), 'lcars-button--alert'),
           ...['A', 'B'].map((X) => button(`EPS tap ${X}: ${grid.taps[X] ? 'open' : 'closed'}`, `tap-${X}`, () => send({ type: 'grid', tap: { bus: X, on: !grid.taps[X] } }), grid.taps[X] ? '' : 'lcars-button--alert')),
-          ...(grid.antimatter ? [button('Eject warp core', 'core-eject', () => { if (confirm('Eject the warp core and antimatter pods? The ship is left with solar and batteries until a new core is installed at a starbase.')) send({ type: 'grid', eject: true }); }, 'lcars-button--alert')] : []))),
+          ...(grid.core !== 'ejected' ? [button('Eject warp core', 'core-eject', () => { if (confirm('Eject the warp core and antimatter pods? The ship is left with solar and batteries until a new core is installed at a starbase.')) send({ type: 'grid', eject: true }); }, 'lcars-button--alert')] : []))),
       el('div', { className: 'grid-sources' },
-        ...(grid.antimatter ? [ties('containment', 'Antimatter containment')] : []),
+        ...(grid.core !== 'ejected' ? [ties('containment', grid.antimatter ? 'Antimatter containment' : 'Containment (no antimatter: may be off)')] : []),
         ties('core', 'Warp core'),
         ties('battery', `Batteries ${grid.battery.charge}%${grid.battery.charging ? ' (charging)' : grid.battery.supplying ? ' (supplying)' : ''}`),
         ties('solar', 'Solar'),
+        ties('impulse', `Impulse reactor${grid.impulseUsed ? ` (giving ${grid.impulseUsed}: impulse only, slower)` : ''}`),
         ties('dock', grid.docked ? `Dock power (${grid.docked})` : 'Dock power (not docked)')),
-      el('p', { className: 'st-state grid-containment', id: 'containment-state', textContent: !grid.antimatter ? 'No antimatter aboard: core ejected' : grid.breach != null ? `CONTAINMENT FAILING: breach in ${grid.breach} s` : `Containment holding, fed from ${feeds(grid.ties.containment)}` }),
+      supplies(),
+      el('p', { className: 'st-state grid-containment', id: 'containment-state', textContent: grid.core === 'ejected' ? 'Warp core ejected: no antimatter aboard' : !grid.antimatter ? 'No antimatter aboard: containment not needed' : grid.breach != null ? `CONTAINMENT FAILING: breach in ${grid.breach} s` : `Containment holding, fed from ${feeds(grid.ties.containment)}` }),
       el('ul', { className: 'st-list grid-buses' }, busRow('A'), busRow('B')),
       el('p', { className: 'ops-notice', id: 'grid-status', textContent: status }),
-      el('p', { className: 'ops-hint', textContent: `Tie each source to any of Bus A, Bus B and the EPS; the EPS reaches a bus through its open tap. The core starts on Bus A power (${grid.startSecs} s). Antimatter containment must always have power from one of its feeds, or the core breaches in seconds (ejecting the core ends that). Power goes to containment first, then consoles, then is shared among systems. EPS carrying ${grid.eps}; total drawn ${grid.drawn} (that's what other ships' sensors see).` }));
+      el('p', { className: 'ops-hint', textContent: `The core burns antimatter and deuterium for the power it gives (the impulse reactor burns deuterium, and while it gives power the ship is held to slow impulse). Tie each source to any of Bus A, Bus B and the EPS; the EPS reaches a bus through its open tap. The core starts on Bus A power (${grid.startSecs} s). Antimatter containment must always have power from one of its feeds, or the core breaches in seconds (ejecting the core ends that). Power goes to containment first, then consoles, then is shared among systems. EPS carrying ${grid.eps}; total drawn ${grid.drawn} (that's what other ships' sensors see).` }));
     gp.querySelector('#containment-state').toggleAttribute('data-up', grid.breach != null);
-    for (const box of gp.querySelectorAll('#ties-containment input')) box.disabled = box.checked && grid.ties.containment.length === 1; // never none
+    for (const box of gp.querySelectorAll('#ties-containment input')) box.disabled = grid.antimatter > 0 && box.checked && grid.ties.containment.length === 1; // never none with antimatter aboard
+    if (keepRes && gp.querySelector('#transfer-resource')) gp.querySelector('#transfer-resource').value = keepRes;
+    if (keepAmt && gp.querySelector('#transfer-amount')) gp.querySelector('#transfer-amount').value = keepAmt;
   }
 
   // Engineering: damage and repair crews.
@@ -517,6 +542,7 @@ function renderCombat() {
       ['Velocity', speed, 'orange'],
       ['Weapons', c.lock ? `Locked: the ${c.lock.name}` : c.phaser.armed ? 'Phasers armed' : 'Standby', 'red'],
       ['Warp core', { online: 'Online', starting: 'Starting', offline: 'Offline', ejected: 'Ejected' }[grid.core], 'blue'],
+      ['Antimatter · deuterium', `${Math.round((grid.antimatter / grid.fuelCaps.antimatter) * 100)}% · ${Math.round((grid.deuterium / grid.fuelCaps.deuterium) * 100)}%`, 'violet'],
       ['Damage', damaged.length ? damaged.join(', ') : 'None', 'peach'],
     ];
     if (changed(ss, items, grid.selfDestruct)) {

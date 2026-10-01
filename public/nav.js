@@ -11,7 +11,7 @@
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(`--lcars-${name}`).trim();
   const speedName = (w) => (w <= 0 ? 'All stop' : w < 1 ? 'Impulse' : `Warp ${+w.toFixed(1)}`);
-  const unitsPerSecond = (w) => (w <= 0 ? 0 : w < 1 ? 0.5 : 2 * w ** 1.8); // as tools/shipcore.js
+  const unitsPerSecond = (w) => (w <= 0 ? 0 : w < 1 ? 2 * w : 2 * w ** 1.8); // as tools/shipcore.js
   const SPEEDS = [['0', 'All stop'], ['0.25', 'Impulse'], ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((w) => [String(w), `Warp ${w}`])];
 
   window.createNavPanel = function createNavPanel(root, { mode, send }) {
@@ -117,7 +117,12 @@
     const button = (text, id, onclick, alert) => { const b = el('button', { type: 'button', className: `lcars-button lcars-button--pill${alert ? ' lcars-button--alert' : ''}`, id, textContent: text }); b.onclick = onclick; return b; };
     const plotted = el('div', { className: 'nav-plotted', hidden: true });
     // Docking at a starbase (within 10 units, at all stop).
-    const dockBtn = button('Dock', 'helm-dock', () => send({ type: 'dock', undock: !!nav?.own?.grid?.docked }));
+    const dockBtn = button('Dock', 'helm-dock', () => {
+      const g = nav?.own?.grid;
+      if (g?.docked || g?.dockedShip) send({ type: 'dock', undock: true });
+      else if (g?.near) send({ type: 'dock' });
+      else if (g?.nearShip) send({ type: 'dock', ship: g.nearShip });
+    });
     const contacts = el('ul', { className: 'nav-contacts' });
     const scanOut = el('div', { className: 'nav-scan' });
 
@@ -179,9 +184,10 @@
         // Show what Helm picked, or else where the ship is actually heading.
         const keep = destSel.value.startsWith('base:') ? destSel.value : selected ? `ship:${selected}` : waypoint ? 'waypoint' : own?.dest?.name ? `${(nav.bases || []).some((b) => b.name === own.dest.name) ? 'base' : 'ship'}:${own.dest.name}` : '';
         const g2 = own?.grid;
-        dockBtn.textContent = g2?.docked ? 'Undock' : 'Dock';
-        dockBtn.disabled = !g2?.docked && !g2?.near;
-        root.querySelector('#helm-dock-state').textContent = g2?.docked ? `Docked at ${g2.docked}` : g2?.near ? `${g2.near}: in docking range` : 'No starbase in docking range';
+        dockBtn.textContent = g2?.docked || g2?.dockedShip ? 'Undock' : g2?.near ? 'Dock' : g2?.nearShip ? `Dock with the ${g2.nearShip}` : 'Dock';
+        dockBtn.disabled = !g2?.docked && !g2?.dockedShip && !g2?.near && !g2?.nearShip;
+        root.querySelector('#helm-dock-state').textContent = [g2?.docked && `Docked at ${g2.docked}`, g2?.dockedShip && `Docked with the ${g2.dockedShip}`].filter(Boolean).join(' · ')
+          || (g2?.near ? `${g2.near}: in docking range` : g2?.nearShip ? `The ${g2.nearShip}: in docking range` : 'Nothing in docking range');
         destSel.replaceChildren(new Option('Hold current heading', ''),
           ...(waypoint ? [new Option(`Waypoint ${waypoint.x}, ${waypoint.y}`, 'waypoint')] : []),
           ...others.map((s) => new Option(`The ${s.name} (${Math.round(s.distance)} units)`, `ship:${s.name}`)),

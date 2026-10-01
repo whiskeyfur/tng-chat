@@ -18,15 +18,19 @@ const computers = new Set();
 // Start a ship's computer (tools/shipcore.js) for some ships, with its own folder.
 // Test ships start close together (within transporter range) unless they fly off.
 const START = { Enterprise: '500,500', Defiant: '510,500', "K'Vatch": '505,505', Voyager: '520,520' };
+// Test ships start where START says, powered up and fuelled (--warm);
+// startComputer.cold(folder, ship) starts a new ship as players get it.
 function startComputer(folder, ...ships) {
+  const opts = typeof ships[ships.length - 1] === 'object' ? ships.pop() : {};
   const proc = spawn(process.execPath, [path.join(__dirname, '..', 'tools', 'shipcore.js'),
-    '--relay', `ws://localhost:${process.env.PORT}`, '--data', path.join(DATA_DIR, folder), '--position', START[ships[0]] || '500,500', ...ships], { stdio: ['ignore', 'pipe', 'pipe'] });
+    '--relay', `ws://localhost:${process.env.PORT}`, '--data', path.join(DATA_DIR, folder), ...(opts.cold ? [] : ['--warm', '--position', START[ships[0]] || '500,500']), ...ships], { stdio: ['ignore', 'pipe', 'pipe'] });
   proc.stdout.on('data', (d) => process.stdout.write(String(d).replace(/^(?=.)/gm, `  [computer ${folder}] `)));
   proc.stderr.on('data', (d) => process.stdout.write(String(d).replace(/^(?=.)/gm, `  [computer ${folder} ERR] `)));
   computers.add(proc);
   proc.on('exit', () => computers.delete(proc));
   return proc;
 }
+startComputer.cold = (folder, ship) => startComputer(folder, ship, { cold: true });
 const stopComputer = (proc) => new Promise((r) => { proc.once('exit', r); proc.kill(); });
 const stored = (folder, ship, name) => { try { return fs.readFileSync(path.join(DATA_DIR, folder, ship, name), 'utf8'); } catch { return null; } };
 const waitFor = async (fn, ms = 10000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return; await new Promise((r) => setTimeout(r, 100)); } throw new Error('timed out waiting'); };
@@ -1111,10 +1115,32 @@ const audioBytes = (page) => page.evaluate(async () => {
     sulu.send(JSON.stringify({ type: 'dock' }));
     await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.docked)) === 'Starbase 12');
     laforge.send({ type: 'grid', refit: true });
-    await waitFor(() => laforge.nav()?.own.grid.core === 'offline' && laforge.nav().own.grid.antimatter);
+    await waitFor(() => laforge.nav()?.own.grid.core === 'offline' && laforge.nav().own.grid.antimatter === 0);
+    laforge.send({ type: 'grid', core: 'start' });
+    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /needs antimatter and deuterium/.test(m.text)));
+    laforge.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 300 } });
+    await waitFor(() => laforge.nav()?.own.grid.antimatter >= 300 && !laforge.nav().own.grid.transfer, 15000);
     laforge.send({ type: 'grid', core: 'start' });
     await waitFor(() => laforge.nav()?.own.grid.core === 'online', 20000);
-    step('towed back to Starbase 12 and released, the Enterprise docked and installed a new warp core, and started it');
+    step('towed back to Starbase 12 and released, the Enterprise docked, installed a new warp core, took on antimatter from the starbase and started it');
+
+    // Supplies: the Enterprise offloads deuterium to the starbase; the Defiant
+    // docks with the Enterprise and sends it some of its own.
+    laforge.send({ type: 'grid', transfer: { resource: 'deuterium', dir: 'out', amount: 300 } });
+    await waitFor(() => laforge.nav()?.own.grid.deuterium <= 1710 && !laforge.nav().own.grid.transfer, 15000);
+    const ent = laforge.nav().own;
+    ezri.send({ type: 'helm', dest: { x: ent.x, y: ent.y - 3 }, warp: 1 });
+    await waitFor(() => { const n = ezri.nav()?.own; return n && Math.hypot(n.x - ent.x, n.y - (ent.y - 3)) < 1 && n.warp === 0 && n.grid.nearShip === 'Enterprise'; }, 20000);
+    ezri.send({ type: 'dock', ship: 'Enterprise' });
+    await waitFor(() => laforge.nav()?.own.grid.dockedShip === 'Defiant');
+    const rom = await crewWs('rom', 'Defiant', 'Engineering');
+    const before = laforge.nav().own.grid.deuterium;
+    rom.send({ type: 'grid', transfer: { resource: 'deuterium', dir: 'out', amount: 100 } });
+    await waitFor(() => laforge.nav()?.own.grid.deuterium >= before + 90, 15000);
+    ezri.send({ type: 'dock', undock: true });
+    await waitFor(() => !laforge.nav()?.own.grid.dockedShip);
+    rom.close();
+    step('the Enterprise offloaded deuterium at Starbase 12; the Defiant docked with it and sent it 100 deuterium, then undocked');
     ezri.close();
     tuvok.close();
 
@@ -1134,9 +1160,12 @@ const audioBytes = (page) => page.evaluate(async () => {
     await bob.waitForSelector('.bcast--alert:has-text("containment failing")', { state: 'attached' });
     await waitFor(() => suluMsgs.some((m) => m.type === 'destroyed' && /breach/.test(m.cause)), 15000);
     const reborn = suluMsgs.find((m) => m.type === 'destroyed');
-    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last.own); return n.grid.docked === reborn.base && n.combat.hull === 100 && n.grid.ties.containment.join() === 'A' && n.grid.containmentOk; });
+    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last.own); return n.grid.docked === reborn.base && n.combat.hull === 100 && n.grid.core === 'offline' && n.grid.antimatter === 0 && n.grid.containmentOk; });
     await bob.waitForSelector(`.bcast--alert:has-text("Rebuilt and docked at ${reborn.base}")`, { state: 'attached' });
-    step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt docked at ${reborn.base}`);
+    await op.waitForSelector('#console-dark:not([hidden])', { state: 'attached' }); // rebuilt cold: dark
+    laforge.send({ type: 'grid', ties: { dock: ['A', 'B'] } });
+    await op.waitForSelector('#console-dark', { state: 'hidden' });
+    step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt cold (consoles dark, no fuel) docked at ${reborn.base}; tied to dock power, it came back`);
     laforge.close();
 
     // Automated starbases: a hail with nobody aboard gets the automated reply;
@@ -1171,6 +1200,40 @@ const audioBytes = (page) => page.evaluate(async () => {
     rand.close();
     await spock.close();
     for (const page of [nog, uhura2, dops]) await page.close();
+
+    // A new ship starts cold, docked at a starbase: every console but
+    // Engineering's grid controls dark, no fuel. Engineering ties in dock
+    // power, sets a containment feed, refuels and starts the core.
+    startComputer.cold('x', 'Excelsior');
+    await bob.waitForSelector('#ship option[value="Excelsior"]', { state: 'attached' }).catch(() => new Promise((r) => setTimeout(r, 2000)));
+    const barclay = await crewWs('barclay', 'Excelsior', 'Engineering');
+    const ro = await crewWs('ro', 'Excelsior', 'Tactical');
+    await waitFor(() => barclay.nav()?.own?.grid.docked);
+    const cold = barclay.nav().own.grid;
+    assert.equal(cold.core, 'offline');
+    assert.equal(cold.antimatter + cold.deuterium, 0);
+    assert.ok(Object.values(cold.ties).every((t) => !t.length), 'a new ship should start with nothing tied in');
+    ro.send({ type: 'lock', ship: 'Enterprise' });
+    await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /console offline/.test(m.text)));
+    barclay.send({ type: 'grid', ties: { dock: ['A', 'B'] } });
+    await waitFor(() => barclay.nav()?.own.grid.buses.B.consolesOk && barclay.nav().own.grid.buses.B.fraction === 100);
+    barclay.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 200 } });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /set a containment feed/.test(m.text)));
+    barclay.send({ type: 'grid', ties: { containment: ['A'] } });
+    barclay.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 200 } });
+    await waitFor(() => barclay.nav()?.own.grid.antimatter >= 200 && !barclay.nav().own.grid.transfer, 15000);
+    barclay.send({ type: 'grid', transfer: { resource: 'deuterium', dir: 'in', amount: 400 } });
+    await waitFor(() => barclay.nav()?.own.grid.deuterium >= 400 && !barclay.nav().own.grid.transfer, 20000);
+    barclay.send({ type: 'grid', core: 'start' });
+    await waitFor(() => barclay.nav()?.own.grid.core === 'online', 20000);
+    step(`a new ship, the Excelsior, started cold at ${cold.docked} (consoles dark, no fuel); on dock power Engineering set a containment feed, took on antimatter and deuterium, and started the core`);
+
+    // Impulse power: the impulse reactor feeding Bus B holds the ship to slow impulse.
+    barclay.send({ type: 'grid', ties: { dock: ['A'], core: [], impulse: ['B'] } });
+    await waitFor(() => { const n = barclay.nav()?.own; return n?.grid.impulseUsed > 0 && barclay.nav().maxWarp < 0.25; });
+    step(`the impulse reactor powered Bus B (${barclay.nav().own.grid.impulseUsed}), so the Excelsior has only ${Math.round(barclay.nav().maxWarp * 400)}% of impulse speed left`);
+    barclay.close();
+    ro.close();
 
     // Closing the tab mid-call ends the call for the other side.
     await callFrom(carol, 'bob');

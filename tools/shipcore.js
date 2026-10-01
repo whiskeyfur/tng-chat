@@ -8,7 +8,8 @@
 //
 //   node tools/shipcore.js Enterprise Defiant
 //   node tools/shipcore.js --relay wss://relay.example.com --data ./ship-data --key secret Enterprise
-//   node tools/shipcore.js --position 500,480 Enterprise   (where a new ship starts)
+//   node tools/shipcore.js --position 500,480 Enterprise   (where a new ship starts; else docked at a starbase)
+//   node tools/shipcore.js --warm Enterprise   (a new ship starts powered up and fuelled, not cold)
 //
 // Files live in <data>/<ship>/ (default ./shipcore-data, next to where you run
 // it), with an index (.index.json) that also remembers deletions, so a file
@@ -29,6 +30,7 @@ function parseArgs(argv) {
     else if (a === '--data') opts.data = path.resolve(argv[++i]);
     else if (a === '--key') opts.key = argv[++i];
     else if (a === '--position') { const [x, y] = argv[++i].split(',').map(Number); opts.position = { x, y }; }
+    else if (a === '--warm') opts.warm = true;
     else if (a === '-h' || a === '--help') opts.help = true;
     else opts.ships.push(a);
   }
@@ -37,7 +39,7 @@ function parseArgs(argv) {
 
 const opts = parseArgs(process.argv.slice(2));
 if (opts.help || !opts.ships.length) {
-  console.log('usage: node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] [--position x,y] <ship> [ship...]');
+  console.log('usage: node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] [--position x,y] [--warm] <ship> [ship...]');
   process.exit(opts.help ? 0 : 1);
 }
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -84,7 +86,7 @@ const stores = new Map(opts.ships.map((s) => [s.toLowerCase(), new ShipStore(s)]
 //          0.25 = impulse, 1..9), dest: { x, y, name? } | null }
 
 const SECTOR = 1000;
-const unitsPerSecond = (warp) => (warp <= 0 ? 0 : warp < 1 ? 0.5 : 2 * warp ** 1.8);
+const unitsPerSecond = (warp) => (warp <= 0 ? 0 : warp < 1 ? 2 * warp : 2 * warp ** 1.8); // impulse 0.25: 0.5 a second (less with the impulse reactor giving power)
 
 // Power: the reactor's output (450%) split across systems, each 0..100%.
 // Engineering sets it; engines set the top speed.
@@ -96,8 +98,10 @@ for (const store of stores.values()) {
   try { store.nav = JSON.parse(fs.readFileSync(store.navFile, 'utf8')); } catch {}
   if (!store.nav || typeof store.nav.x !== 'number') {
     // New ships start near the middle of the sector, within comms range of each other.
+    // A new ship: where --position says, or the relay docks it at a starbase.
+    // It starts cold (reactor offline, no fuel) unless --warm.
     const p = opts.position || { x: 400 + Math.random() * 200, y: 400 + Math.random() * 200 };
-    store.nav = { x: p.x, y: p.y, heading: Math.floor(Math.random() * 360), warp: 0, dest: null };
+    store.nav = { x: p.x, y: p.y, heading: Math.floor(Math.random() * 360), warp: 0, dest: null, ...(opts.position ? {} : { spawn: true }), ...(opts.warm ? { warm: true } : {}) };
   }
   store.nav.power = { ...DEFAULT_POWER, ...(store.nav.power || {}) };
   store.primary = false;
@@ -209,7 +213,7 @@ function onMessage(raw, isBinary) {
       if (!store || !store.primary || !msg.set) return;
       for (const k of ['alert', 'lockout', 'combat', 'eng']) if (k in msg.set) store.nav[k] = msg.set[k];
       // Destroyed: rebuilt at a starbase.
-      if (msg.set.respawn) { Object.assign(store.nav, { x: msg.set.respawn.x, y: msg.set.respawn.y, warp: 0, dest: null }); delete store.nav.arrived; log(`${store.ship}: destroyed, rebuilt at ${msg.set.respawn.x}, ${msg.set.respawn.y}`); }
+      if (msg.set.respawn) { delete store.nav.spawn; delete store.nav.warm; Object.assign(store.nav, { x: msg.set.respawn.x, y: msg.set.respawn.y, warp: 0, dest: null }); delete store.nav.arrived; log(`${store.ship}: placed at ${msg.set.respawn.x}, ${msg.set.respawn.y} (a new or rebuilt ship, docked at a starbase)`); }
       // Towed by another ship's tractor beam: moved along behind it.
       if (msg.set.moveTo) { Object.assign(store.nav, { x: msg.set.moveTo.x, y: msg.set.moveTo.y, heading: msg.set.moveTo.heading ?? store.nav.heading, warp: 0, dest: null }); delete store.nav.arrived; }
       const said = Object.entries(msg.set).filter(([k]) => !['combat', 'eng', 'respawn', 'moveTo'].includes(k));
