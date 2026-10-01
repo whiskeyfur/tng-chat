@@ -36,7 +36,12 @@ const stored = (folder, ship, name) => { try { return fs.readFileSync(path.join(
 const SYSTEMS_SHORT = (own) => Object.keys(own.grid.demand).filter((k) => own.grid.delivered[k] < own.grid.demand[k]);
 // The transporter's TOS energize sliders: all three to the top.
 const energize = async (page) => { await page.waitForFunction(() => [...document.querySelectorAll('.tr-slider')].every((r) => Number(r.value) === 0)); for (const n of [1, 2, 3]) await page.$eval(`#beam-slider-${n}`, (r) => { r.value = 100; r.dispatchEvent(new Event('input', { bubbles: true })); }); };
-const waitFor = async (fn, ms = 10000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return; await new Promise((r) => setTimeout(r, 100)); } throw new Error('timed out waiting'); };
+const waitFor = async (fn, ms = 10000) => {
+  const where = (new Error().stack.split('\n')[2] || '').trim(); // the caller, for the failure message
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (await fn()) return; await new Promise((r) => setTimeout(r, 100)); }
+  throw new Error(`timed out waiting (${where})`);
+};
 const server = require('../server');
 const URL = `http://localhost:${process.env.PORT}/`;
 
@@ -125,7 +130,7 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // Ship's computers bring the ships into existence.
     let coreA = startComputer('a', 'Enterprise');
-    startComputer('d', 'Defiant');
+    let coreD = startComputer('d', 'Defiant');
     const coreK = startComputer('k', "K'Vatch");
     for (const ship of ['Enterprise', 'Defiant', "K'Vatch"]) await early.waitForSelector(`#ship option[value="${ship}"]`, { state: 'attached' });
     await early.close();
@@ -918,7 +923,7 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // No engine power: no warp. No shield power: Tactical can't raise shields. Low life support: everyone is warned.
     await route({ sensors: 100, engines: 0, shields: 0, lifeSupport: 40 });
-    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.maxWarp)) === 0);
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.speed.warp)) === 0);
     helm({ dest: { ship: 'Defiant' }, warp: 5 });
     await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /no power to the engines/.test(m.text)));
     await closeComms(carol);
@@ -1006,7 +1011,9 @@ const audioBytes = (page) => page.evaluate(async () => {
       sock.on('message', (m) => { try { msgs.push(JSON.parse(m)); } catch {} });
       await new Promise((r) => sock.on('open', r));
       sock.send(JSON.stringify({ type: 'register', name, ship, station }));
-      await waitFor(() => msgs.some((m) => m.type === 'registered'));
+      await waitFor(() => msgs.some((m) => m.type === 'registered' || m.type === 'register-failed'));
+      const refused = msgs.find((m) => m.type === 'register-failed');
+      if (refused) throw new Error(`${name} could not report aboard the ${ship}: ${refused.reason}`);
       return { msgs, send: (m) => sock.send(JSON.stringify(m)), close: () => sock.close(), nav: () => [...msgs].reverse().find((m) => m.type === 'nav') };
     };
     const kira = await crewWs('kira', 'Defiant', 'Tactical');
@@ -1042,7 +1049,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     const hit = kira.nav().own;
     const damaged = Object.entries(hit.combat.damage).find(([, d]) => d > 0);
     assert.ok(damaged, 'a system should be damaged');
-    assert.ok(hit.power[damaged[0]] <= 100 - damaged[1] + 1, 'damage should cap the system\'s power');
+    assert.ok(!(damaged[0] in hit.power) || hit.power[damaged[0]] <= 100 - damaged[1] + 1, 'damage should cap the system\'s power'); // subsystems have no power level: they fail at 50%
     await waitFor(() => obrien.msgs.some((m) => m.type === 'notice' && /^Engineering: .* damaged/.test(m.text)));
     step(`with shields down a phaser hit the hull (${hit.combat.hull}%) and damaged the ${damaged[0]}, capping its power`);
 
@@ -1053,17 +1060,17 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => obrien.nav()?.own.combat.damage[damaged[0]] === 0, 30000);
     step(`Engineering sent repair crews to the ${damaged[0]} and fixed it; the Defiant's computer saved the hull damage`);
 
-    // Stealth: the Enterprise stands off 200 units; the Defiant powers down
+    // Stealth: the Enterprise stands off 250 units; the Defiant powers down
     // and drops off the Enterprise's sensors (and weapons lock), then powers up again.
-    helm({ dest: { x: 310, y: 500 }, warp: 5 });
-    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); return n?.own.warp === 0 && n.own.x < 320; }, 30000);
+    helm({ dest: { x: 250, y: 500 }, warp: 5 });
+    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); return n?.own.warp === 0 && n.own.x < 260; }, 30000);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     obrien.send({ type: 'power', power: { engines: 0, shields: 0, sensors: 20, transporter: 0, weapons: 0, lifeSupport: 60, replicators: 0, recreation: 0 } });
     await nog.waitForSelector('[data-readout="Replicators"]:has-text("Offline")', { state: 'attached' });
-    await waitFor(() => obrien.nav()?.own.signature < 0.3);
+    await waitFor(() => obrien.nav()?.own.signature < 0.42);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'detached' });
     await carol.waitForSelector('#weapons-lock-state:has-text("No weapons lock")');
-    step(`the Defiant powered down (replicators and holodecks too: its Crew consoles show them offline) to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 200 units away, and the weapons lock was lost`);
+    step(`the Defiant powered down (replicators and holodecks too: its Crew consoles show them offline) to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 250 units away, and the weapons lock was lost`);
     obrien.send({ type: 'power', power: { engines: 80, shields: 60, sensors: 100, transporter: 60, weapons: 50, lifeSupport: 100, replicators: 40, recreation: 10 } });
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     step('powered up again, the Defiant showed up on sensors');
@@ -1076,30 +1083,43 @@ const audioBytes = (page) => page.evaluate(async () => {
     sulu.send(JSON.stringify({ type: 'dock' }));
     await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.docked)) === 'Starbase 12');
     await carol.waitForSelector('#wp-torpedoes:has-text("10 of 10")', { timeout: 15000 });
-    step('Helm flew to Starbase 12 and docked; the torpedo fired earlier was restocked');
+    // Restarting the ship's computers keeps it docked (saved with the ship).
+    await new Promise((r) => setTimeout(r, 5500)); // the relay sends the computers a copy every 5 s
+    await Promise.all([stopComputer(coreA), stopComputer(coreB)]);
+    coreA = startComputer('a', 'Enterprise'); coreB = startComputer('b', 'Enterprise');
+    await new Promise((r) => setTimeout(r, 3000)); // the computers sign back on
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own?.grid?.docked)) === 'Starbase 12', 15000);
+    step("Helm flew to Starbase 12 and docked; the torpedo fired earlier was restocked; still docked after the ship's computers restarted");
 
     // The power grid: with the core shut down and the batteries off, Bus B is
     // dead: Tactical's console goes dark and refuses orders. Restarting the
     // core (on dock power, Bus A) brings it back.
     const laforge = await crewWs('laforge', 'Enterprise', 'Engineering');
-    laforge.send({ type: 'grid', core: 'stop', ties: { battery: [] } });
+    laforge.send({ type: 'grid', core: 'stop', ties: { battery: [] }, tap: { bus: 'B', amount: 0 } }); // (the impulse drives still feed the EPS)
     await carol.waitForSelector('#console-dark:not([hidden])');
-    await waitFor(() => laforge.nav()?.maxWarp === 0);
+    await waitFor(() => laforge.nav()?.speed.warp === 0); // no warp (the impulse drives still run on their own)
     await carol.$eval('#fire-torpedo', (b) => { b.disabled = false; b.click(); });
     await waitFor(async () => /console offline, no power on its bus/.test(await carol.textContent('#log')));
-    laforge.send({ type: 'grid', core: 'start' });
+    laforge.send({ type: 'grid', core: 'start', tap: { bus: 'B', amount: 300 } });
     await waitFor(() => laforge.nav()?.own.grid.core === 'starting');
     await carol.waitForSelector('#console-dark', { state: 'hidden', timeout: 20000 });
-    assert.equal(laforge.nav().own.grid.core, 'online');
-    step('the warp core shut down with the batteries off left Bus B dead (Tactical dark, no engines); restarted on dock power, the consoles came back');
+    await waitFor(() => laforge.nav()?.own.grid.core === 'online', 20000);
+    step("the warp core shut down, batteries off and Bus B's EPS tap closed left Bus B dead (Tactical dark, no warp); restarted on dock power with the tap open, the consoles came back");
 
-    // Ties are any combination: the core straight onto both buses and the EPS,
-    // the batteries on both buses. Containment can't be left with no feed.
-    laforge.send({ type: 'grid', ties: { core: ['A', 'B', 'EPS'], battery: ['A', 'B'] } });
-    await waitFor(() => { const t = laforge.nav()?.own.grid.ties; return t?.core.length === 3 && t.battery.join() === 'A,B'; });
+    // Ties are any combination of what a source allows: batteries on both
+    // buses (not the EPS); the warp core feeds the EPS only. Containment can't
+    // be left with no feed.
+    laforge.send({ type: 'grid', ties: { battery: ['A', 'B'] } });
+    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /batteries ties to one: Bus A, B or C/.test(m.text)));
+    laforge.send({ type: 'grid', ties: { battery: ['A'], crosslink: ['A', 'B'] } });
+    await waitFor(() => laforge.nav()?.own.grid.ties.battery.join() === 'A' && laforge.nav().own.grid.ties.crosslink.join() === 'A,B');
+    laforge.send({ type: 'grid', ties: { core: ['A', 'EPS'] } });
+    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /warp core can only be tied to EPS/.test(m.text)));
+    laforge.send({ type: 'grid', ties: { battery: ['EPS'] } });
+    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /batteries can only be tied to Bus A \+ Bus B/.test(m.text)));
     laforge.send({ type: 'grid', ties: { containment: [] } });
     await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /containment can't be switched off/.test(m.text)));
-    step('Engineering tied the warp core to Bus A, Bus B and the EPS and the batteries to both buses; containment could not be left without a feed');
+    step('ties are one each: batteries refused both buses (the A-B crosslink joins them instead); the warp core (EPS only) and batteries (no EPS) refused other ties; containment could not be left without a feed');
 
     // Engineering ejects the warp core: no antimatter, no core power.
     laforge.send({ type: 'grid', eject: true });
@@ -1148,14 +1168,20 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => { const n = ezri.nav()?.own; return n && Math.hypot(n.x - ent.x, n.y - (ent.y - 3)) < 1 && n.warp === 0 && n.grid.nearShip === 'Enterprise'; }, 20000);
     ezri.send({ type: 'dock', ship: 'Enterprise' });
     await waitFor(() => laforge.nav()?.own.grid.dockedShip === 'Defiant');
+    // Docked together across a restart of the Defiant's computer.
+    await new Promise((r) => setTimeout(r, 5500));
+    await stopComputer(coreD);
+    coreD = startComputer('d', 'Defiant');
+    await new Promise((r) => setTimeout(r, 3000));
+    assert.equal(laforge.nav()?.own.grid.dockedShip, 'Defiant', "restarting the Defiant's computer undocked the ships");
     const rom = await crewWs('rom', 'Defiant', 'Engineering');
     const before = laforge.nav().own.grid.deuterium;
     rom.send({ type: 'grid', transfer: { resource: 'deuterium', dir: 'out', amount: 100 } });
     await waitFor(() => laforge.nav()?.own.grid.deuterium >= before + 90, 15000);
-    // Power across the dock: the Defiant offers 100 from its EPS, the Enterprise 30; 70 flows to the Enterprise's Bus A.
-    rom.send({ type: 'grid', ties: { ship: ['EPS'] }, feed: 100 });
+    // Power across the dock: the Defiant offers 100 from its Bus B, the Enterprise 30; 70 flows to the Enterprise's Bus A.
+    rom.send({ type: 'grid', ties: { ship: ['B'] }, feed: 100 });
     laforge.send({ type: 'grid', ties: { ship: ['A'] }, feed: 30 });
-    await waitFor(() => laforge.nav()?.own.grid.shipIn === 70 && laforge.nav().own.grid.cells.ship.A === 70 && rom.nav()?.own.grid.fed === 70);
+    await waitFor(() => laforge.nav()?.own.grid.shipIn === 70 && rom.nav()?.own.grid.fed === 70); // (the Enterprise's A and B are crosslinked: it lands on either)
     ezri.send({ type: 'dock', undock: true });
     await waitFor(() => !laforge.nav()?.own.grid.dockedShip);
     rom.close();
@@ -1181,7 +1207,7 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // Containment fed from Bus B with Bus B cut off: the core breaches and the
     // Enterprise is destroyed, then rebuilt docked at a starbase.
-    laforge.send({ type: 'grid', ties: { containment: ['B'], core: ['EPS'], battery: [] } });
+    laforge.send({ type: 'grid', ties: { containment: ['B'], core: ['EPS'], battery: [], crosslink: [] } });
     laforge.send({ type: 'grid', tap: { bus: 'B', on: false } });
     await bob.waitForSelector('.bcast--alert:has-text("containment failing")', { state: 'attached' });
     await waitFor(() => suluMsgs.some((m) => m.type === 'destroyed' && /breach/.test(m.cause)), 15000);
@@ -1193,7 +1219,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.waitForSelector('#console-dark', { state: 'hidden' });
     await screen(op, 'status');
     await op.waitForSelector('#console-dark:not([hidden])', { state: 'attached' });
-    laforge.send({ type: 'grid', ties: { dock: ['A', 'B'] } });
+    laforge.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'] } });
     await op.waitForSelector('#console-dark', { state: 'hidden' });
     step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt cold (consoles dark, no fuel) docked at ${reborn.base}; tied to dock power, it came back`);
     laforge.close();
@@ -1257,11 +1283,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     const cold = barclay.nav().own.grid;
     assert.equal(cold.core, 'offline');
     assert.equal(cold.antimatter + cold.deuterium, 0);
-    assert.ok(['solar', 'dock', 'ship', 'impulse', 'core', 'battery', 'containment'].every((k) => !cold.ties[k].length), 'a new ship should start with no power source tied in');
+    assert.ok(['solar', 'dock', 'ship', 'core', 'battery', 'containment', 'crosslink'].every((k) => !cold.ties[k].length), 'a new ship should start with no power source tied in'); assert.ok(Object.values(cold.drives).every((d) => d.state === 'off') && Object.values(cold.taps).every((t) => t === 0), 'drives off and taps closed');
     ro.send({ type: 'lock', ship: 'Enterprise' });
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /console offline/.test(m.text)));
-    barclay.send({ type: 'grid', ties: { dock: ['A', 'B', 'EPS'] } });
-    await waitFor(() => barclay.nav()?.own.grid.consoleOk.Tactical && barclay.nav().own.power.engines === 80);
+    barclay.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'] } }); // dock power on Bus A, shared with B
+    await waitFor(() => barclay.nav()?.own.grid.consoleOk.Tactical && barclay.nav().own.power.lifeSupport === 100);
     // Loads have their own ties: consoles on Bus A or B only; engines (high power) on the EPS only.
     barclay.send({ type: 'grid', ties: { 'console:Tactical': ['EPS'] } });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /Tactical can only be tied to Bus A \+ Bus B/.test(m.text)));
@@ -1282,20 +1308,38 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => barclay.nav()?.own.grid.core === 'online', 20000);
     step(`a new ship, the Excelsior, started cold at ${cold.docked} (consoles dark, no fuel); on dock power Engineering moved Tactical's console to Bus A and sensors to Bus B (consoles only take A or B, engines only the EPS), set a containment feed, took on antimatter and deuterium, and started the core`);
 
-    // Impulse power: the impulse reactor feeding Bus B holds the ship to slow impulse.
-    barclay.send({ type: 'grid', ties: { dock: ['A'], core: [], impulse: ['B'] } });
-    await waitFor(() => { const n = barclay.nav()?.own; return n?.grid.impulseUsed > 0 && barclay.nav().maxWarp < 0.25; });
-    step(`the impulse reactor powered Bus B (${barclay.nav().own.grid.impulseUsed}), so the Excelsior has only ${Math.round(barclay.nav().maxWarp * 400)}% of impulse speed left`);
+    // Impulse drives: started on bus power (their pumps), then self-sustaining.
+    // Thrusters tied in, a drive moves the ship (half impulse); off, it feeds the EPS.
+    barclay.send({ type: 'grid', impulse: { drive: 'port', on: true } });
+    await waitFor(() => barclay.nav()?.own.grid.drives.port.state === 'running', 15000);
+    await waitFor(() => barclay.nav()?.speed.impulse === 0.125);
+    barclay.send({ type: 'grid', ties: { 'sub:portThrusters': [], core: [] } });
+    await waitFor(() => { const n = barclay.nav(); return n?.own.grid.cells.impulsePort.EPS > 0 && n.speed.impulse === 0; });
+    step(`the port impulse drive started on bus power; with its thrusters tied in it gave half impulse, untied it fed the EPS (${barclay.nav().own.grid.cells.impulsePort.EPS}) and the ship had no impulse`);
+    barclay.send({ type: 'grid', ties: { 'sub:portThrusters': ['B'] }, impulse: { drive: 'port', on: false } });
     // #2: a battery on Bus A charges from Bus A's surplus even while Bus B and
     // the EPS are short (Bus A is served, and its batteries charged, first).
-    barclay.send({ type: 'grid', ties: { impulse: [], battery: ['B'] } }); // Bus B on the battery alone: drain it a little
+    barclay.send({ type: 'grid', ties: { dock: ['A'], battery: ['B'], crosslink: [] } }); // Bus B on the battery alone: drain it a little
     await waitFor(() => barclay.nav()?.own.grid.battery.charge <= 97, 15000);
-    barclay.send({ type: 'power', power: { engines: 100, shields: 100, transporter: 100, replicators: 100, recreation: 100 } });
+    barclay.send({ type: 'power', power: { engines: 100, shields: 100, transporter: 100 } });
     barclay.send({ type: 'grid', ties: { battery: ['A'], core: ['EPS'], dock: [] } });
     barclay.send({ type: 'grid', tap: { bus: 'A', on: true } });
     barclay.send({ type: 'grid', tap: { bus: 'B', on: true } });
     await waitFor(() => { const n = barclay.nav()?.own; return n && n.grid.battery.charging > 0 && SYSTEMS_SHORT(n).length > 0; });
     step(`with the warp core overloaded (short: ${SYSTEMS_SHORT(barclay.nav().own).join(', ')}), the battery on Bus A still charged from Bus A's share`);
+
+    // Breakers: tie more than Bus B carries (300) and it trips loads off at random.
+    barclay.send({ type: 'power', power: { replicators: 100, recreation: 100, transporter: 100 } });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /breaker tripped on Bus B/.test(m.text)));
+    await waitFor(() => barclay.nav()?.own.grid.totals.B.tied <= 300);
+    step(`over its 300 max, Bus B's breaker tripped loads off (${barclay.msgs.filter((m) => m.type === 'notice' && /breaker tripped/.test(m.text)).map((m) => m.text.split(': ').pop()).join('; ')})`);
+
+    // Communications' local RF without power: no calls aboard.
+    barclay.send({ type: 'grid', ties: { 'sub:rf': [] } });
+    await waitFor(() => barclay.nav()?.own.grid.subOk.rf === false);
+    barclay.send({ type: 'call', to: id('ro', 'Excelsior'), cid: 'x1' });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /local RF has no power/.test(m.text)));
+    step("with Communications' local RF untied, a call aboard the Excelsior was refused");
     barclay.close();
     ro.close();
 

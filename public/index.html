@@ -147,7 +147,12 @@
     .grid-table thead th { color: var(--lcars-orange); font-size: 18px; }
     .grid-table tbody th { color: var(--lcars-gold); }
     .grid-table tfoot th, .grid-table tfoot td { color: var(--lcars-sky); border-bottom: 0; border-top: 3px solid var(--lcars-orange); font-variant-numeric: tabular-nums; }
-    .grid-table .grid-indent { padding-left: 34px; }
+    .grid-table .grid-indent--1 { padding-left: 30px; }
+    .grid-table .grid-indent--2 { padding-left: 60px; }
+    .grid-table .grid-indent--3 { padding-left: 90px; }
+    .grid-table .grid-mini { min-height: 24px; font-size: 11px; margin-left: 8px; padding: 0 10px; }
+    .grid-flow--in { color: #66cc66; }
+    .grid-table tfoot td[data-over] { color: var(--lcars-red); }
     .grid-table .grid-indent span::before { content: '└ '; color: var(--lcars-tan); }
     .grid-table .grid-note { display: block; color: var(--lcars-tan); font-size: 12px; }
     .grid-table .grid-na { color: #444; }

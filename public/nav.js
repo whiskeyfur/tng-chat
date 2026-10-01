@@ -174,9 +174,11 @@
       const others = nav.ships.filter((s) => s.name !== own?.name);
       if (mode === 'helm') {
         // Engine power caps the speed (Engineering).
-        const top = nav.maxWarp ?? 9;
+        // Impulse comes from the impulse drives, warp from the warp core and engines.
+        const lim = nav.speed || { warp: nav.maxWarp ?? 9, impulse: 0.25 };
         for (const o of speedSel.options) {
-          const over = Number(o.value) > top;
+          const v = Number(o.value);
+          const over = v > 0 && (v < 1 ? lim.impulse <= 0 : v > lim.warp);
           o.disabled = over;
           o.textContent = SPEEDS.find(([v]) => v === o.value)[1] + (over ? ' (no power)' : '');
         }
