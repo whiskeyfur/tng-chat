@@ -118,7 +118,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Ship's computers bring the ships into existence.
     let coreA = startComputer('a', 'Enterprise');
     startComputer('d', 'Defiant');
-    startComputer('k', "K'Vatch");
+    const coreK = startComputer('k', "K'Vatch");
     for (const ship of ['Enterprise', 'Defiant', "K'Vatch"]) await early.waitForSelector(`#ship option[value="${ship}"]`, { state: 'attached' });
     await early.close();
     step("ship's computers for the Enterprise, Defiant and K'Vatch put them in the ship list");
@@ -708,8 +708,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     step('library endpoints allow cross-origin use for pages hosted elsewhere');
 
     // The K'Vatch's ops station drops out mid-call: alice and martok carry on,
-    // but no new hail to the K'Vatch can start.
-    // Re-open the link so we can check it drops with the K'Vatch's ops.
+    // no new hail to the K'Vatch can start, but the K'Vatch's computer keeps
+    // the data link up.
     await screen(op, 'link');
     await screen(kops, 'link');
     await op.click('#link-form button');
@@ -717,8 +717,6 @@ const audioBytes = (page) => page.evaluate(async () => {
     await bob.waitForSelector('#users li:has-text("kor")', { state: 'attached' });
     await kops.close();
     await closeComms(op);
-    await op.waitForFunction(() => window.__operator.network.length === 0);
-    await bob.waitForFunction(() => !window.__comms.users.some((u) => u.name === 'kor'));
     await martok.waitForSelector('#ops-status:has-text("Ops offline")', { state: 'attached' });
     await op.waitForFunction(() => !window.__operator.ships.includes("K'Vatch"));
     await alice.waitForTimeout(1000);
@@ -728,7 +726,16 @@ const audioBytes = (page) => page.evaluate(async () => {
     await alice.press('.v-chat-text', 'Enter');
     await martok.waitForSelector('.v-chatlog div:has-text("alice: still with you")');
     assert.equal(await op.isDisabled('#hail-form button'), true, 'Enterprise ops can still hail with no ship in range');
-    step('ops drops out: the call in progress carries on, the data link closes, new hails are refused');
+    await op.waitForTimeout(300);
+    assert.deepEqual(await op.evaluate(() => window.__operator.network), ["K'Vatch"], "the K'Vatch's computer didn't keep the link");
+    assert.equal(await bob.evaluate(() => window.__comms.users.some((u) => u.name === 'kor')), true);
+    step("ops drops out: the call carries on, new hails are refused, and the K'Vatch's computer keeps the data link up");
+
+    // With neither ops nor a ship's computer, the link closes.
+    await stopComputer(coreK);
+    await op.waitForFunction(() => window.__operator.network.length === 0);
+    await bob.waitForFunction(() => !window.__comms.users.some((u) => u.name === 'kor'));
+    step("the K'Vatch's computer goes offline too: with neither ops nor a computer, the data link closes");
 
     // The call can still finish, and K'Vatch crew can still call each other.
     await martok.click('.v-hangup');

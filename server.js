@@ -14,8 +14,9 @@
 // (themselves included), which connects the two directly.
 // Two operators can agree to open a data link between their ships. Linked
 // ships form a data network: everyone on it sees and can call everyone on
-// every ship in it. Links close when either operator closes them or a ship's
-// last ops station signs off.
+// every ship in it. A ship's computer keeps its links open with nobody aboard
+// (it can't start one); links close when an operator closes them or a ship
+// has neither ops nor a ship's computer.
 // A ship comes into existence when its ops station first signs on, and crew
 // pick their ship from that list. If ops drops out, calls in progress carry on
 // (including calls with other ships) and crew can still call each other aboard,
@@ -643,7 +644,9 @@ function coreSignOff(ws) {
     opLog(k, cores.has(k) ? 'a ship\'s computer went offline' : 'ship\'s computer offline: the library is unavailable');
     refreshLibraries(k);
     syncShip(k);
+    dropLinksIfUnmaintained(k);
   }
+  broadcastAllOps();
   console.log(`ship's computer offline for ${[...ws.coreShips].map(shipName).join(', ')}`);
   broadcastShips();
 }
@@ -744,14 +747,23 @@ function leaveOps(ws) {
   ws.operator = false;
   console.log(`${ws.name} left the ops station on the ${ws.ship}`);
   if (!opsOf(ws.shipKey).length) {
+    // Hails and link requests need ops to answer them.
     dropHails((h) => h.toShip === ws.shipKey || h.fromShip === ws.shipKey, `no operator on duty aboard the ${ws.ship}`);
-    const formerNet = [...network(ws.shipKey)];
-    for (const k of linkedTo(ws.shipKey)) { links.delete(linkKey(ws.shipKey, k)); opLog(k, `data link with the ${ws.ship} lost: no operator on duty`); }
     for (const req of [...linkRequests.values()]) if (req.fromShip === ws.shipKey || req.toShip === ws.shipKey) linkRequests.delete(req.id);
-    refreshNetworks(formerNet);
+    dropLinksIfUnmaintained(ws.shipKey);
   }
   broadcastAllOps();
   broadcastShips();
+}
+
+// Open data links are kept up by the ship's ops or its ship's computer (which
+// can keep a link going with nobody aboard, but can't start one). With
+// neither, the ship's links close; calls already going over them carry on.
+function dropLinksIfUnmaintained(key) {
+  if (opsOf(key).length || cores.has(key) || !linkedTo(key).length) return;
+  const formerNet = [...network(key)];
+  for (const k of linkedTo(key)) { links.delete(linkKey(key, k)); opLog(k, `data link with the ${shipName(key)} lost: no operator or ship's computer`); }
+  refreshNetworks(formerNet);
 }
 
 // --- comm traffic (Communications station) ------------------------------------

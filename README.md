@@ -75,6 +75,7 @@ A **ship's computer** is a small Node program that signs on to the relay *as one
 node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] <ship> [ship...]
 ```
 
+- **Keeps data links up:** a link opened by two operators stays open while either side's ops or ship's computer is there, so it survives everyone leaving the bridge (or the ship). A ship's computer can't start a link; only ops can. With neither ops nor a computer, the ship's links close (calls already going over them carry on).
 - **Makes the ship:** no ship's computer, no ship. While one is connected, its ships are in the ship list (even with nobody aboard), so ops and crew can sign in any time; without one, nobody can. (Off-ship comms still need an ops station on duty.)
 - **Holds the library:** the **Library** screen (bottom of the left-hand menu) lists the files uploaded to your ship and, across data links, every library on your data network in its own ship folder. Uploads stream through the relay straight to one of the ship's computers, which stores them in `<data>/<ship>/` (default `./shipcore-data`); downloads stream back the same way. The relay never stores files. With no computer online for a ship, its library shows as offline.
 - **Work together:** run several computers for the same ship (on different machines, say) and they keep each other's libraries in sync through the relay: a new or changed file is copied to the others, the newest version wins, and deletions are remembered (`.index.json`), so a computer that was offline catches up without bringing deleted files back. One computer can also run several ships.
@@ -99,7 +100,7 @@ The ops menu has Comms, Status (channel readouts and the comm log), Hail, Data l
 
 ### When ops drops out
 
-If a ship's last ops station signs off, nobody is cut off. Calls in progress carry on, including calls with other ships, until people hang up, and crew can still call anyone aboard. But no new off-ship communication can start. Other ships can't hail the ship, its data links close, and pending hails and link requests are dropped. Crew see "Ops offline". The ship stays in the list, marked "ops offline", while anyone is aboard.
+If a ship's last ops station signs off, nobody is cut off. Calls in progress carry on, including calls with other ships, until people hang up, and crew can still call anyone aboard. But no new off-ship communication can start. Other ships can't hail the ship and pending hails and link requests are dropped; its data links stay open only if its ship's computer is running. Crew see "Ops offline". The ship stays in the list, marked "ops offline", while anyone is aboard.
 
 ## Test
 
