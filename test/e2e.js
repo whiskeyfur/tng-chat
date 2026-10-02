@@ -81,9 +81,10 @@ async function openAs(browser, name, tag, ship = 'Enterprise', station = 'Crew')
   page.on('console', (m) => console.log(`  [${tag}] ${m.text()}`));
   await page.goto(URL);
   await page.fill('#name', name);
-  await page.selectOption('#ship', ship); // only ships with ops on duty are listed
-  await page.selectOption('#station', station);
-  await page.click('#register-form button');
+  // (Taps: the vessel, then a station, unassigned; only ships with a ship's computer are listed.)
+  await page.click(`#signin-ships button[data-ship="${ship}"]`);
+  await page.click(`#signin-unassigned button[data-station="${station}"]`);
+  await page.click('#register-go');
   return page;
 }
 
@@ -94,9 +95,9 @@ async function openOps(browser, ship, tag, name = 'obrien') {
   page.on('console', (m) => console.log(`  [${tag}] ${m.text()}`));
   await page.goto(URL);
   await page.fill('#name', name);
-  await page.selectOption('#station', 'Operations');
-  await page.selectOption('#ship', ship); // only ships with a ship's computer are offered
-  await page.click('#register-form button');
+  await page.click(`#signin-ships button[data-ship="${ship}"]`); // only ships with a ship's computer are offered
+  await page.click('#signin-unassigned button[data-station="Operations"]');
+  await page.click('#register-go');
   await page.waitForSelector('[data-screen="status"]:not([hidden])');
   return page;
 }
@@ -636,7 +637,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     await lobby3.waitForSelector('#ship option[value="Enterprise"]', { state: 'attached' });
     assert.equal(await lobby3.locator('#ship option[value="Voyager"]').count(), 0);
     // No OPERATOR_KEY on this relay, so no authorization code field.
-    await lobby3.selectOption('#station', 'Operations');
+    await lobby3.click('#signin-ships button[data-ship="Enterprise"]');
+    await lobby3.click('#signin-unassigned button[data-station="Operations"]');
     assert.equal(await lobby3.isVisible('#key'), false, 'code field shown with no key required');
     assert.equal(await lobby3.locator('#ops-ship').count(), 0, 'ops still type a ship name');
     await lobby3.close();
@@ -2553,20 +2555,42 @@ const audioBytes = (page) => page.evaluate(async () => {
     await closeComms(alice);
     step('alice texted bob and carol together without a call; bob\'s Comms button showed the unread message');
 
-    // Rank, species and gender: alice picks hers on the Station screen. Her rank shows to
-    // everyone with her name; her species and gender only to people in the same place.
+    // Species and gender: alice picks hers on the Station screen; only people in the same place see them.
     await screen(alice, 'reassign');
-    for (const [k, v] of [['rank', 'Lt. Cmdr.'], ['species', 'Vulcan'], ['gender', 'Female']]) await alice.click(`#station-profile [data-profile="${k}"][data-value="${v}"]`);
-    await alice.waitForSelector('#station-sub:has-text("Lt. Cmdr. alice")');
+    assert.equal(await alice.locator('#station-profile [data-profile="rank"]').count(), 0, 'rank comes with a position, not the profile');
+    for (const [k, v] of [['species', 'Vulcan'], ['gender', 'Female']]) await alice.click(`#station-profile [data-profile="${k}"][data-value="${v}"]`);
     const aliceAs = (page) => page.evaluate((who) => window.__comms.users.find((u) => u.id === who), id('alice'));
     const aliceAt = await alice.evaluate(() => window.__voice.me.station);
+    await new Promise((r) => setTimeout(r, 1000));
     for (const page of [bob, carol]) {
-      await page.waitForFunction((who) => window.__comms.users.find((u) => u.id === who)?.title === 'Lt. Cmdr. alice', id('alice'));
-      const there = (await page.evaluate(() => window.__voice.me.station)) === aliceAt, seen = await aliceAs(page);
+      const there = (await page.evaluate(() => window.__voice.me.station)) === aliceAt;
+      if (there) await page.waitForFunction((who) => window.__comms.users.find((u) => u.id === who)?.species === 'Vulcan', id('alice'));
+      const seen = await aliceAs(page);
       assert.deepEqual([seen.species ?? null, seen.gender ?? null], there ? ['Vulcan', 'Female'] : [null, null], `${await page.evaluate(() => window.__voice.me.name)} at ${await page.evaluate(() => window.__voice.me.station)} (alice at ${aliceAt})`);
     }
-    assert.equal(await alice.evaluate(() => JSON.parse(localStorage.getItem('stchat-profile')).rank), 'Lt. Cmdr.', 'remembered with the name');
-    step("alice took Lt. Cmdr., Vulcan, female on the Station screen: everyone sees \"Lt. Cmdr. alice\"; only people in her place see Vulcan, female");
+    assert.equal(await alice.evaluate(() => JSON.parse(localStorage.getItem('stchat-profile')).species), 'Vulcan', 'remembered with the name');
+    // Rank comes with a position on the vessel's org chart, tapped at sign-in: brandy signs in as the
+    // Enterprise's Chief Engineer (a Lt. Cmdr., at Engineering); the position is hers while she's aboard.
+    const brandy = await (await browser.newContext()).newPage();
+    await brandy.goto(URL);
+    await brandy.fill('#name', 'brandy');
+    await brandy.click('#signin-ships button[data-ship="Enterprise"]');
+    assert.match(await brandy.textContent('#signin-org'), /Command.*Commanding Officer.*Captain.*Engineering.*Chief Engineer.*Lt\. Cmdr\..*Unassigned/s);
+    await brandy.click('#signin-org button[data-position="eng-chief"]');
+    await brandy.waitForSelector('#signin-org button[data-position="eng-chief"][aria-pressed="true"]');
+    await brandy.click('#register-go');
+    await brandy.waitForSelector('#station-sub:has-text("Lt. Cmdr. brandy")');
+    assert.equal(await brandy.evaluate(() => window.__voice.me.station), 'Engineering');
+    await bob.waitForFunction((who) => window.__comms.users.find((u) => u.id === who)?.title === 'Lt. Cmdr. brandy', id('brandy'));
+    const lobby4 = await (await browser.newContext()).newPage();
+    await lobby4.goto(URL);
+    await lobby4.click('#signin-ships button[data-ship="Enterprise"]');
+    await lobby4.waitForSelector('#signin-org button[data-position="eng-chief"][disabled]:has-text("filled: brandy")');
+    await lobby4.evaluate(() => window.__send({ type: 'register', name: 'zed', ship: 'Enterprise', position: 'eng-chief' }));
+    await lobby4.waitForSelector('#register-error:has-text("Chief Engineer: filled by brandy")');
+    await lobby4.close(); await brandy.close();
+    await bob.waitForFunction((who) => !window.__comms.users.some((u) => u.id === who), id('brandy'));
+    step("alice took Vulcan, female on the Station screen: only people in her place see them; brandy tapped Chief Engineer on the Enterprise's org chart and is \"Lt. Cmdr. brandy\" at Engineering, the position shown filled (and refused) to anyone else");
 
     // Closing the tab mid-call ends the call for the other side. Meanwhile
     // another ship's Communications can't see this call inside the Enterprise.

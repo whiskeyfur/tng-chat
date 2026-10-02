@@ -135,5 +135,51 @@
       0,
       1.5
     ]
+  },
+  "org": {
+    "command": [
+      {
+        "id": "pilot",
+        "title": "Pilot (in command)",
+        "rank": "Lieutenant",
+        "station": "Helm"
+      }
+    ],
+    "departments": [
+      {
+        "name": "Flight crew",
+        "positions": [
+          {
+            "id": "copilot",
+            "title": "Co-pilot",
+            "rank": "Lt. JG",
+            "station": "Tactical"
+          },
+          {
+            "id": "ops",
+            "title": "Operations Officer",
+            "rank": "Ensign",
+            "station": "Operations"
+          }
+        ]
+      },
+      {
+        "name": "Aft compartment",
+        "positions": [
+          {
+            "id": "flight-engineer",
+            "title": "Flight Engineer",
+            "rank": "Ensign",
+            "station": "Engineering"
+          },
+          {
+            "id": "tr-op",
+            "title": "Transporter Operator",
+            "rank": "Crewman",
+            "station": "Transporter"
+          }
+        ]
+      }
+    ]
   }
 }

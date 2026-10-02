@@ -290,6 +290,9 @@
     body[data-blackout] #left-pane:has([data-screen="log"]:not([hidden])) { filter: brightness(0.06); pointer-events: none; }
     body[data-blackout] .lcars-content { background: #000; }
     .ls-table .ls-tap[data-short] { background: var(--lcars-red); }
+    .signin-taps { flex: 1 1 100%; }
+    .signin-taps .tr-tap small { display: block; font-size: 10px; opacity: 0.8; }
+    .signin-taps .tr-tap { text-align: left; line-height: 1.1; padding: 4px 12px; }
     .profile-taps { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; }
     .profile-head { margin: 12px 0 4px; color: var(--lcars-tan); text-transform: uppercase; font-size: 16px; }
     /* Comms and the library offline: no console power or local RF. */
@@ -467,12 +470,15 @@
         <div class="lcars-panel__body">
           <form class="ops-form" id="register-form">
             <input class="ops-input" id="name" placeholder="Your name" autocomplete="off" required>
-            <select class="ops-select" id="ship" aria-label="ship" required></select>
-            <select class="ops-select" id="station" aria-label="station" required></select>
+            <!-- The vessel, then a position on its org chart or a station: taps (the pull-downs hold the picks). -->
+            <select class="ops-select" id="ship" aria-label="ship" hidden></select>
+            <select class="ops-select" id="station" aria-label="station" hidden></select>
+            <div class="signin-taps" id="signin-ships"></div>
+            <div class="signin-taps" id="signin-org"></div>
             <input class="ops-input" id="key" type="password" placeholder="Authorization code (if required)" autocomplete="off" aria-label="operator authorization code" hidden>
-            <button class="lcars-button lcars-button--pill">Report aboard</button>
+            <button class="lcars-button lcars-button--pill" id="register-go">Report aboard</button>
           </form>
-          <!-- Rank, species and gender (taps; remembered with the name). -->
+          <!-- Species and gender (taps; remembered with the name). -->
           <div class="profile-taps" id="signin-profile" data-profile-taps></div>
           <p class="lcars-note" id="register-error"></p>
           <form class="ops-form relay-form" id="relay-form">

@@ -41,9 +41,9 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     await page.goto(URL);
     await page.waitForSelector('#ship option[value="Tabletship"]', { state: 'attached' });
     await page.fill('#name', 'tablet');
-    await page.selectOption('#ship', 'Tabletship');
-    await page.selectOption('#station', 'Engineering');
-    await page.click('#register-form button');
+    await page.click('#signin-ships button[data-ship="Tabletship"]');
+    await page.click('#signin-unassigned button[data-station="Engineering"]');
+    await page.click('#register-go');
     // The power grid: its panel body scrolls with a drag.
     await page.waitForSelector('#grid-table', { state: 'attached' });
     await page.evaluate(() => document.querySelector('[data-screen-tab="st-grid"]')?.click());

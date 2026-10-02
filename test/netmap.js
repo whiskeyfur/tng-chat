@@ -65,9 +65,9 @@ async function sock(hello) {
     await page.goto(URL);
     await page.waitForSelector('#ship option[value="Discovery"]', { state: 'attached' });
     await page.fill('#name', 'detmer');
-    await page.selectOption('#ship', 'Discovery');
-    await page.selectOption('#station', 'Operations');
-    await page.click('#register-form button');
+    await page.click('#signin-ships button[data-ship="Discovery"]');
+    await page.click('#signin-unassigned button[data-station="Operations"]');
+    await page.click('#register-go');
     await page.evaluate(() => document.querySelector('[data-screen-tab="link"]')?.click());
     await page.waitForFunction(() => document.querySelectorAll('#net-map .net-node').length === 11, null, { timeout: 15000 });
     await wait(500);
@@ -132,9 +132,9 @@ async function sock(hello) {
     await comms.goto(URL);
     await comms.waitForSelector('#ship option[value="Farragut"]', { state: 'attached' });
     await comms.fill('#name', 'hoshi');
-    await comms.selectOption('#ship', 'Farragut');
-    await comms.selectOption('#station', 'Communications');
-    await comms.click('#register-form button');
+    await comms.click('#signin-ships button[data-ship="Farragut"]');
+    await comms.click('#signin-unassigned button[data-station="Communications"]');
+    await comms.click('#register-go');
     await comms.evaluate(() => document.querySelector('[data-screen-tab="st-links"]')?.click());
     await comms.waitForFunction(() => document.querySelectorAll('#comm-net-map .net-node').length === 11, null, { timeout: 15000 });
     await comms.click('#comm-net-map .net-node[data-ship="Cole"]');

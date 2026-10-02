@@ -13,6 +13,8 @@ const isStr = (v) => typeof v === 'string' && v.length > 0;
 const isBool = (v) => typeof v === 'boolean';
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const isPoint = (v) => isNum(v?.x) && isNum(v?.y);
+// (An org chart's position: n of them, if n is given.)
+const isPosition = (p) => isStr(p?.id) && isStr(p?.title) && isStr(p?.rank) && isStr(p?.station) && (p.n === undefined || (Number.isInteger(p.n) && p.n > 0));
 
 // field: [check, what it must be, required]
 const SHIP_FIELDS = {
@@ -35,7 +37,8 @@ const SHIP_FIELDS = {
   ties: [(v) => isObj(v) && Object.values(v).every((x) => Array.isArray(x) && x.every(isStr)), 'an object of tie lists', false],
   places: [(v) => Array.isArray(v) && v.every((p) => isStr(p?.name) && isNum(p?.deck) && Array.isArray(p?.stations) && p.stations.every(isStr) && (p.via === undefined || isStr(p.via))), 'a list of { name, deck, stations, rows?, via?, default? }', false],
   seats: [(v) => isObj(v) && Object.values(v).every((s) => Array.isArray(s) && s.length === 2 && s.every(isNum)), 'an object of [x, y] seats', false],
-  org: [(v) => Array.isArray(v), 'a list of departments', false],
+  org: [(v) => isObj(v) && Array.isArray(v.command) && v.command.every(isPosition) && (v.departments === undefined || (Array.isArray(v.departments) && v.departments.every((d) => isStr(d?.name) && Array.isArray(d.positions) && d.positions.every(isPosition)))),
+    'its org chart: { command: [positions], departments: [{ name, positions }] }, a position { id, title, rank, station, n? }', false],
 };
 const SYSTEM_FIELDS = {
   name: [isStr, 'a name', true],

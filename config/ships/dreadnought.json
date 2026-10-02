@@ -315,5 +315,261 @@
       0,
       3.8
     ]
+  },
+  "org": {
+    "command": [
+      {
+        "id": "co",
+        "title": "Commanding Officer",
+        "rank": "Captain",
+        "station": "Captain"
+      },
+      {
+        "id": "xo",
+        "title": "First Officer",
+        "rank": "Commander",
+        "station": "First Officer"
+      }
+    ],
+    "departments": [
+      {
+        "name": "Operations",
+        "positions": [
+          {
+            "id": "ops-chief",
+            "title": "Chief Operations Officer",
+            "rank": "Lt. Cmdr.",
+            "station": "Operations"
+          },
+          {
+            "id": "ops-officer",
+            "title": "Operations Officer",
+            "rank": "Lt. JG",
+            "station": "Operations"
+          }
+        ]
+      },
+      {
+        "name": "Flight Control",
+        "positions": [
+          {
+            "id": "helm-chief",
+            "title": "Chief Flight Controller",
+            "rank": "Lieutenant",
+            "station": "Helm"
+          },
+          {
+            "id": "helm-officer",
+            "title": "Flight Controller",
+            "rank": "Ensign",
+            "station": "Helm"
+          }
+        ]
+      },
+      {
+        "name": "Tactical / Security",
+        "positions": [
+          {
+            "id": "sec-chief",
+            "title": "Chief of Security",
+            "rank": "Lt. Cmdr.",
+            "station": "Security"
+          },
+          {
+            "id": "tac-officer",
+            "title": "Tactical Officer",
+            "rank": "Lieutenant",
+            "station": "Tactical"
+          },
+          {
+            "id": "tac-relief",
+            "title": "Tactical Officer",
+            "rank": "Ensign",
+            "station": "Tactical"
+          },
+          {
+            "id": "sec-bridge",
+            "title": "Security Officer (bridge)",
+            "rank": "Lt. JG",
+            "station": "Bridge 4"
+          },
+          {
+            "id": "sec-officer",
+            "title": "Security Officer",
+            "rank": "Ensign",
+            "station": "Security",
+            "n": 2
+          },
+          {
+            "id": "brig-officer",
+            "title": "Brig Officer",
+            "rank": "Crewman",
+            "station": "Brig"
+          }
+        ]
+      },
+      {
+        "name": "Engineering",
+        "positions": [
+          {
+            "id": "eng-chief",
+            "title": "Chief Engineer",
+            "rank": "Lt. Cmdr.",
+            "station": "Engineering"
+          },
+          {
+            "id": "eng-asst",
+            "title": "Assistant Chief Engineer",
+            "rank": "Lieutenant",
+            "station": "Engineering"
+          },
+          {
+            "id": "eng-bridge",
+            "title": "Engineering Officer (bridge)",
+            "rank": "Lt. JG",
+            "station": "Bridge 2"
+          },
+          {
+            "id": "engineer",
+            "title": "Engineer",
+            "rank": "Ensign",
+            "station": "Engineering",
+            "n": 3
+          },
+          {
+            "id": "eng-tech",
+            "title": "Engineering Technician",
+            "rank": "Crewman",
+            "station": "Engineering",
+            "n": 2
+          }
+        ]
+      },
+      {
+        "name": "Science",
+        "positions": [
+          {
+            "id": "sci-chief",
+            "title": "Chief Science Officer",
+            "rank": "Lt. Cmdr.",
+            "station": "Science"
+          },
+          {
+            "id": "sci-bridge",
+            "title": "Science Officer (bridge)",
+            "rank": "Lt. JG",
+            "station": "Bridge 1"
+          },
+          {
+            "id": "sci-officer",
+            "title": "Science Officer",
+            "rank": "Ensign",
+            "station": "Science",
+            "n": 2
+          }
+        ]
+      },
+      {
+        "name": "Medical",
+        "positions": [
+          {
+            "id": "cmo",
+            "title": "Chief Medical Officer",
+            "rank": "Commander",
+            "station": "Medical"
+          },
+          {
+            "id": "doctor",
+            "title": "Doctor",
+            "rank": "Lieutenant",
+            "station": "Medical"
+          },
+          {
+            "id": "med-bridge",
+            "title": "Medical Officer (bridge)",
+            "rank": "Lt. JG",
+            "station": "Bridge 5"
+          },
+          {
+            "id": "nurse",
+            "title": "Nurse",
+            "rank": "Ensign",
+            "station": "Medical",
+            "n": 2
+          }
+        ]
+      },
+      {
+        "name": "Communications",
+        "positions": [
+          {
+            "id": "comm-chief",
+            "title": "Communications Officer",
+            "rank": "Lieutenant",
+            "station": "Communications"
+          },
+          {
+            "id": "comm-bridge",
+            "title": "Communications Officer (bridge)",
+            "rank": "Lt. JG",
+            "station": "Bridge 3"
+          },
+          {
+            "id": "comm-spec",
+            "title": "Communications Specialist",
+            "rank": "Ensign",
+            "station": "Communications"
+          }
+        ]
+      },
+      {
+        "name": "Transporter",
+        "positions": [
+          {
+            "id": "tr-chief",
+            "title": "Transporter Chief",
+            "rank": "Chief Petty Officer",
+            "station": "Transporter"
+          },
+          {
+            "id": "tr-tech",
+            "title": "Transporter Technician",
+            "rank": "Crewman",
+            "station": "Transporter",
+            "n": 2
+          }
+        ]
+      },
+      {
+        "name": "Hangar Deck",
+        "positions": [
+          {
+            "id": "hangar-chief",
+            "title": "Hangar Chief",
+            "rank": "Chief Petty Officer",
+            "station": "Shuttle Bay"
+          },
+          {
+            "id": "deck-crew",
+            "title": "Flight Deck Crewman",
+            "rank": "Crewman",
+            "station": "Shuttle Bay",
+            "n": 2
+          }
+        ]
+      },
+      {
+        "name": "Crew Support",
+        "positions": [
+          {
+            "id": "crewman",
+            "title": "Crewman",
+            "rank": "Crewman",
+            "station": "Crew",
+            "n": 8
+          }
+        ]
+      }
+    ]
   }
 }

@@ -317,5 +317,216 @@
       0,
       3.8
     ]
+  },
+  "org": {
+    "command": [
+      {
+        "id": "co",
+        "title": "Station Commander",
+        "rank": "Captain",
+        "station": "Captain"
+      },
+      {
+        "id": "xo",
+        "title": "Executive Officer",
+        "rank": "Commander",
+        "station": "First Officer"
+      }
+    ],
+    "departments": [
+      {
+        "name": "Operations",
+        "positions": [
+          {
+            "id": "ops-chief",
+            "title": "Chief of Operations",
+            "rank": "Lt. Cmdr.",
+            "station": "Operations"
+          },
+          {
+            "id": "ops-officer",
+            "title": "Operations Officer",
+            "rank": "Lt. JG",
+            "station": "Operations"
+          }
+        ]
+      },
+      {
+        "name": "Drydock / Shipyard Ops",
+        "positions": [
+          {
+            "id": "dockmaster",
+            "title": "Dockmaster",
+            "rank": "Lieutenant",
+            "station": "Operations"
+          },
+          {
+            "id": "drydock-officer",
+            "title": "Drydock Officer",
+            "rank": "Ensign",
+            "station": "Operations"
+          }
+        ]
+      },
+      {
+        "name": "Traffic Control",
+        "positions": [
+          {
+            "id": "traffic",
+            "title": "Traffic Controller",
+            "rank": "Lieutenant",
+            "station": "Helm"
+          }
+        ]
+      },
+      {
+        "name": "Tactical / Security",
+        "positions": [
+          {
+            "id": "sec-chief",
+            "title": "Chief of Security",
+            "rank": "Lt. Cmdr.",
+            "station": "Security"
+          },
+          {
+            "id": "tac-officer",
+            "title": "Tactical Officer",
+            "rank": "Lieutenant",
+            "station": "Tactical"
+          },
+          {
+            "id": "sec-officer",
+            "title": "Security Officer",
+            "rank": "Ensign",
+            "station": "Security",
+            "n": 2
+          },
+          {
+            "id": "brig-officer",
+            "title": "Brig Officer",
+            "rank": "Crewman",
+            "station": "Brig"
+          }
+        ]
+      },
+      {
+        "name": "Engineering",
+        "positions": [
+          {
+            "id": "eng-chief",
+            "title": "Chief Engineer",
+            "rank": "Lt. Cmdr.",
+            "station": "Engineering"
+          },
+          {
+            "id": "engineer",
+            "title": "Engineer",
+            "rank": "Ensign",
+            "station": "Engineering",
+            "n": 2
+          },
+          {
+            "id": "eng-tech",
+            "title": "Engineering Technician",
+            "rank": "Crewman",
+            "station": "Engineering",
+            "n": 2
+          }
+        ]
+      },
+      {
+        "name": "Science",
+        "positions": [
+          {
+            "id": "sci-chief",
+            "title": "Science Officer",
+            "rank": "Lieutenant",
+            "station": "Science"
+          },
+          {
+            "id": "sci-officer",
+            "title": "Science Specialist",
+            "rank": "Ensign",
+            "station": "Science"
+          }
+        ]
+      },
+      {
+        "name": "Medical",
+        "positions": [
+          {
+            "id": "cmo",
+            "title": "Chief Medical Officer",
+            "rank": "Commander",
+            "station": "Medical"
+          },
+          {
+            "id": "nurse",
+            "title": "Nurse",
+            "rank": "Ensign",
+            "station": "Medical",
+            "n": 2
+          }
+        ]
+      },
+      {
+        "name": "Communications",
+        "positions": [
+          {
+            "id": "comm-chief",
+            "title": "Communications Officer",
+            "rank": "Lieutenant",
+            "station": "Communications"
+          }
+        ]
+      },
+      {
+        "name": "Transporter",
+        "positions": [
+          {
+            "id": "tr-chief",
+            "title": "Transporter Chief",
+            "rank": "Chief Petty Officer",
+            "station": "Transporter"
+          },
+          {
+            "id": "tr-tech",
+            "title": "Transporter Technician",
+            "rank": "Crewman",
+            "station": "Transporter"
+          }
+        ]
+      },
+      {
+        "name": "Docking Ring",
+        "positions": [
+          {
+            "id": "hangar-chief",
+            "title": "Hangar Chief",
+            "rank": "Chief Petty Officer",
+            "station": "Shuttle Bay"
+          },
+          {
+            "id": "deck-crew",
+            "title": "Docking Crewman",
+            "rank": "Crewman",
+            "station": "Shuttle Bay",
+            "n": 2
+          }
+        ]
+      },
+      {
+        "name": "Residents",
+        "positions": [
+          {
+            "id": "civilian",
+            "title": "Civilian",
+            "rank": "Civilian",
+            "station": "Crew",
+            "n": 6
+          }
+        ]
+      }
+    ]
   }
 }

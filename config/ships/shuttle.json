@@ -98,5 +98,28 @@
       0.5,
       0
     ]
+  },
+  "org": {
+    "command": [
+      {
+        "id": "pilot",
+        "title": "Pilot (in command)",
+        "rank": "Lieutenant",
+        "station": "Helm"
+      }
+    ],
+    "departments": [
+      {
+        "name": "Flight crew",
+        "positions": [
+          {
+            "id": "copilot",
+            "title": "Co-pilot",
+            "rank": "Ensign",
+            "station": "Operations"
+          }
+        ]
+      }
+    ]
   }
 }

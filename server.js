@@ -139,19 +139,20 @@ const userId = (name, ship) => `${name.toLowerCase()}@${shipKey(ship)}`;
 // Players' rank, species and gender (set at sign-in, changed later). Rank
 // shows wherever the name does (rosters, calls, messages, orders: "Lt. Cmdr.
 // Brandy"); species and gender only to people in the same place (same ship, same station).
-const RANKS = ['Ensign', 'Lt. JG', 'Lieutenant', 'Lt. Cmdr.', 'Commander', 'Captain', 'Admiral', 'Crewman', 'Civilian'];
-const RANK_TITLE = { Ensign: 'Ens.', 'Lt. JG': 'Lt. JG', Lieutenant: 'Lt.', 'Lt. Cmdr.': 'Lt. Cmdr.', Commander: 'Cmdr.', Captain: 'Capt.', Admiral: 'Adm.', Crewman: 'Crewman', Civilian: '' };
+// (A rank comes with a position on the vessel's org chart, picked at sign-in.)
+const RANKS = ['Ensign', 'Lt. JG', 'Lieutenant', 'Lt. Cmdr.', 'Commander', 'Captain', 'Admiral', 'Chief Petty Officer', 'Crewman', 'Civilian'];
+const RANK_TITLE = { Ensign: 'Ens.', 'Lt. JG': 'Lt. JG', Lieutenant: 'Lt.', 'Lt. Cmdr.': 'Lt. Cmdr.', Commander: 'Cmdr.', Captain: 'Capt.', Admiral: 'Adm.', 'Chief Petty Officer': 'Chief', Crewman: 'Crewman', Civilian: '' };
 const SPECIES = ['Human', 'Vulcan', 'Klingon', 'Betazoid', 'Andorian', 'Bajoran', 'Trill', 'Ferengi', 'Romulan', 'Cardassian', 'Android', 'Hologram', 'Other'];
 const GENDERS = ['Male', 'Female', 'Non-binary', 'Other'];
-const profileFrom = (msg) => ({ rank: RANKS.includes(msg?.rank) ? msg.rank : null, species: SPECIES.includes(msg?.species) ? msg.species : null, gender: GENDERS.includes(msg?.gender) ? msg.gender : null });
+const profileFrom = (msg) => ({ species: SPECIES.includes(msg?.species) ? msg.species : null, gender: GENDERS.includes(msg?.gender) ? msg.gender : null });
 const titled = (ws) => (ws.rank && RANK_TITLE[ws.rank] ? `${RANK_TITLE[ws.rank]} ${ws.name}` : ws.name);
 const samePlace = (a, b) => a.shipKey === b.shipKey && placeOf(a) === placeOf(b);
 // What others see of someone: in person adds species and gender.
 const seenBy = (viewer, u) => ({ ...info(u), ...(viewer && samePlace(viewer, u) ? { species: u.species || null, gender: u.gender || null } : {}) });
-const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station, ...(ws.rank ? { rank: ws.rank } : {}), title: titled(ws),
+const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station, ...(ws.rank ? { rank: ws.rank } : {}), title: titled(ws), ...(ws.position ? { position: ws.position, post: ws.post } : {}),
   ...(ws.console ? { console: ws.console } : {}), ...(ws.fielded ? { fielded: true } : {}), ...(ws.sickbay ? { sickbay: true } : {}), ...(ws.confined ? { confined: true } : {}) });
 // The sign-in reply: who you are, all of it.
-const selfInfo = (ws) => ({ ...info(ws), profile: { rank: ws.rank || null, species: ws.species || null, gender: ws.gender || null } });
+const selfInfo = (ws) => ({ ...info(ws), profile: { species: ws.species || null, gender: ws.gender || null } });
 const crewOf = (key) => [...users.values()].filter((u) => u.shipKey === key);
 const opsOf = (key) => [...operators].filter((op) => op.shipKey === key);
 const shipName = (key) => ships.get(key) || key;
@@ -288,7 +289,7 @@ function networkGraph() {
 function shipList() {
   const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys(), ...BASE_KEYS]);
   return [...live].map((k) => ({
-    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, system: SYSTEM_ID, ...(isBase(k) ? { starbase: true, classId: 'starbase' } : { class: classOf(k).name, classId: classId(k), stations: stationsOf(k) }),
+    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, system: SYSTEM_ID, ...(isBase(k) ? { starbase: true, classId: 'starbase' } : { class: classOf(k).name, classId: classId(k), stations: stationsOf(k) }), org: orgOf(k), filled: filledOf(k),
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
 // Starbases run themselves (no ship's computer needed), so they're always there.
@@ -1675,6 +1676,28 @@ const classOf = (k) => CLASSES[shipClasses.get(k)] || CLASSES[DEFAULT_CLASS];
 const classId = (k) => (CLASSES[shipClasses.get(k)] ? shipClasses.get(k) : DEFAULT_CLASS);
 // A vessel's design: its class's, or the starbases' own.
 const designOf = (k) => (isBase(k) ? BASE_DESIGN : classOf(k));
+// The vessel's org chart (its design's "org"): the command, then each department,
+// each position { id, title, rank, station } (n of one: ids id-1 .. id-n), only
+// those whose station is aboard. [{ name, positions }]
+const orgOf = (k) => {
+  const o = designOf(k).org;
+  if (!o) return [];
+  const pos = (list) => (list || []).flatMap((p) => (p.n ? Array.from({ length: p.n }, (_, i) => ({ ...p, id: `${p.id}-${i + 1}`, n: undefined })) : [p]))
+    .filter((p) => hasStation(k, p.station)).map(({ id, title, rank, station }) => ({ id, title, rank: RANKS.includes(rank) ? rank : null, station }));
+  return [{ name: 'Command', positions: pos(o.command) }, ...(o.departments || []).map((d) => ({ name: d.name, positions: pos(d.positions) }))].filter((d) => d.positions.length);
+};
+const positionOf = (k, id) => orgOf(k).flatMap((d) => d.positions).find((p) => p.id === id) || null;
+// Who has each position: { id: name } (theirs while they're away on another vessel, too).
+const filledOf = (k) => Object.fromEntries([...users.values()].filter((u) => u.postShip === k && u.position).map((u) => [u.position, u.name]));
+// A position asked for at sign-in: null (none asked), the position, or { why }.
+function takePosition(k, msg, id) {
+  if (msg.position == null || msg.position === '') return null;
+  const p = positionOf(k, msg.position);
+  if (!p) return { why: `the ${shipName(k)} has no such position` };
+  const by = [...users.values()].find((u) => u.postShip === k && u.position === p.id && u.id !== id);
+  if (by) return { why: `${p.title}: filled by ${by.name}` };
+  return p;
+}
 // Where its stations are: its places (in deck order) and the room a station is in.
 const placesOf = (k) => designOf(k).places || [];
 const roomOfStation = (k, st) => placesOf(k).find((p) => p.stations.includes(st))?.name || st;
@@ -4828,9 +4851,12 @@ wss.on('connection', (ws, req) => {
       if (!hasComputer(ship)) return send(ws, { type: 'operator-failed', reason: `the ${ship} has no ship's computer online` });
       const id = userId(name, ship);
       if (users.has(id)) return send(ws, { type: 'operator-failed', reason: `${name} is already aboard the ${shipName(shipKey(ship))}` });
+      const post = takePosition(shipKey(ship), msg, id);
+      if (post?.why || (post && post.station !== OPS_STATION)) return send(ws, { type: 'operator-failed', reason: post.why || `${post.title} isn't an Operations position` });
       ws.id = id;
       ws.name = name;
       Object.assign(ws, profileFrom(msg));
+      if (post) Object.assign(ws, { position: post.id, post: post.title, rank: post.rank, postShip: shipKey(ship) });
       ws.shipKey = registerShip(ship);
       ws.ship = shipName(ws.shipKey);
       users.set(id, ws);
@@ -4864,6 +4890,9 @@ wss.on('connection', (ws, req) => {
       const name = clean(msg.name), ship = clean(msg.ship);
       if (!NAME_RE.test(name)) return send(ws, { type: 'register-failed', reason: 'name: use 1-32 letters, digits, spaces, \' . -' });
       if (!NAME_RE.test(ship)) return send(ws, { type: 'register-failed', reason: 'ship: use 1-32 letters, digits, spaces, \' . -' });
+      const post = hasComputer(ship) ? takePosition(shipKey(ship), msg, userId(name, ship)) : null;
+      if (post?.why) return send(ws, { type: 'register-failed', reason: post.why });
+      if (post && !STATIONS.includes(msg.station)) msg.station = post.station;
       if (!STATIONS.includes(msg.station)) return send(ws, { type: 'register-failed', reason: 'pick a station' });
       if (!hasComputer(ship)) return send(ws, { type: 'register-failed', reason: `the ${ship} has no ship's computer online` });
       if (!hasStation(shipKey(ship), msg.station)) return send(ws, { type: 'register-failed', reason: `a ${classOf(shipKey(ship)).name.toLowerCase()} has no ${msg.station} station (it has ${stationsOf(shipKey(ship)).join(', ')})` });
@@ -4872,6 +4901,7 @@ wss.on('connection', (ws, req) => {
       ws.id = id;
       ws.name = name;
       Object.assign(ws, profileFrom(msg));
+      if (post) Object.assign(ws, { position: post.id, post: post.title, rank: post.rank, postShip: shipKey(ship) });
       ws.shipKey = registerShip(ship);
       ws.ship = shipName(ws.shipKey);
       seat(ws, msg.station);
@@ -4887,7 +4917,7 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    // Rank, species and gender, changed after sign-in.
+    // Species and gender, changed after sign-in (rank comes with a position).
     if (msg.type === 'profile' && ws.id) {
       Object.assign(ws, profileFrom(msg));
       send(ws, { type: 'profile', ...selfInfo(ws) });

@@ -126,7 +126,7 @@ const CONSOLE_MODES = ['Science', 'Engineering', 'Communications', 'Security', '
 const BRIDGE = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Operations', ...BRIDGE_CONSOLES];
 const shownScreen = () => [...document.querySelectorAll('[data-screen]')].find((x) => !x.hidden)?.dataset.screen;
 function saveRejoin() {
-  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: myPlace(), screen: shownScreen() })); } catch {}
+  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: myPlace(), position: me.position || null, screen: shownScreen() })); } catch {}
 }
 window.addEventListener("screenchange", () => { if (me) saveRejoin(); });
 window.addEventListener('pagehide', saveRejoin);
@@ -191,16 +191,15 @@ document.getElementById('link')?.addEventListener('click', (ev) => {
   window.open('admin', 'stchat-admin');
 });
 
-// Rank, species and gender: picked by taps at sign-in or on the Station
-// screen, remembered with the name in this browser. Rank shows with your name
-// everywhere; species and gender to people in the same place.
+// Species and gender: picked by taps at sign-in or on the Station screen,
+// remembered with the name in this browser; shown to people in the same place.
+// (Rank comes with a position on the org chart, picked at sign-in: it shows with your name everywhere.)
 const PROFILE = {
-  rank: ['Ensign', 'Lt. JG', 'Lieutenant', 'Lt. Cmdr.', 'Commander', 'Captain', 'Admiral', 'Crewman', 'Civilian'],
   species: ['Human', 'Vulcan', 'Klingon', 'Betazoid', 'Andorian', 'Bajoran', 'Trill', 'Ferengi', 'Romulan', 'Cardassian', 'Android', 'Hologram', 'Other'],
   gender: ['Male', 'Female', 'Non-binary', 'Other'],
 };
-let profile = { rank: null, species: null, gender: null };
-try { profile = { ...profile, ...JSON.parse(localStorage.getItem('stchat-profile') || '{}') }; } catch {}
+let profile = { species: null, gender: null };
+try { const { species = null, gender = null } = JSON.parse(localStorage.getItem('stchat-profile') || '{}'); profile = { species, gender }; } catch {}
 function setProfile(p, tell = true) {
   profile = { ...profile, ...p };
   try { localStorage.setItem('stchat-profile', JSON.stringify(profile)); } catch {}
@@ -264,8 +263,9 @@ function tryRejoin() {
   rejoin = null;
   pendingScreen = r.screen || null;
   if (r.station === 'Operations' && opsKeyRequired) { $('name').value = r.name; return; } // needs the code: sign in by hand
-  if (r.station === 'Operations') send({ type: 'operator', name: r.name, ship: r.ship, ...profile });
-  else send({ type: 'register', name: r.name, ship: r.ship, station: r.station, ...profile });
+  const post = r.position ? { position: r.position } : {};
+  if (r.station === 'Operations') send({ type: 'operator', name: r.name, ship: r.ship, ...profile, ...post });
+  else send({ type: 'register', name: r.name, ship: r.ship, station: r.station, ...profile, ...post });
   log(`rejoined the ${r.ship} as ${r.name}, ${r.station}`);
 }
 
@@ -294,7 +294,7 @@ function signedOut(reason) {
   showScreen('register');
   $('station-view').replaceChildren();
   $('register-error').textContent = reason;
-  $('register-form').querySelector('button').disabled = false;
+  $('register-go').disabled = false;
   setHeader('LCARS', relayName, 'Report aboard');
   document.title = 'LCARS: Report aboard';
 }
@@ -317,6 +317,7 @@ function renderShips(all) {
   const match = ships.find((s) => s.name.toLowerCase() === keep.toLowerCase());
   sel.value = match?.name || '';
   updateSignInMode();
+  renderSignIn();
 }
 
 // Operations takes the ship's ops station, plus the authorization code if the
@@ -325,8 +326,8 @@ const opsSelected = () => $('station').value === 'Operations';
 function updateSignInMode() {
   const isOps = opsSelected();
   $('key').hidden = !isOps || !opsKeyRequired;
-  $('register-form').querySelector('button').disabled = $('ship').options.length <= 1;
-  $('register-form').querySelector('button').textContent = isOps ? 'Take ops station' : 'Report aboard';
+  $('register-go').disabled = $('ship').options.length <= 1;
+  $('register-go').textContent = isOps ? 'Take ops station' : 'Report aboard';
 }
 
 // Station displays, and a sidebar tab for each one.
@@ -390,7 +391,7 @@ function renderConsoleBar() {
 let dockSig = '';
 function fillReassign() {
   if (!me) return;
-  $('assignment').textContent = `${me.name}: ${me.console ? `${me.console} (${me.station})` : me.station}, the ${me.ship}`;
+  $('assignment').textContent = `${me.title || me.name}${me.post ? ` (${me.post})` : ''}: ${me.console ? `${me.console} (${me.station})` : me.station}, the ${me.ship}`;
   // Every vessel lists every station, Operations included; where you are now is greyed out.
   const tap = (name, ship) => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: name });
@@ -2032,7 +2033,7 @@ async function onMessage(msg) {
       if (stationView) setHeader(stationView.code, `${me.title || me.name} · ${me.ship}`, me.station);
       break;
     case 'registered':
-      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, console: msg.console || null, title: msg.title };
+      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, console: msg.console || null, title: msg.title, position: msg.position || null, post: msg.post || null };
       applyPlaces();
       if (msg.profile) setProfile(msg.profile, false);
       token = msg.token;
@@ -2049,11 +2050,11 @@ async function onMessage(msg) {
       $('library-tab').hidden = false;
       log(msg.beamedFrom || msg.walkedFrom ? `${me.name} now aboard the ${me.ship}: ${me.station}` : `${me.name} reporting for duty aboard the ${me.ship}: ${me.station}`);
       showStation();
-      try { localStorage.setItem('voice-reg', JSON.stringify({ name: me.name, ship: me.ship, station: myPlace() })); } catch {}
+      try { localStorage.setItem('voice-reg', JSON.stringify({ name: me.name, ship: me.ship, station: myPlace(), position: me.position })); } catch {}
       break;
     case 'register-failed':
       $('register-error').textContent = msg.reason;
-      $('register-form').querySelector('button').disabled = false;
+      $('register-go').disabled = false;
       break;
     case 'operator-ok':
       me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station };
@@ -2074,7 +2075,7 @@ async function onMessage(msg) {
       break;
     case 'operator-failed':
       $('register-error').textContent = `Access denied: ${msg.reason}`;
-      $('register-form').querySelector('button').disabled = false;
+      $('register-go').disabled = false;
       break;
     case 'station-failed':
       $('reassign-error').textContent = `Access denied: ${msg.reason}`;
@@ -2216,6 +2217,8 @@ const urlParams = new URLSearchParams(location.search);
 let savedReg = null;
 try { savedReg = JSON.parse(localStorage.getItem('voice-reg') || 'null'); } catch {}
 $('name').value = urlParams.get('name') || savedReg?.name || '';
+// (The position picked on the org chart, if any.)
+let signinPosition = urlParams.get('position') || savedReg?.position || null;
 $('station').onchange = updateSignInMode;
 
 function fillStations() {
@@ -2234,6 +2237,46 @@ function fillStations() {
   sel.value = all.includes(keep) && aboard(keep) ? keep : '';
   updateSignInMode();
   fillReassign();
+  renderSignIn();
+}
+
+// Sign-in by taps: the vessel, then a position on its org chart (its rank, and its
+// station, come with it; one filled shows who has it) or, unassigned, a station.
+// (The hidden pull-downs hold the vessel and station picked.)
+function renderSignIn() {
+  const shipSel = $('ship'), stSel = $('station');
+  if (!$('signin-ships') || typeof ships === 'undefined') return;
+  const tap = (html, pressed, onTap, data = {}, disabled = false) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button tr-tap', disabled });
+    b.append(...html);
+    for (const [k, v] of Object.entries(data)) b.dataset[k] = v;
+    b.setAttribute('aria-pressed', String(pressed));
+    b.onclick = onTap;
+    return b;
+  };
+  const small = (t) => Object.assign(document.createElement('small'), { textContent: t });
+  const vessels = [...shipSel.options].filter((o) => o.value);
+  $('signin-ships').replaceChildren(pillBar('Vessel', vessels.length ? vessels.map((o) => tap([o.textContent], o.value === shipSel.value, () => {
+    if (shipSel.value !== o.value) signinPosition = null;
+    shipSel.value = o.value;
+    shipSel.dispatchEvent(new Event('change'));
+  }, { ship: o.value })) : [Object.assign(document.createElement('span'), { className: 'ops-hint', textContent: shipSel.options[0]?.textContent || '' })]));
+  const pick = ships.find((x) => x.name === shipSel.value);
+  const org = pick?.org || [], filled = pick?.filled || {};
+  const mine = (id) => filled[id] && $('name').value.trim().toLowerCase() === filled[id].toLowerCase();
+  if (signinPosition && !org.some((d) => d.positions.some((p) => p.id === signinPosition && (!filled[p.id] || mine(p.id))))) signinPosition = null;
+  const choose = (station, position) => { signinPosition = position; stSel.value = station; updateSignInMode(); renderSignIn(); };
+  const stationTaps = [...stSel.querySelectorAll('option')].filter((o) => o.value && !o.disabled).map((o) => tap([o.value], !signinPosition && stSel.value === o.value, () => choose(o.value, null), { station: o.value }));
+  const unassigned = pick ? pillBar(org.length ? 'Unassigned' : 'Station', stationTaps) : null;
+  unassigned?.setAttribute('id', 'signin-unassigned');
+  $('signin-org').replaceChildren(...(pick ? [
+    ...org.map((d) => pillBar(d.name, d.positions.map((p) => {
+      const by = !mine(p.id) && filled[p.id];
+      const b = tap([p.title, small(by ? `filled: ${by}` : p.rank || '')], signinPosition === p.id, () => choose(p.station, p.id), { position: p.id, station: p.station }, !!by);
+      b.title = `${p.rank ? `${p.rank} · ` : ''}${p.station}`;
+      return b;
+    }))),
+    unassigned] : []));
 }
 fillStations();
 $('ship')?.addEventListener('change', () => { applyPlaces(); fillStations(); });
@@ -2242,9 +2285,11 @@ $('register-form').onsubmit = (e) => {
   e.preventDefault();
   if (ws?.readyState !== WebSocket.OPEN) return;
   $('register-error').textContent = '';
-  $('register-form').querySelector('button').disabled = true;
-  if (opsSelected()) send({ type: 'operator', name: $('name').value.trim(), ship: $('ship').value, key: $('key').value, ...profile });
-  else send({ type: 'register', name: $('name').value.trim(), ship: $('ship').value, station: $('station').value, ...profile });
+  $('register-go').disabled = true;
+  if (!$('ship').value || !$('station').value) { $('register-error').textContent = !$('ship').value ? 'Pick a vessel' : 'Pick a position (or a station)'; $('register-go').disabled = false; return; }
+  const post = signinPosition ? { position: signinPosition } : {};
+  if (opsSelected()) send({ type: 'operator', name: $('name').value.trim(), ship: $('ship').value, key: $('key').value, ...profile, ...post });
+  else send({ type: 'register', name: $('name').value.trim(), ship: $('ship').value, station: $('station').value, ...profile, ...post });
 };
 $('reassign-form').onsubmit = (e) => {
   e.preventDefault();
