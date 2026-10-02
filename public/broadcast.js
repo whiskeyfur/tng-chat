@@ -18,7 +18,8 @@
     // into it while it's open, to stay usable (End broadcast, Mute).
     const place = () => {
       const host = document.querySelector('dialog[open]') || document.body;
-      if (bar.parentElement !== host) host.append(bar);
+      // (In a dialog it goes first, at its top, in the flow: it never covers the dialog's own controls.)
+      if (bar.parentElement !== host) { if (host === document.body) host.append(bar); else host.prepend(bar); }
     };
     new MutationObserver(place).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open'] });
 

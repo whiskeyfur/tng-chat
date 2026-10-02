@@ -450,6 +450,48 @@
 
   // (and the bridge consoles: each runs one of the stations above, picked by its top buttons)
   window.STATION_NAMES = [...Object.keys(STATIONS), 'Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
+  // Where each console is aboard: the places in deck order (the same rooms as the
+  // room mic), the bridge's by seat, forward to aft.
+  window.PLACES = [
+    { name: 'Bridge', deck: 1, stations: ['Helm', 'Operations', 'Captain', 'First Officer', 'Bridge 1', 'Bridge 2', 'Tactical', 'Bridge 3', 'Bridge 4', 'Bridge 5'] },
+    { name: 'Main Shuttle Bay', deck: 4, stations: ['Shuttle Bay'] },
+    { name: 'Transporter Room', deck: 6, stations: ['Transporter'] },
+    { name: 'Security Office', deck: 8, stations: ['Security'] },
+    { name: 'Brig', deck: 8, stations: ['Brig'] },
+    { name: 'Crew Quarters', deck: 9, stations: ['Crew'] },
+    { name: 'Science Lab', deck: 10, stations: ['Science'] },
+    { name: 'Communications Center', deck: 11, stations: ['Communications'] },
+    { name: 'Sickbay', deck: 12, stations: ['Medical'] },
+    { name: 'Main Engineering', deck: 36, stations: ['Engineering'] },
+  ];
+  const PLACE_ORDER = PLACES.flatMap((p) => p.stations);
+  // Things grouped by where their station is, in deck order: [{ name, label, items }]
+  // (in a place, by seat; the same station keeps the order given).
+  window.byPlace = (items, stationOf = (x) => x) => {
+    const at = (x) => PLACES.findIndex((p) => p.stations.includes(stationOf(x)));
+    const groups = [...PLACES.map((p) => ({ name: p.name, deck: p.deck, label: `Deck ${p.deck} · ${p.name}`, items: [] })), { name: 'Elsewhere', label: 'Elsewhere', items: [] }];
+    for (const x of items) groups[at(x) < 0 ? PLACES.length : at(x)].items.push(x);
+    for (const g of groups) g.items.sort((a, b) => (PLACE_ORDER.indexOf(stationOf(a)) + 1 || 99) - (PLACE_ORDER.indexOf(stationOf(b)) + 1 || 99));
+    return groups.filter((g) => g.items.length);
+  };
+  // Station lists as LCARS bars, one a place: a rounded cap, "Deck N - Place", its
+  // stations' taps, a rounded cap (wrapping onto the next line, caps only at the ends).
+  window.placeBars = (items, stationOf, render) => byPlace(items, stationOf).map((g) => {
+    const bar = document.createElement('div');
+    bar.className = 'place-bar';
+    bar.dataset.place = g.name;
+    const part = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text || '' });
+    bar.append(part('place-cap place-cap--l'), part('place-label', g.deck != null ? `Deck ${g.deck} - ${g.name}` : g.name), ...g.items.map(render), part('place-cap place-cap--r'));
+    return bar;
+  });
+  // The same as elements: a heading (a <p>, or the tag given) before each place's own.
+  window.placeNodes = (items, stationOf, render, tag = 'p') => byPlace(items, stationOf).flatMap((g) => {
+    const head = document.createElement(tag);
+    head.className = 'place-head';
+    head.textContent = g.label;
+    head.dataset.place = g.name;
+    return [head, ...g.items.map(render)];
+  });
   // The ship's real speed (warp factor; impulse 0.25), for the forward view.
   let navSpeed = 0;
   // Shield strength (0..1) for the shield grid.
@@ -487,7 +529,7 @@
         const aboard = users.filter((u) => u.ship.toLowerCase() === ship.toLowerCase());
         const tags = (u) => `${u.station}${[u.species, u.gender].filter(Boolean).map((x) => ` · ${x}`).join('')}${u.sickbay ? ' · sickbay' : ''}${u.confined ? ' · confined' : ''}`;
         for (const ul of container.querySelectorAll('[data-roster]')) {
-          ul.replaceChildren(...(aboard.length ? aboard : [{ name: 'No one else aboard', station: '' }]).map((u) => h('li', {}, u.title || u.name, h('span', {}, tags(u)))));
+          ul.replaceChildren(...(aboard.length ? placeNodes(aboard, (u) => u.console || u.station, (u) => h('li', {}, u.title || u.name, h('span', {}, tags(u))), 'li') : [h('li', {}, 'No one else aboard')]));
         }
         // Department readiness: how many are at each duty station, and the
         // answers to the last readiness check (tap Check to call one department,
@@ -496,7 +538,7 @@
         for (const ul of container.querySelectorAll('[data-depts]')) {
           const tapTo = (b, dept) => { b.onclick = () => window.__callReadiness?.(dept); return b; };
           const all = h('li', { class: 'st-dept-all' }, tapTo(h('button', { type: 'button', class: 'lcars-button lcars-button--pill', id: 'readiness-all' }, 'Check all departments'), 'all'));
-          ul.replaceChildren(all, ...DEPARTMENTS.filter((d) => !window.__readiness || d in rd).map((d) => {
+          ul.replaceChildren(all, ...placeNodes(DEPARTMENTS.filter((d) => !window.__readiness || d in rd), (d) => d, (d) => {
             const n = aboard.filter((u) => u.station === d && !u.sickbay).length; // sickbay is off duty
             const r = rd[d] || { state: 'idle' };
             const said = r.state === 'ready' ? `Ready (${r.ready.length})` : r.state === 'pending' ? `Waiting: ${r.pending.join(', ')}` : r.state === 'nocrew' ? 'No crew' : n ? `${n} on duty` : 'Unmanned';
@@ -509,7 +551,7 @@
               tapTo(h('button', { type: 'button', class: 'lcars-button lcars-button--pill st-dept-check', 'data-check': d }, 'Check'), d),
               h('span', { class: 'st-dept-label' }, d),
               h('span', { class: 'st-chips' }, ...chips));
-          }));
+          }, 'li'));
         }
       },
     };

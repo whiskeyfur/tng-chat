@@ -15,10 +15,10 @@
   const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
   // Bridge seats (metres; the viewscreen is ahead, -y): Helm and Ops forward,
   // the Captain in the centre with the First Officer beside them, Tactical
-  // behind, the five consoles around the aft wall.
+  // behind, the five consoles around the sides and the aft wall (numbered forward to aft).
   const SEATS = {
     Operations: [-1.2, -2.2], Helm: [1.2, -2.2], Captain: [0, 0], 'First Officer': [1, 0.2], Tactical: [0, 2.4],
-    'Bridge 1': [-3.5, 0.5], 'Bridge 2': [-3, 2.6], 'Bridge 3': [-1.2, 3.6], 'Bridge 4': [1.2, 3.6], 'Bridge 5': [3, 2.6],
+    'Bridge 1': [-3.5, 0.5], 'Bridge 2': [3.5, 0.5], 'Bridge 3': [-3, 2.6], 'Bridge 4': [3, 2.6], 'Bridge 5': [0, 3.8],
   };
   const spot = (place) => SEATS[place] || [0, 0];
   // Where a voice sits for this listener: pan (-1 left, 1 right) and gain.

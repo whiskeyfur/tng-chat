@@ -1393,7 +1393,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await geordi.locator('#grid-table tbody th button').count(), 0, 'a button left in the System column');
     assert.ok(await geordi.locator('#grid-table td.grid-controls #tank-deu-main-fill').count() === 1, 'Fill is in the Controls column');
     // Then the fuel storage (the buses, the main tanks), then the consoles.
-    assert.deepEqual(sections.slice(sections.indexOf('ties-crosslink') + 1, sections.indexOf('ties-console-Captain')), ['[Fuel storage]', 'fuel-deu', 'ties-sub-deuTransfer', 'tank-deu-main', 'fuel-am', 'ties-sub-amTransfer', 'tank-am-main']);
+    // (The consoles under a heading for each place: the bridge first, Helm forward.)
+    const firstPlace = sections.indexOf('', sections.indexOf('ties-crosslink'));
+    assert.deepEqual(sections.slice(sections.indexOf('ties-crosslink') + 1, firstPlace), ['[Fuel storage]', 'fuel-deu', 'ties-sub-deuTransfer', 'tank-deu-main', 'fuel-am', 'ties-sub-amTransfer', 'tank-am-main']);
+    assert.equal(sections[firstPlace + 1], 'ties-console-Helm', 'the bridge first, Helm forward');
     // The pods' row carries their containment ties (the low buses); there's no separate containment row.
     assert.equal(await geordi.locator('#tank-am-main input[data-node="A"]').count(), 1, 'the pods tie their containment to the low buses');
     assert.equal(await geordi.locator('#ties-containment').count(), 0, 'a duplicate containment row');
@@ -1477,6 +1480,14 @@ const audioBytes = (page) => page.evaluate(async () => {
     // The warp core's Start / Stop is on its row in the grid, in every order.
     await geordi.waitForSelector('#ties-core-parent #core-stop');
     assert.deepEqual(await geordi.evaluate(() => ['#grid-table thead', '#grid-table tfoot'].map((q) => getComputedStyle(document.querySelector(q)).position)), ['static', 'static'], 'the headings and totals scroll with the table');
+    // Consoles listed by where they are aboard, in deck order: the Station menu, the grid's consoles.
+    // (The Station menu: an LCARS bar a place, its deck and name, then its stations' taps.)
+    const heads = await geordi.evaluate(() => [...document.querySelectorAll('#station-taps .place-bar .place-label')].map((x) => x.textContent));
+    assert.equal(heads[0], 'Deck 1 - Bridge');
+    assert.equal(heads[heads.length - 1], 'Deck 36 - Main Engineering');
+    assert.deepEqual(await geordi.evaluate(() => [...document.querySelector('#station-taps .place-bar').querySelectorAll('button')].slice(0, 2).map((x) => x.dataset.station)), ['Helm', 'Operations'], 'the bridge by seat, forward first');
+    assert.ok(await geordi.evaluate(() => [...document.querySelectorAll('#grid-table tr.grid-place th')].some((x) => x.textContent === 'Deck 12 · Sickbay')), 'the grid groups its consoles by place');
+    step('consoles listed by where they are aboard: the Station menu from Deck 1 (the bridge, Helm and Ops first) to Deck 36 (Main Engineering); the grid with place sub-headings');
     // A refresh comes back signed in, at the same station, on the same screen.
     await geordi.reload();
     await geordi.waitForFunction(() => window.__voice.me?.station === 'Engineering' && window.__voice.myName === 'geordi');
@@ -1753,7 +1764,7 @@ const audioBytes = (page) => page.evaluate(async () => {
       assert.deepEqual([down.core, down.ties.containment, down.ties.dock, down.ties['console:Engineering']], ['offline', [], [], []]);
       step('automation: Shutdown brought the Lexington back to cold iron, its antimatter and deuterium offloaded to the starbase');
       // (Ops' own console lists the panels it can automate: never Ops itself.)
-      assert.deepEqual(await op.$$eval('#automation-list li[data-panel]', (ls) => ls.map((l) => l.dataset.panel)), ['engineering', 'lifeSupport', 'tactical', 'science', 'transporter', 'comms', 'hangar', 'medical']);
+      assert.deepEqual(await op.$$eval('#automation-list li[data-panel]', (ls) => ls.map((l) => l.dataset.panel)), ['tactical', 'hangar', 'transporter', 'science', 'comms', 'medical', 'engineering', 'lifeSupport'], 'by where each is aboard');
       lops.close(); scotty3.close();
       await stopComputer(lc);
     }

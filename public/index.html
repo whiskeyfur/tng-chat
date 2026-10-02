@@ -153,6 +153,20 @@
     .vessel-bar { position: absolute; top: 4px; right: 8px; z-index: 6; display: flex; gap: 6px; }
     .vessel-bar[hidden] { display: none; }
     .vessel-bar .tr-tap { min-height: 28px; font-size: 12px; }
+    /* Consoles grouped by where they are aboard: a heading for each place (deck order). */
+    .place-head { flex-basis: 100%; margin: 8px 0 2px; color: var(--lcars-orange); font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; list-style: none; }
+    .place-head:first-child { margin-top: 0; }
+    li.place-head { border: 0; padding: 4px 0 0; background: none; }
+    th.place-head { text-align: left; font-weight: normal; padding-top: 8px; }
+    li.place-ship { list-style: none; color: var(--lcars-sky); }
+    .grid-table tr.grid-place th { text-align: left; color: var(--lcars-orange); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 4px 2px; font-weight: normal; }
+    /* Station lists: an LCARS bar for each place, (] [Deck N - Place] [station] ... [) */
+    .place-bar { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: stretch; gap: 4px; margin: 0 0 6px; }
+    .place-bar .place-cap { width: 22px; min-height: 32px; background: var(--lcars-orange); }
+    .place-bar .place-cap--l { border-radius: 16px 0 0 16px; }
+    .place-bar .place-cap--r { border-radius: 0 16px 16px 0; }
+    .place-bar .place-label { display: flex; align-items: center; padding: 0 12px; min-height: 32px; background: var(--lcars-orange); color: #000; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .place-bar .tr-tap { border-radius: 0; margin: 0; }
     /* A bridge console's top buttons: what it runs. */
     .lcars-header { position: relative; }
     .console-bar { position: absolute; top: 44px; left: calc(var(--side) + 40px); z-index: 6; display: flex; gap: 6px; align-items: center; }

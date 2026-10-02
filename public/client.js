@@ -207,7 +207,7 @@ function renderAdmin(st) {
     el('ul', { className: 'st-list', id: 'admin-ships' }, ...(st.ships?.length ? st.ships.map((x) => el('li', {}, el('span', { textContent: `${x.ship}: ${x.connected ? 'connected' : 'not connected'}${x.primary?.length ? ', flying it' : ''} · ${ago(x.since)}` }),
       btn('Restart', `admin-restart-${x.ship}`, () => send({ type: 'admin', action: 'restart-ship', ship: x.ship })))) : [el('li', { className: 'empty', textContent: 'none' })])),
     el('h3', { textContent: 'Connected consoles' }),
-    el('ul', { className: 'st-list', id: 'admin-consoles' }, ...(st.consoles?.length ? st.consoles.map((u) => el('li', { textContent: `${u.name} · ${u.ship} · ${u.station}` })) : [el('li', { className: 'empty', textContent: 'none' })])),
+    el('ul', { className: 'st-list', id: 'admin-consoles' }, ...(st.consoles?.length ? [...new Set(st.consoles.map((u) => u.ship))].sort().flatMap((ship) => [el('li', { className: 'place-ship', textContent: ship }), ...placeNodes(st.consoles.filter((u) => u.ship === ship), (u) => u.console || u.station, (u) => el('li', { textContent: `${u.name} · ${u.ship} · ${u.station}` }), 'li')]) : [el('li', { className: 'empty', textContent: 'none' })])),
     el('h3', { textContent: 'Supervisor log' }),
     el('pre', { className: 'admin-log', id: 'admin-log', textContent: (st.log || []).join('\n') }));
   const pre = box.querySelector('#admin-log'); pre.scrollTop = pre.scrollHeight;
@@ -467,7 +467,7 @@ function fillReassign() {
   // Operations right after First Officer.
   const fo = stations.indexOf('First Officer');
   const all = [...stations.slice(0, fo + 1), 'Operations', ...stations.slice(fo + 1)];
-  $('station-taps').replaceChildren(...all.map((n) => tap(n)));
+  $('station-taps').replaceChildren(...placeBars(all, (n) => n, (n) => tap(n)));
   const across = lastNav?.own?.grid?.dockedWith || [];
   dockSig = JSON.stringify(across);
   $('dock-stations').replaceChildren(...across.map((v) => {
@@ -476,7 +476,7 @@ function fillReassign() {
     box.dataset.vessel = v;
     box.append(Object.assign(document.createElement('h3'), { className: 'ops-subhead', textContent: `Across the dock: ${/^(Starbase|Deep Space) /.test(v) ? v : `the ${v}`}` }),
       Object.assign(document.createElement('div'), { className: 'tr-taps' }));
-    box.lastChild.append(...all.map((n) => tap(n, v)));
+    box.lastChild.append(...placeBars(all, (n) => n, (n) => tap(n, v)));
     return box;
   }));
   $('reassign-form').hidden = true;
@@ -642,19 +642,23 @@ function renderTransporter(trEl, { crew, targets, up, p, range, where = () => un
   };
   const stations = ['Same station', ...STATION_NAMES.filter((n) => n !== 'Operations')];
   if (!stations.includes(beamSel.station)) beamSel.station = 'Same station';
-  const taps = (box, items, isOn, set) => box.replaceChildren(...items.map(([value, text, why]) => {
-    const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: why ? `${text} · ${why}` : text });
-    b.dataset.value = value;
-    if (why) { b.disabled = true; b.title = why; }
-    b.setAttribute('aria-pressed', String(isOn(value)));
-    b.onclick = () => { set(value); rerender(); };
-    return b;
-  }));
+  // (Station taps: grouped by where they are aboard.)
+  const taps = (box, items, isOn, set, places = false) => {
+    const tapOf = ([value, text, why]) => {
+      const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: why ? `${text} · ${why}` : text });
+      b.dataset.value = value;
+      if (why) { b.disabled = true; b.title = why; }
+      b.setAttribute('aria-pressed', String(isOn(value)));
+      b.onclick = () => { set(value); rerender(); };
+      return b;
+    };
+    box.replaceChildren(...(places ? [...items.filter(([v]) => v === 'Same station').map(tapOf), ...placeNodes(items.filter(([v]) => v !== 'Same station'), ([v]) => v, tapOf)] : items.map(tapOf)));
+  };
   const vesselName = (n, here) => (here ? `The ${n} (here)` : /^(Starbase|Deep Space|Utopia) /.test(n) ? n : `The ${n}`);
   taps(tr.querySelector('#beam-from-ship'), sources.map((v) => [v.ship, vesselName(v.ship, v.here)]), (v) => v === beamSel.fromShip,
     (v) => { if (v !== beamSel.fromShip) { beamSel.fromShip = v; beamSel.fromStation = null; beamSel.who.clear(); } });
   taps(tr.querySelector('#beam-from-station'), (src?.stations || []).map((x) => [x.station, `${x.station} (${x.people.length})`]), (v) => v === beamSel.fromStation,
-    (v) => { if (v !== beamSel.fromStation) { beamSel.fromStation = v; beamSel.who.clear(); } });
+    (v) => { if (v !== beamSel.fromStation) { beamSel.fromStation = v; beamSel.who.clear(); } }, true);
   if (!src?.stations.length) tr.querySelector('#beam-from-station').append(el('span', { className: 'ops-hint', textContent: 'Nobody aboard to beam' }));
   // People: one or more (tap to add or remove).
   taps(tr.querySelector('#beam-who'), people.map((u) => [u.id, u.id === me.id ? `${u.name} (you)` : u.name]), (v) => beamSel.who.has(v),
@@ -662,7 +666,7 @@ function renderTransporter(trEl, { crew, targets, up, p, range, where = () => un
   // Tap a destination to lock on; tap the locked one again to let go (always allowed).
   taps(tr.querySelector('#beam-ship'), ships.map((x) => [x.name, x.here ? `The ${x.name} (site to site)` : vesselName(x.name), x.name === tr2.lock ? '' : reach(x)]), (v) => v === tr2.lock,
     (v) => { send({ type: 'transporter-lock', ship: v === tr2.lock ? null : v }); });
-  taps(tr.querySelector('#beam-station'), stations.map((n) => [n, n]), (v) => v === beamSel.station, (v) => { beamSel.station = v; });
+  taps(tr.querySelector('#beam-station'), stations.map((n) => [n, n]), (v) => v === beamSel.station, (v) => { beamSel.station = v; }, true);
   const limit = lastNav?.own?.allocated?.transporter ?? 100;
   // The level-3 diagnostic: it must pass before anyone is beamed.
   const diag = tr2.diag || { state: 'passed' };
@@ -850,7 +854,7 @@ function renderCrewPanels() {
   if (ra && changed(ra, crewSig, stations)) {
     const keep = ra.querySelector('#xo-who')?.value, keepSt = ra.querySelector('#xo-station')?.value;
     const who = pickCrew('xo-who', crew, keep);
-    const st = el('select', { className: 'ops-select', id: 'xo-station', ariaLabel: 'station' }, ...stations.map((n) => new Option(n, n)));
+    const st = el('select', { className: 'ops-select', id: 'xo-station', ariaLabel: 'station' }, ...byPlace(stations).map((g) => el('optgroup', { label: g.label }, ...g.items.map((n) => new Option(n, n)))));
     if (keepSt) st.value = keepSt;
     ra.replaceChildren(
       el('div', { className: 'ops-form' }, el('span', { textContent: 'Reassign' }), who, el('span', { textContent: 'to' }), st,
@@ -876,7 +880,7 @@ function renderCrewPanels() {
         el('p', { className: 'st-state', id: 'brig-field-state', textContent: lastNav?.own?.grid?.brigSealed ? 'Brig force field: up' : 'Brig force field: down' }),
         button(lastNav?.own?.grid?.brigField ? 'Drop brig field' : 'Raise brig field', () => send({ type: 'brig-field', on: !lastNav?.own?.grid?.brigField }), lastNav?.own?.grid?.brigField ? '' : 'lcars-button--alert')),
       el('h3', { className: 'ops-subhead', textContent: 'Force fields (isolate a station)' }),
-      el('div', { className: 'tr-taps', id: 'sec-fields' }, ...stations.map((st) => {
+      el('div', { className: 'tr-taps', id: 'sec-fields' }, ...placeNodes(stations, (st) => st, (st) => {
         const on = fields.includes(st);
         const b = button(st, () => send({ type: 'forcefield', station: st, on: !on }), on ? 'lcars-button--alert' : '');
         b.classList.add('tr-tap');
@@ -941,13 +945,14 @@ function renderCrewPanels() {
     const skip = me.station === 'First Officer' ? ['Captain', 'First Officer'] : ['Captain'];
     const reachable = crew.filter((u) => u.id !== me.id && !skip.includes(u.station));
     for (const id of [...orderPick]) if (!reachable.some((u) => u.id === id)) orderPick.delete(id);
-    const byDept = (list) => [...new Set(list.map((u) => u.station))].map((st) => [st, list.filter((u) => u.station === st)]);
+    const byDept = (list) => byPlace([...new Set(list.map((u) => u.station))]).flatMap((g) => g.items).map((st) => [st, list.filter((u) => u.station === st)]);
+    const withPlaces = (rows) => { let at = null; return rows.flatMap(([st, ...rest]) => { const g = byPlace([st])[0]; const head = g.name !== at ? [el('p', { className: 'place-head', textContent: g.label })] : []; at = g.name; return [...head, [st, ...rest]]; }); };
     // (One look for both lists: a department pill and name chips, taps where they do something.)
     const chip = (u, state, onclick) => { const b = el('button', { type: 'button', className: 'order-chip', textContent: u.name, onclick, disabled: !onclick }); b.dataset.state = state; b.dataset.who = u.id; return b; };
     const deptPill = (st, onclick, on) => { const b = el('button', { type: 'button', className: 'order-dept', textContent: st, onclick, disabled: !onclick }); if (onclick) b.setAttribute('aria-pressed', String(!!on)); return b; };
     if (changed(targets, reachable.map((u) => [u.id, u.station]), [...orderPick])) {
       targets.replaceChildren(el('p', { className: 'ops-hint', textContent: orderPick.size ? `To ${orderPick.size} picked · tap again to unpick` : 'To all hands · or tap a department or names to pick who' }),
-        ...byDept(reachable).map(([st, us]) => {
+        ...withPlaces(byDept(reachable)).map((x) => { if (!Array.isArray(x)) return x; const [st, us] = x;
           const all = us.every((u) => orderPick.has(u.id));
           const label = deptPill(st, () => { for (const u of us) if (all) orderPick.delete(u.id); else orderPick.add(u.id); renderCrewPanels(); }, all);
           const row = el('div', { className: 'order-row' }, label, el('span', { className: 'order-chips' }, ...us.map((u) => { const c = chip(u, orderPick.has(u.id) ? 'picked' : 'idle', () => { if (orderPick.has(u.id)) orderPick.delete(u.id); else orderPick.add(u.id); renderCrewPanels(); }); c.setAttribute('aria-pressed', String(orderPick.has(u.id))); return c; })));
@@ -963,7 +968,7 @@ function renderCrewPanels() {
         const sec = el('section', { className: 'order-entry' },
           el('h4', { className: 'order-title', textContent: o.text }),
           el('small', { className: 'grid-note', textContent: `${new Date(o.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${o.from.title || o.from.name}${o.declined ? ` · declined by ${o.declined}` : waiting.length ? ` · ${o.acked.length} acknowledged · waiting for ${waiting.map((u) => u.name).join(', ')}` : o.to.length ? ` · all ${o.acked.length} acknowledged` : ' · nobody to acknowledge'}` }),
-          ...byDept(o.to).map(([st, us]) => el('div', { className: 'order-row' }, deptPill(st), el('span', { className: 'order-chips' }, ...us.map((u) => chip(u, o.acked.includes(u.id) ? 'acked' : o.declined === u.name ? 'declined' : 'pending'))))));
+          ...withPlaces(byDept(o.to)).map((x) => (!Array.isArray(x) ? x : el('div', { className: 'order-row' }, deptPill(x[0]), el('span', { className: 'order-chips' }, ...x[1].map((u) => chip(u, o.acked.includes(u.id) ? 'acked' : o.declined === u.name ? 'declined' : 'pending')))))));
         sec.dataset.order = o.id;
         return sec;
       }));
@@ -1494,6 +1499,8 @@ function renderCombat() {
         rows.push(...Object.entries(grid.subsystems).filter(([, v]) => v.parent === st).map(([x]) => subRow(x, 1)));
         return rows;
       };
+      // A place aboard: a sub-heading over its consoles' rows.
+      const placeRow = (label) => el('tr', { className: 'grid-place' }, el('th', { scope: 'rowgroup', colSpan: COLS.length + 2, textContent: label }));
       const header = (text, extra = []) => { const tr = el('tr', { className: 'grid-section' }, el('th', { scope: 'rowgroup', colSpan: COLS.length + 2 }, el('span', { textContent: text }), ...extra)); return tr; };
       const divide = (rows) => { rows[rows.length - 1]?.classList.add('grid-crosslink'); return rows; };
       const xl = () => { const r = crosslinkRow(); r.querySelector('th').className = ''; return withFlows(r); };
@@ -1516,7 +1523,7 @@ function renderCombat() {
       if (gridOrder === 'operations') {
         // Management layout: power sources, the crosslink, batteries, then the consoles.
         rows.push(header('External sources'), ...divide([...sourceRows(), ...connectionRows()]), header('Bus crosslink'), ...divide([xl()]), header('Fuel storage'), ...divide(storageRows()));
-        for (const st of consoles) rows.push(...consoleRows(st));
+        for (const g of byPlace(consoles)) rows.push(placeRow(g.label), ...g.items.flatMap((st) => consoleRows(st)));
       } else {
         // Startup / Shutdown: a checklist, worked top to bottom.
         const busOn = ['A', 'B', 'C'].some((X) => grid.totals[X]?.available > 0);
@@ -1554,7 +1561,7 @@ function renderCombat() {
             on: () => (!grid.epsLive ? `the EPS isn't energized: the manifold charges from ${grid.epsChargeGen}+ of EPS generation` : !(grid.computers || []).some((x) => x.state === 'online') ? 'the EPS taps need a computer core online' : epsOn ? '' : 'the EPS taps need the EPS energized') },
           { title: 'Warp core', rows: coreRows, state: () => ({ online: 'Online', starting: 'Startup', ejected: 'Ejected' })[grid.core] || 'Cold',
             on: () => (grid.core === 'ejected' ? 'no warp core: install one at a starbase' : !grid.antimatter ? 'the warp core needs antimatter aboard' : busOn ? '' : 'the constriction needs Bus A, B or C energized') },
-          { title: 'Consoles and systems', rows: () => others.flatMap((st) => consoleRows(st)), state: () => { const manned = others.filter((st) => crewAt(st)); const tied = others.filter((st) => grid.ties[`console:${st}`].length); return manned.length && manned.every((st) => grid.consoleOk[st]) ? 'Online' : tied.length ? 'Startup' : 'Cold'; },
+          { title: 'Consoles and systems', rows: () => byPlace(others).flatMap((g) => [placeRow(g.label), ...g.items.flatMap((st) => consoleRows(st))]), state: () => { const manned = others.filter((st) => crewAt(st)); const tied = others.filter((st) => grid.ties[`console:${st}`].length); return manned.length && manned.every((st) => grid.consoleOk[st]) ? 'Online' : tied.length ? 'Startup' : 'Cold'; },
             on: () => (busOn ? '' : 'the consoles need Bus A, B or C energized') },
         ];
         const list = gridOrder === 'shutdown' ? [...steps].reverse() : steps;
@@ -2109,7 +2116,10 @@ function fillStations() {
   // A ship's class sets its stations (a runabout's cockpit, a shuttle's Helm): the others are greyed.
   const pick = (typeof ships !== 'undefined' ? ships : []).find((x) => x.name.toLowerCase() === ($('ship')?.value || '').toLowerCase());
   const aboard = (n) => n === 'Operations' || !pick?.stations || pick.stations.includes(n);
-  sel.replaceChildren(placeholder, ...all.map((n) => Object.assign(new Option(aboard(n) ? n : `${n} (not aboard a ${pick.class})`, n), { disabled: !aboard(n) })));
+  sel.replaceChildren(placeholder, ...byPlace(all).map((g) => Object.assign(document.createElement('optgroup'), { label: g.label })).map((og, i) => {
+    og.append(...byPlace(all)[i].items.map((n) => Object.assign(new Option(aboard(n) ? n : `${n} (not aboard a ${pick.class})`, n), { disabled: !aboard(n) })));
+    return og;
+  }));
   sel.value = all.includes(keep) && aboard(keep) ? keep : '';
   updateSignInMode();
   fillReassign();

@@ -87,7 +87,7 @@
       const ul = document.getElementById('automation-list');
       if (!ul || !list) return;
       const tap = (text, on, msg) => { const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: text, onclick: () => send({ type: 'automation', ...msg }) }); b.setAttribute('aria-pressed', String(!!on)); return b; };
-      ul.replaceChildren(...list.map((a) => {
+      ul.replaceChildren(...placeNodes(list, (a) => a.station, (a) => {
         const taps = a.panel === 'engineering'
           ? [tap('Off', !a.on, { panel: a.panel, mode: null }), tap('Startup', a.on === 'startup', { panel: a.panel, mode: 'startup' }), tap('Shutdown', a.on === 'shutdown', { panel: a.panel, mode: 'shutdown' })]
           : [tap(a.on ? 'Auto: on' : 'Auto: off', a.on, { panel: a.panel, on: !a.on })];
@@ -95,7 +95,7 @@
         const li = el('li', { className: 'ops-hail' }, el('span', { className: 'ops-hail__text', textContent: `${a.name} (${a.station})${!a.built ? ' · coming next' : a.on ? ` · ${a.status || 'running'}` : a.status ? ` · ${a.status}` : ''}` }), ...taps);
         li.dataset.panel = a.panel;
         return li;
-      }));
+      }, 'li'));
     }
 
     // The command prefix: masked (tap Show to see it), set on a keypad.
@@ -326,7 +326,10 @@
       const body = $('roster');
       body.replaceChildren();
       if (!roster.length) body.append(el('tr', { className: 'empty' }, el('td', { colSpan: 4, textContent: 'No crew on the comm net' })));
-      for (const u of roster) {
+      // (By where they are aboard, in deck order: a heading row for each place.)
+      for (const g of byPlace(roster, (x) => x.console || x.station)) {
+        body.append(el('tr', { className: 'place-row' }, el('th', { colSpan: 4, className: 'place-head', textContent: g.label })));
+        for (const u of g.items) {
         const actions = el('td');
         const isMe = u.id === me?.id;
         if (!isMe && voice.state === 'idle') {
@@ -350,6 +353,7 @@
           el('td', { textContent: u.station }),
           el('td', { textContent: channel, className: u.state === 'idle' ? (pending ? 'ringing' : 'idle') : u.state === 'in-call' ? 'busy' : 'ringing' }),
           actions));
+        }
       }
 
       // Hail queues

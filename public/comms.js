@@ -119,7 +119,10 @@
         }));
         const crew = others.filter((u) => u.ship === ship)
           .sort((a, b) => (b.station === 'Operations') - (a.station === 'Operations') || a.name.localeCompare(b.name));
-        for (const u of crew) {
+        // (By where they are aboard, in deck order: a heading for each place.)
+        for (const g of byPlace(crew, (x) => x.console || x.station)) {
+          ul.append(Object.assign(document.createElement('li'), { className: 'place-head', textContent: g.label }));
+          for (const u of g.items) {
           const li = document.createElement('li');
           li.className = 'comms-entry';
           const name = document.createElement('span');
@@ -147,6 +150,7 @@
           if (u.hologram) { msgBtn.disabled = true; msgBtn.title = 'a hologram: no comm badge'; }
           li.append(name, btn, msgBtn);
           ul.append(li);
+          }
         }
       }
     }
