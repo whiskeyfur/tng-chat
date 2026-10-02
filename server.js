@@ -1166,9 +1166,10 @@ function coreNav(c, key, nav) {
   let spawnAt = null;
   if (!combat.get(key)?.loaded) {
     combat.set(key, { ...freshCombat(nav.combat, torpedoesOf(key)), loaded: true });
-    eng.set(key, freshEng(nav.eng, { cold: !nav.eng && !nav.warm }));
+    eng.set(key, freshEng(nav.eng, { cold: !nav.eng && !nav.warm, k: key }));
     for (const c of CONDUITS) engOf(key).ties[c] ||= [];
     if (!engOf(key).conduits) deriveConduits(key); // (a cold ship's are untied: its loads are)
+    reconcileConduits(key);
     restoreLinks(key, nav.eng?.links);
     if (!classOf(key).warpCore) Object.assign(engOf(key), { core: 'ejected', antimatter: 0 }); // (a shuttle has no warp core: impulse and batteries)
     // A small craft brought up ready to go: wiring that fits its buses, and EPS taps no wider than they are.
@@ -1176,6 +1177,7 @@ function coreNav(c, key, nav) {
       const e = engOf(key), b = busMaxOf(key);
       Object.assign(e.ties, classOf(key).ties || {});
       for (const X of BUSES) e.taps[X] = Math.min(e.taps[X], b[X]);
+      deriveConduits(key); // (its conduits where its design's ties are)
     }
     if (!nav.eng && nav.spawn) { spawnAt = STARBASES.find((b) => b.name === pendingSpawn.get(key)) || SPAWN_BASES[Math.floor(Math.random() * SPAWN_BASES.length)]; pendingSpawn.delete(key); engOf(key).docked = spawnAt.name; }
     flowCache.delete(key);
@@ -2083,6 +2085,24 @@ function deriveConduits(k) {
   for (const c of CONDUITS.filter((x) => x.startsWith('place:'))) for (const up of conduitsOf(k, c)) e.ties[up] = NODES.filter((n) => e.ties[up].includes(n) || e.ties[c].includes(n));
   e.conduits = true; e.dirty = true; flowCache.delete(k);
 }
+// A saved ship under a changed design: a load whose power path changed (a row moved to another
+// place, a place reached through another now), or that runs through a place new to the design,
+// gets the conduits on its path tied where it is. Everything else stays as the crew left it.
+function reconcileConduits(k) {
+  const e = engOf(k), r = e.restore;
+  delete e.restore;
+  if (!r || !e.conduits) return;
+  const loads = Object.keys(e.ties).filter((x) => /^(console|system|sub):/.test(x) && !CONDUITS.includes(x));
+  const touched = new Set();
+  for (const key of loads) {
+    const chain = conduitsOf(k, key);
+    if (!(r.paths && r.paths[key] !== undefined && r.paths[key] !== chain.join('>')) && !chain.some((c) => r.newConduits.includes(c))) continue;
+    for (const c of chain) { e.ties[c] = NODES.filter((n) => (e.ties[c] || []).includes(n) || ((e.ties[key] || []).includes(n) && tieNodes(c).includes(n))); touched.add(c); }
+  }
+  // (a place reached through another: that one carries what it carries)
+  for (const c of [...touched].filter((x) => x.startsWith('place:'))) for (const up of conduitsOf(k, c)) e.ties[up] = NODES.filter((n) => e.ties[up].includes(n) || e.ties[c].includes(n));
+  if (touched.size) { e.dirty = true; flowCache.delete(k); console.log(`${shipName(k)}: its design's power paths changed; ${[...touched].join(', ')} tied where their loads are`); }
+}
 const NEVER_TRIP = new Set(['containment', 'sub:constriction', ...Object.values(AM_CONTAIN)]);
 // Starbases: dock to restock torpedoes, take dock power, repair faster and
 // refit a warp core. A destroyed ship comes back docked at one of them.
@@ -2192,8 +2212,11 @@ const DEFAULT_TIES = { solar: ['B'], dock: ['B'], dockEps: [], ship: [], shipEps
 // Engineering brings them up on dock power.
 // Cold iron: nothing tied in anywhere, sources or loads (the drives feed the EPS only through their thrusters' ties).
 const COLD = { ties: { ...Object.fromEntries([...Object.keys(DEFAULT_TIES), ...Object.keys(DEFAULT_LOAD_TIES)].map((k) => [k, []])), impulsePort: ['EPS'], impulseStarboard: ['EPS'] }, taps: { A: 0, B: 0, C: 0 }, breakers: { A: false, B: false, C: false }, computers: ['off', 'off', 'off'], core: 'offline', drives: { port: { state: 'off', epsTap: false, accel: 0, gear: 'low' }, starboard: { state: 'off', epsTap: false, accel: 0, gear: 'low' } }, aux: {}, epsLive: false, antimatter: 0, deuterium: 0 };
-function freshEng(saved, { cold = false } = {}) {
+// (k: the vessel, when it's known: its design's ties are the defaults for anything a save lacks,
+// and its buses' limits cap the EPS taps.)
+function freshEng(saved, { cold = false, k = null } = {}) {
   cold = cold || saved === COLD;
+  const designTies = k ? designOf(k).ties || {} : {}, tapMax = k ? busMaxOf(k) : BUS_MAX;
   const s = saved && typeof saved === 'object' ? saved : cold ? COLD : {};
   // Ties: a list of nodes (older saves had one bus, or null for off), only those allowed.
   // A saved tie that's no longer allowed (an EPS tie on an A/B load, say) moves to the default bus.
@@ -2207,15 +2230,17 @@ function freshEng(saved, { cold = false } = {}) {
   const oldXl = s.crosslinks ? [...new Set(Object.entries(s.crosslinks).filter(([, on]) => on).flatMap(([x]) => x.split('')))] : s.crosslink ? ['A', 'B'] : undefined;
   // Thrusters were once a load (sub:portThrusters) or on/off (thrusters.port): tied there means tied in.
   const oldThr = (d) => (Array.isArray(s.ties?.[`sub:${d}Thrusters`]) ? (s.ties[`sub:${d}Thrusters`].length ? ['EPS'] : []) : s.thrusters?.[d] === false ? [] : undefined);
-  const ties = Object.fromEntries(Object.entries(DEFAULT_TIES).map(([k, d]) => [k, tiesOf(k, s.ties?.[k] ?? (k === 'crosslink' ? oldXl : k === 'thrustersPort' ? oldThr('port') : k === 'thrustersStarboard' ? oldThr('starboard') : s[k]), d)]));
+  const ties = Object.fromEntries(Object.entries(DEFAULT_TIES).map(([k, d]) => [k, tiesOf(k, s.ties?.[k] ?? (k === 'crosslink' ? oldXl : k === 'thrustersPort' ? oldThr('port') : k === 'thrustersStarboard' ? oldThr('starboard') : s[k]), designTies[k] ?? d)]));
   if (!chainOk(ties.crosslink)) ties.crosslink = []; // (A and C without B: older saves lose the crosslink)
   for (const c of CONDUITS) ties[c] = Array.isArray(s.ties?.[c]) ? NODES.filter((n) => s.ties[c].includes(n) && tieNodes(c).includes(n)) : []; // (the power paths' conduits)
+  // (Conduits a save with power paths doesn't have: places new to the design since.)
+  const newConduits = s.conduits ? CONDUITS.filter((c) => !Array.isArray(s.ties?.[c])) : [];
   // Older saves: antimatter was true/false (false: core ejected); tanks full.
   const amount = (v, cap) => (Number.isFinite(v) ? Math.max(0, Math.min(cap, v)) : v === false ? 0 : cap);
   const antimatter = amount(s.antimatter, FUEL.antimatter), deuterium = amount(s.deuterium, FUEL.deuterium);
   if (!ties.containment.length && antimatter > 0) ties.containment = DEFAULT_TIES.containment; // never no feed with antimatter aboard
   // (Older saves: life support was one load; its ties go to all three of its systems.)
-  for (const [k, d] of Object.entries(DEFAULT_LOAD_TIES)) ties[k] = tiesOf(k, s.ties?.[k] ?? (LIFE_SUPPORT.includes(k.slice(7)) ? s.ties?.['system:lifeSupport'] : undefined), d);
+  for (const [k, d] of Object.entries(DEFAULT_LOAD_TIES)) ties[k] = tiesOf(k, s.ties?.[k] ?? (LIFE_SUPPORT.includes(k.slice(7)) ? s.ties?.['system:lifeSupport'] : undefined), designTies[k] ?? d);
   const core = s.core === 'ejected' || s.antimatter === false ? 'ejected' : s.core === 'offline' || !antimatter || !deuterium ? 'offline' : 'online';
   // The EPS manifold: energized if anything was feeding it (older saves); then it starts at full pressure.
   const epsLive = s.epsLive ?? (!cold && (s.core === 'online' || s.core === undefined || Object.values(s.drives || {}).some((x) => (typeof x === 'object' ? x?.state : x ?? 'running') === 'running')));
@@ -2240,7 +2265,9 @@ function freshEng(saved, { cold = false } = {}) {
     // Computer cores (older saves: online; a boot in progress starts over).
     computers: COMPUTERS.map((x, i) => ({ state: (s.computers?.[i] ?? 'online') === 'online' ? 'online' : 'off', t: 0 })),
     // EPS taps: how much EPS power may flow down into each low bus (older saves: open/closed).
-    taps: Object.fromEntries(BUSES.map((X) => { const t = s.taps?.[X]; return [X, typeof t === 'number' ? Math.max(0, Math.min(BUS_MAX[X], t)) : t === false ? 0 : t === true || X !== 'C' ? BUS_MAX[X] : 0]; })), ties,
+    taps: Object.fromEntries(BUSES.map((X) => { const t = s.taps?.[X]; return [X, typeof t === 'number' ? Math.max(0, Math.min(tapMax[X], t)) : t === false ? 0 : t === true || X !== 'C' ? tapMax[X] : 0]; })), ties,
+    // (Restoring: the power paths each load had when saved, and conduits new since: see reconcileConduits.)
+    restore: { paths: s.paths && typeof s.paths === 'object' ? s.paths : null, newConduits },
 
     transfer: null, feed: { port: 0, starboard: 0 }, fed: { port: 0, starboard: 0 }, // power offered to a ship docked at each port, and what actually went (Power row: Bus B)
     feedEps: { port: 0, starboard: 0 }, fedEps: { port: 0, starboard: 0 }, // (and the EPS row's)
@@ -2314,9 +2341,10 @@ function freshEng(saved, { cold = false } = {}) {
 }
 const engOf = (k) => {
   if (!eng.has(k)) {
-    eng.set(k, { ...freshEng(isBase(k) ? baseSettings[shipName(k)]?.eng : undefined), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
+    eng.set(k, { ...freshEng(isBase(k) ? baseSettings[shipName(k)]?.eng : undefined, { k }), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
     for (const c of CONDUITS) eng.get(k).ties[c] ||= [];
     if (isBase(k) && !eng.get(k).conduits) deriveConduits(k);
+    reconcileConduits(k);
   }
   return eng.get(k);
 };
@@ -2354,6 +2382,8 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
+    // (Each load's power path, as the design had it: a design change is noticed on the next load.)
+    paths: Object.fromEntries(Object.keys(e.ties).filter((x) => /^(console|system|sub):/.test(x) && !CONDUITS.includes(x)).map((x) => [x, conduitsOf(k, x).join('>')])),
     dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores * 100) / 100, sporeLoaded: e.spore?.loaded || 0, brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
@@ -2790,7 +2820,7 @@ function gridView(k) {
     // Ties that carry nothing: a conduit on their way untied from that bus (key -> the buses cut off).
     cutOff: Object.fromEntries(Object.keys(e.ties).map((x) => [x, (e.ties[x] || []).filter((X) => !effTies(k, e, x).includes(X))]).filter(([, v]) => v.length)),
     conduits: CONDUITS.filter((c) => c === 'system:lifeSupport' || placesOf(k).some((pl) => `place:${pl.name}` === c)), systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, brigField: !!e.brigField, brigSealed: brigSealed(k), stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
-    tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: BUS_MAX,
+    tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: busMaxOf(k),
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
   };
 }
@@ -2889,7 +2919,7 @@ function gridCommand(ws, msg) {
   // EPS taps: how much EPS power may flow into a bus ({bus, amount}, or {bus, on} for all or nothing).
   if (msg.tap && BUSES.includes(msg.tap.bus)) {
     const X = msg.tap.bus;
-    e.taps[X] = Math.max(0, Math.min(BUS_MAX[X], Math.round(Number.isFinite(msg.tap.amount) ? msg.tap.amount : msg.tap.on ? BUS_MAX[X] : 0)));
+    e.taps[X] = Math.max(0, Math.min(busMaxOf(key)[X], Math.round(Number.isFinite(msg.tap.amount) ? msg.tap.amount : msg.tap.on ? busMaxOf(key)[X] : 0)));
     said.push(`EPS tap to Bus ${X}: ${e.taps[X] ? `up to ${e.taps[X]}` : 'closed'}`);
   }
   // All on / All off for a bus column (A, B, C, EPS, Deu, AM) or every one ('all'): { busAll: { bus, on } }.
@@ -3513,7 +3543,9 @@ function destroy(k, cause) {
   transporters.delete(k);
   for (const [o, t] of transporters) if (t.lock === k && !t.energizing) dropLock(o, `the ${name} was destroyed`);
   undockShips(k, `the ${name} was destroyed`);
-  eng.set(k, { ...freshEng(null, { cold: true }), docked: base.name }); // rebuilt cold: Engineering brings it up on dock power
+  eng.set(k, { ...freshEng(null, { cold: true, k }), docked: base.name }); // rebuilt cold: Engineering brings it up on dock power
+  delete engOf(k).restore;
+  if (!classOf(k).warpCore) Object.assign(engOf(k), { core: 'ejected', antimatter: 0 }); // (a design without a warp core: none)
   shields.delete(k);
   navTargets.delete(k);
   const nav = navState.get(k);
@@ -3584,7 +3616,7 @@ const savedCombat = (k) => {
   return { hull: round1(c.hull), shield: round1(c.shield), damage: Object.fromEntries(DAMAGEABLE.map((s) => [s, round1(c.damage[s])])), torpedoes: c.torpedoes, repair: c.repair, yield: c.yield, shieldFreq: c.shieldFreq, weaponFreq: c.weaponFreq };
 };
 // What a ship's computer keeps: its position and settings, plus combat and grid state.
-const coreCopy = (k) => (navState.has(k) ? { ...navState.get(k), combat: savedCombat(k), eng: savedEng(k) } : undefined);
+const coreCopy = (k) => (navState.has(k) ? { ...navState.get(k), ...(isBase(k) ? {} : { class: classId(k) }), combat: savedCombat(k), eng: savedEng(k) } : undefined);
 
 // The ship's own combat state, for its consoles.
 const lockInfo = (k, t) => ({ name: shipName(t), distance: Math.round(distance(k, t)), shields: shields.has(t), shield: Math.round(combatOf(t).shield), hull: Math.round(combatOf(t).hull), aim: combatOf(k).aim[t] || null, aimName: combatOf(k).aim[t] ? damageName(combatOf(k).aim[t]) : null });

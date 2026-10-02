@@ -197,7 +197,7 @@ function onMessage(raw, isBinary) {
       // The relay picks one computer per ship to fly it; the others keep a copy.
       const store = storeFor(msg.ship);
       if (!store) return;
-      if (msg.nav) store.nav = msg.nav;
+      if (msg.nav) store.nav = { ...msg.nav, class: msg.nav.class ?? store.nav?.class }; // (its class kept, from older relays too)
       if (store.primary !== !!msg.primary) log(`${store.ship}: ${msg.primary ? 'flying the ship' : 'standing by (another computer is flying)'}`);
       store.primary = !!msg.primary;
       store.saveNav();
@@ -235,7 +235,7 @@ function onMessage(raw, isBinary) {
     case 'core-nav-sync': {
       // A copy of the ship's position from the computer that's flying it.
       const store = storeFor(msg.ship);
-      if (store && !store.primary && msg.nav) { store.nav = msg.nav; if (Math.random() < 0.2) store.saveNav(); }
+      if (store && !store.primary && msg.nav) { store.nav = { ...msg.nav, class: msg.nav.class ?? store.nav?.class }; if (Math.random() < 0.2) store.saveNav(); }
       break;
     }
     case 'core-helm': {

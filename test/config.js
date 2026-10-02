@@ -87,6 +87,52 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
       fs.rmSync(TWO, { recursive: true, force: true });
       step('a second star system file: its subspace relay and Sol\'s linked to each other');
     }
+    // A design edited (a copy of config/): a ship keeps its class across restarts, and on the next
+    // load Engineering takes the new limits and power paths, its own state (ties) kept.
+    {
+      const ED = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-design-')), SHIPS = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-designship-'));
+      fs.cpSync(CONFIG.DIR, ED, { recursive: true });
+      const P = PORT + 10, env = { PORT: P, CONFIG_DIR: ED, RELAY_DATA: SHIPS, STARBASES_FILE: path.join(SHIPS, 'starbases.json') };
+      const kill = (p) => new Promise((r) => { if (p.exitCode !== null) return r(); p.once('exit', r); p.kill(); });
+      const look = async () => {
+        const ws = new WebSocket(`ws://localhost:${P}`), m = [];
+        ws.on('message', (x) => m.push(JSON.parse(x)));
+        await new Promise((r) => ws.on('open', r));
+        await until(() => m.some((x) => x.type === 'ships' && x.ships.some((s) => s.name === 'Designship' && s.computer)));
+        ws.send(JSON.stringify({ type: 'register', name: 'tester', ship: 'Designship', station: 'Helm' }));
+        const own = await until(() => [...m].reverse().find((x) => x.type === 'nav' && x.own?.grid)?.own);
+        ws.close();
+        return own;
+      };
+      let rp = run(['server.js'], env);
+      await wait(1000);
+      let sc = run(['tools/shipcore.js', '--relay', `ws://localhost:${P}`, '--data', SHIPS, '--warm', '--position', '500,500', '--class', 'shuttle', 'Designship'], env);
+      let own = await look();
+      assert.equal(own.class, 'Shuttle');
+      assert.deepEqual(own.grid.busMax, { A: 60, B: 60, C: 60, EPS: 80 }, 'its taps\' limits: its buses');
+      assert.deepEqual([own.grid.cutOff['system:gravity'], own.grid.cutOff['system:lateral']], [undefined, undefined], 'warm: its design\'s ties (gravity, lateral sensors on Bus C) not cut off');
+      await wait(2500);
+      await kill(sc); await kill(rp);
+      assert.equal(JSON.parse(fs.readFileSync(path.join(SHIPS, 'Designship', '.nav.json'), 'utf8')).class, 'shuttle', 'the class saved with the ship');
+      // The design changes: bigger buses, and the lateral sensors moved to a place of their own.
+      const file = path.join(ED, 'ships', 'shuttle.json'), d = JSON.parse(fs.readFileSync(file, 'utf8'));
+      d.bus = 90;
+      d.places.find((pl) => pl.name === 'Cockpit').rows = d.places.find((pl) => pl.name === 'Cockpit').rows.filter((r) => r !== 'system:lateral');
+      d.places.push({ name: 'Sensor Pod', deck: 2, stations: [], rows: ['system:lateral'] });
+      fs.writeFileSync(file, JSON.stringify(d, null, 2));
+      rp = run(['server.js'], env);
+      await wait(1000);
+      sc = run(['tools/shipcore.js', '--relay', `ws://localhost:${P}`, '--data', SHIPS, 'Designship'], env);
+      own = await look();
+      assert.equal(own.class, 'Shuttle', 'still a shuttle (no --class this time)');
+      assert.deepEqual([own.grid.busMax.A, own.grid.totals.A.max], [90, 90], 'the new bus limit');
+      assert.deepEqual(own.grid.ties['system:lateral'], ['C'], 'its own ties kept');
+      assert.ok(own.grid.ties['place:Sensor Pod']?.includes('C'), `the new place carries its load (${JSON.stringify(own.grid.ties['place:Sensor Pod'])})`);
+      assert.equal(own.grid.cutOff['system:lateral'], undefined, 'the moved load isn\'t cut off');
+      await kill(sc); await kill(rp);
+      fs.rmSync(ED, { recursive: true, force: true }); fs.rmSync(SHIPS, { recursive: true, force: true });
+      step('a design edited: the shuttle kept its class across restarts (saved with it), came up warm with its design\'s ties, then took the new bus limit (90) and its lateral sensors\' new place (Sensor Pod, tied on Bus C) with its own ties kept');
+    }
     ok = true;
   } catch (err) {
     console.error('FAIL:', err.message);
