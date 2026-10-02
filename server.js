@@ -230,7 +230,7 @@ function networkGraph() {
 function shipList() {
   const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys(), ...BASE_KEYS]);
   return [...live].map((k) => ({
-    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, ...(isBase(k) ? { starbase: true } : {}),
+    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, ...(isBase(k) ? { starbase: true } : { class: classOf(k).name, stations: stationsOf(k) }),
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
 // Starbases run themselves (no ship's computer needed), so they're always there.
@@ -781,10 +781,10 @@ const SYSTEMS = ['engines', 'injectors', 'deflector', 'bussard', 'amBus', 'shiel
 // per berth: the shipyard's drydocked ships need theirs powered for work to go
 // on) and the industrial replicators. Ships never draw them; starbases have no
 // warp drive (engines, plasma injectors, Bussard collectors, plasma conduits).
-const BASE_ONLY = ['drydock1', 'drydock2', 'drydock3', 'industrial', 'phaser2', 'phaser3', 'phaser4'];
+const BASE_ONLY = ['drydock1', 'drydock2', 'drydock3', 'industrial', 'phaser3', 'phaser4'];
 // Phaser arrays (EPS, under Tactical, each with its own light bar): a ship has one, a starbase four.
 const PHASER_ARRAYS = ['phaser1', 'phaser2', 'phaser3', 'phaser4'];
-const arraysOf = (k) => (isBase(k) ? 4 : 1);
+const arraysOf = (k) => (isBase(k) ? 4 : Math.min(4, classOf(k).arrays));
 // Tactical's locks (shared by the phasers and the tractor beam): a ship up to 6, a starbase 24.
 const lockMax = (k) => 6 * arraysOf(k);
 const WARP_DRIVE = ['engines', 'injectors', 'bussard'];
@@ -869,7 +869,8 @@ function speedLimits(k) {
       : p.sif < HULL.impulse.sif || p.idf < HULL.impulse.idf ? `impulse needs the SIF at ${HULL.impulse.sif}% and dampers at ${HULL.impulse.idf}% (SIF ${p.sif}%, dampers ${p.idf}%)` : '',
   };
   if (isBase(k)) why.warp = 'a starbase has no warp drive';
-  let warp = why.warp ? 0 : eng9;
+  else if (!classOf(k).maxWarp) why.warp = `a ${classOf(k).name.toLowerCase()} has no warp drive`;
+  let warp = why.warp ? 0 : Math.min(eng9, classOf(k).maxWarp || 9);
   if (e.towing) warp = Math.min(warp, TRACTOR.maxWarp); // towing holds a ship back
   return { warp, impulse: why.impulse ? 0 : flow(k).thrusting, why };
 }
@@ -914,12 +915,12 @@ function navMessage(key) {
   const seen = [...navState.keys()].filter((k) => cores.has(k) && !isBase(k) && sensorOk(key, k));
   return {
     type: 'nav',
-    own: own ? { name: shipName(key), ...own, power: powerOf(key), capacity: Object.fromEntries(Object.entries(capacityOf(key)).map(([x, v]) => [x, Math.floor(v)])), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
+    own: own ? { name: shipName(key), ...own, class: isBase(key) ? null : classOf(key).name, power: powerOf(key), capacity: Object.fromEntries(Object.entries(capacityOf(key)).map(([x, v]) => [x, Math.floor(v)])), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
       autopilot: autopilots.get(key)?.target || null, transporter: transporterView(key),
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
     bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
-    ships: seen.map((k) => ({ name: shipName(k), ...navState.get(k), ops: opsOf(k).length > 0, shields: shields.has(k), distance: k === key ? 0 : distance(key, k) })),
+    ships: seen.map((k) => ({ name: shipName(k), ...navState.get(k), class: classOf(k).name, ops: opsOf(k).length > 0, shields: shields.has(k), distance: k === key ? 0 : distance(key, k) })),
     ranges: rangesOf(key),
     maxWarp: maxWarp(key),
     speed: speedLimits(key),
@@ -1008,6 +1009,9 @@ function coreNav(c, key, nav) {
   if (!nav || typeof nav.x !== 'number' || typeof nav.y !== 'number') return;
   if (isBase(key)) return; // a computer for a starbase only holds its library: the station runs itself
   const clean = { x: nav.x, y: nav.y, heading: Number(nav.heading) || 0, warp: Number(nav.warp) || 0, dest: nav.dest || null };
+  const was = shipClasses.get(key);
+  if (CLASSES[nav.class]) shipClasses.set(key, nav.class); else if (!shipClasses.has(key)) shipClasses.set(key, 'galaxy');
+  if (was !== shipClasses.get(key)) broadcastShips(); // (the sign-in list shows each ship's class and stations)
   if (ALERTS.includes(nav.alert)) clean.alert = nav.alert;
   if (nav.lockout) clean.lockout = true;
   if (nav.power && typeof nav.power === 'object') clean.power = Object.fromEntries(SYSTEMS.map((s) => [s, Math.max(0, Math.min(POWER_MAX, Number(nav.power[s] ?? DEFAULT_POWER[s]) || 0))]));
@@ -1019,6 +1023,7 @@ function coreNav(c, key, nav) {
   if (!combat.get(key)?.loaded) {
     combat.set(key, { ...freshCombat(nav.combat), loaded: true });
     eng.set(key, freshEng(nav.eng, { cold: !nav.eng && !nav.warm }));
+    if (!classOf(key).warpCore) Object.assign(engOf(key), { core: 'ejected', antimatter: 0 }); // (a shuttle has no warp core: impulse and batteries)
     if (!nav.eng && nav.spawn) { spawnAt = SPAWN_BASES[Math.floor(Math.random() * SPAWN_BASES.length)]; engOf(key).docked = spawnAt.name; }
     flowCache.delete(key);
   }
@@ -1223,7 +1228,7 @@ function scanData(key, t) {
   const f = present(t) && !isBase(t) ? flow(t) : null;
   const power = f ? SYSTEMS.map((x) => [SYSTEM_NAMES[x], Math.round(((f.delivered[x] || 0) * ratingOf(x)) / 100)]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]) : [];
   return {
-    distance: t === key ? 0 : Math.round(distance(key, t)), x: n.x, y: n.y, heading: n.heading, warp: n.warp,
+    distance: t === key ? 0 : Math.round(distance(key, t)), x: n.x, y: n.y, heading: n.heading, warp: n.warp, class: isBase(t) ? 'Starbase' : classOf(t).name,
     shields: shields.has(t), ops: opsOf(t).length > 0, crew: crew.length, stations, lifeforms, species,
     sensors: loc.sensors, shieldLevel: loc.shield, resolved: loc.resolved, shieldFreq: loc.resolved && shields.has(t) ? combatOf(t).shieldFreq : null,
     inCommsRange: commsOk(key, t), inTransporterRange: transporterOk(key, t),
@@ -1332,7 +1337,7 @@ function crewCommand(ws, msg) {
       const u = aboard(msg.who);
       if (!u) return note('That crew member is not aboard');
       if (u.operator) return note('The ops station can only be left by the operator');
-      if (!STATIONS.includes(msg.station)) return note('No such station');
+      if (!STATIONS.includes(msg.station) || !hasStation(key, msg.station)) return note('No such station');
       if (u.station === msg.station) return;
       // An order to the crewman: they move when they acknowledge (or decline it).
       const o = { id: newId('o-'), ship: key, by: ws.id, from: info(ws), text: `${u.name}: report to ${msg.station}`, at: Date.now(), pending: new Set([u.id]), acked: new Set(), reassign: { who: u.id, station: msg.station } };
@@ -1426,8 +1431,27 @@ function crewCommand(ws, msg) {
 
 const GRID = { forcefield: 5, core: 650, coreStartSecs: 10, containment: 20, constriction: { start: 60, run: 20 }, injector: 10, solar: 25, dock: 700, impulse: 75, impulseStartSecs: 5, impulsePump: 10, comms: 10, batteryOut: 100, batteryCap: 1000, batteryCharge: 50, epsOut: 300, epsCap: 1000, epsCharge: 100, console: 2, breachSecs: 5 };
 const BUS_MAX = { A: 300, B: 300, C: 300, EPS: 1000 };
-// A starbase's EPS carries three times a ship's.
-const busMaxOf = (k) => (isBase(k) ? { ...BUS_MAX, EPS: 3000 } : BUS_MAX);
+// Ship classes: set when a ship's computer first creates the ship (--class;
+// kept in its .nav.json), Galaxy for ships from before classes. The class sets
+// the buses' and the EPS's limits, the warp core's output and the top warp,
+// the shields' strength, the phaser arrays, whether there's a warp core and a
+// transporter, which stations it has, and its docking ports.
+const ALL_STATIONS = null; // (every station)
+const CLASSES = {
+  galaxy: { name: 'Galaxy', bus: 300, eps: 1000, core: 1, maxWarp: 9, shields: 1, arrays: 1, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2 },
+  dreadnought: { name: 'Dreadnought', bus: 400, eps: 1500, core: 1.4, maxWarp: 9, shields: 1.5, arrays: 2, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2 },
+  intrepid: { name: 'Intrepid', bus: 250, eps: 700, core: 0.8, maxWarp: 9, shields: 0.8, arrays: 1, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2 },
+  runabout: { name: 'Runabout', bus: 100, eps: 250, core: 0.3, maxWarp: 5, shields: 0.4, arrays: 1, warpCore: true, refit: false, transporter: true, stations: ['Helm', 'Tactical', 'Engineering', 'Transporter'], ports: 1 },
+  shuttle: { name: 'Shuttle', bus: 60, eps: 80, core: 0, maxWarp: 0, shields: 0.2, arrays: 1, warpCore: false, refit: false, transporter: false, stations: ['Helm'], ports: 1 },
+};
+const shipClasses = new Map(); // ship key -> class id
+const classOf = (k) => CLASSES[shipClasses.get(k)] || CLASSES.galaxy;
+const classId = (k) => (CLASSES[shipClasses.get(k)] ? shipClasses.get(k) : 'galaxy');
+// The stations aboard (ops always: a runabout's cockpit and a shuttle have Ops too).
+const hasStation = (k, st) => st === 'Operations' || isBase(k) || !classOf(k).stations || classOf(k).stations.includes(st);
+const stationsOf = (k) => STATIONS.filter((st) => hasStation(k, st));
+// A starbase's EPS carries three times a ship's; a ship's follow its class.
+const busMaxOf = (k) => (isBase(k) ? { ...BUS_MAX, EPS: 3000 } : (() => { const c = classOf(k); return { A: c.bus, B: c.bus, C: c.bus, EPS: c.eps }; })());
 // Supplies: the warp core burns antimatter and deuterium (per second, at full
 // output; less as it gives less), each impulse drive deuterium while it runs.
 // Refuel or offload at a starbase, or pass them between ships docked together.
@@ -1617,8 +1641,17 @@ function baseMove(k) {
   }
   engOf(k).dirty = true;
 }
+// A ship's grid rows follow its class: a second phaser array, no transporter, no warp drive, its stations.
+function classSystems(k) {
+  const c = classOf(k), out = {};
+  for (const [st, list] of Object.entries(STATION_SYSTEMS)) {
+    if (!hasStation(k, st) && st !== 'Engineering') continue;
+    out[st] = list.flatMap((x) => (x === 'phaser1' ? PHASER_ARRAYS.slice(0, arraysOf(k)) : [x])).filter((x) => (x !== 'transporter' || c.transporter) && (!WARP_DRIVE.includes(x) || c.maxWarp));
+  }
+  return out;
+}
 // What each console's grid rows list: a starbase has no warp drive, and has its drydock connections and industrial replicators.
-const stationSystemsOf = (k) => (isBase(k) ? { ...STATION_SYSTEMS, Helm: STATION_SYSTEMS.Helm.filter((x) => !WARP_DRIVE.includes(x)), Tactical: ['shields', ...PHASER_ARRAYS, 'weapons', 'tractor'], Engineering: [...STATION_SYSTEMS.Engineering, ...BASE_ONLY.filter((x) => !PHASER_ARRAYS.includes(x))] } : STATION_SYSTEMS);
+const stationSystemsOf = (k) => (!isBase(k) ? classSystems(k) : isBase(k) ? { ...STATION_SYSTEMS, Helm: STATION_SYSTEMS.Helm.filter((x) => !WARP_DRIVE.includes(x)), Tactical: ['shields', ...PHASER_ARRAYS, 'weapons', 'tractor'], Engineering: [...STATION_SYSTEMS.Engineering, ...BASE_ONLY.filter((x) => !PHASER_ARRAYS.includes(x))] } : STATION_SYSTEMS);
 const SYSTEM_PRIORITY = ['amBus', 'sif', 'idf', 'atmosphere', 'thermal', 'lighting', 'lights', 'gravity', 'sensors', 'lateral', 'deflector', 'bussard', 'shields', 'engines', 'injectors', 'phaser1', 'phaser2', 'phaser3', 'phaser4', 'weapons', 'tractor', 'drydock1', 'drydock2', 'drydock3', 'transporter', 'replicators', 'recreation', 'industrial'];
 // Systems shown under another system in the grid table (Helm > Engines > Plasma injectors).
 const SYSTEM_CHILDREN = { engines: ['injectors'], lifeSupport: LIFE_SUPPORT };
@@ -1885,6 +1918,7 @@ const SUB_FAIL_DAMAGE = 50;
 function usageOf(k, s, c) {
   const w = navState.get(k)?.warp || 0;
   if (isBase(k) ? WARP_DRIVE.includes(s) : BASE_ONLY.includes(s)) return 0;
+  if (!isBase(k) && ((s === 'phaser2' && arraysOf(k) < 2) || (s === 'transporter' && !classOf(k).transporter) || (WARP_DRIVE.includes(s) && !classOf(k).maxWarp))) return 0; // (not aboard this class)
   switch (s) {
     case 'drydock1': case 'drydock2': case 'drydock3': return berthShip(k, Number(s.slice(7))) ? 100 : 0; // while a ship is in that berth
     case 'industrial': return 100; // at its limiter (the light bar)
@@ -1937,7 +1971,7 @@ function flow(k) {
   const driveGen = (d) => (running.includes(d) && (e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length ? GRID.impulse * (1 - share) : 0);
   const cap = { ship: conns.reduce((n, cn) => n + (cn.net < 0 ? Math.min(-cn.net, cn.theirFed) : 0), 0), shipEps: conns.reduce((n, cn) => n + (cn.netEps < 0 ? Math.min(-cn.netEps, cn.theirFedEps) : 0), 0), solar: GRID.solar,
     dock: e.docked && connOf(e, 'station').power.imp ? GRID.dock : 0, dockEps: e.docked && connOf(e, 'station').eps.imp ? GRID.dock : 0,
-    ...Object.fromEntries(EMERG.names.map((n) => [n, Math.min(EMERG.out, e.emerg[n])])), impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), ...Object.fromEntries(AUX.map((a) => [a, e.aux[a].state === 'running' && e.deuterium > 0 ? FUSION.aux : 0])), core: (c.damage.conduits || 0) < SUB_FAIL_DAMAGE ? coreOutput(e) : 0, ...Object.fromEntries(Object.entries(STORES).map(([name, node]) => [name, Math.min(node === 'EPS' ? GRID.epsOut : GRID.batteryOut, e.stores[name])])) };
+    ...Object.fromEntries(EMERG.names.map((n) => [n, Math.min(EMERG.out, e.emerg[n])])), impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), ...Object.fromEntries(AUX.map((a) => [a, e.aux[a].state === 'running' && e.deuterium > 0 ? FUSION.aux : 0])), core: (c.damage.conduits || 0) < SUB_FAIL_DAMAGE ? coreOutput(e) * (isBase(k) ? 1 : classOf(k).core) : 0, ...Object.fromEntries(Object.entries(STORES).map(([name, node]) => [name, Math.min(node === 'EPS' ? GRID.epsOut : GRID.batteryOut, e.stores[name])])) };
   // A source tied to several buses shares its output evenly between them.
   const srcs = SOURCES.map((name) => {
     const t = isStore(name) ? (STORES[name] === 'EPS' || e.breakers[STORES[name]] ? [STORES[name]] : []) : e.ties[name], full = t.length ? cap[name] : 0;
@@ -2258,7 +2292,7 @@ function gridView(k) {
     drydock: { shipyard: isShipyard(e.docked), in: !!e.drydock, berth: e.drydock ? e.berth : null, powered: e.drydock ? berthPowered(k) : null, release: e.release ? Math.max(0, Math.ceil((e.release - Date.now()) / 1000)) : null, hold: !!e.hold },
     dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName),
     // What each port holds: a starbase, a ship (with its power offers), or nothing.
-    ports: Object.fromEntries(PORTS.map((p) => {
+    ports: Object.fromEntries(portsOf(k).map((p) => {
       const o = e.shipDocks[p] && portFor(e.shipDocks[p], k) ? e.shipDocks[p] : null;
       return [p, e.docked && e.dockedPort === p ? { base: e.docked } : o ? { ship: shipName(o), feed: e.feed[p], fed: Math.round(e.fed[p]), theirFeed: engOf(o).feed[portFor(o, k)] } : null];
     })),
@@ -2307,6 +2341,7 @@ function gridCommand(ws, msg) {
   if (msg.refit) {
     // A new warp core and antimatter pods, from the starbase. Full pods need a
     // containment feed set to go into; without one they come empty.
+    if (classOf(key).refit === false) return note(`a ${classOf(key).name.toLowerCase()}'s warp core can't be replaced`);
     if (!e.drydock) return note(`a warp core and antimatter pods can only be replaced in drydock at the shipyard (${SHIPYARD.name})`);
     if (!berthPowered(key)) return note(`${e.docked}'s drydock connection ${e.berth} has no power: the work waits for it`);
     if (e.core === 'online' || e.core === 'starting') return note('shut the warp core down before replacing it');
@@ -2440,7 +2475,9 @@ const DOCK_REQUEST_MS = 30000;
 const dockRequests = new Map(); // target ship key -> { from, port, until }
 // Maneuvering thrusters work while an impulse drive runs.
 const thrustersOk = (k) => DRIVES.some((d) => engOf(k).drives[d].state === 'running') && engOf(k).deuterium > 0;
-const freePort = (k, want) => (PORTS.includes(want) && !portTaken(k, want) ? want : PORTS.find((p) => !portTaken(k, p)) || null);
+// (A runabout or a shuttle has one docking port.)
+const portsOf = (k) => (isBase(k) ? PORTS : PORTS.slice(0, classOf(k).ports));
+const freePort = (k, want) => (portsOf(k).includes(want) && !portTaken(k, want) ? want : portsOf(k).find((p) => !portTaken(k, p)) || null);
 const portTaken = (k, p) => !!(engOf(k).shipDocks[p] || (engOf(k).docked && engOf(k).dockedPort === p));
 
 function joinShips(k, p, t, tp) {
@@ -2999,7 +3036,7 @@ function hit(t, dmg, from, what = '', aim = null, { torpedo = false, yield: y = 
   const said = through ? ['on their shield frequency: straight through'] : [];
   if (shields.has(t) && !through) {
     // Shield strength drained per point of damage: less with more shield power.
-    const drain = (dmg * 60) / Math.max(MIN_SHIELD_POWER, powerOf(t).shields) / (isBase(t) ? 3 : 1); // (a starbase's shields hold three times as much)
+    const drain = (dmg * 60) / Math.max(MIN_SHIELD_POWER, powerOf(t).shields) / (isBase(t) ? 3 : classOf(t).shields); // (a starbase's shields hold three times as much; a ship's by its class)
     if (c.shield > drain || torpedo) { c.shield = Math.max(0, c.shield - drain); rest = 0; } else { rest = dmg * (1 - c.shield / drain); c.shield = 0; } // (a torpedo's tenth all goes on the shields)
     said.push(`their shields at ${Math.round(c.shield)}%`);
     if (c.shield <= 0) {
@@ -3465,6 +3502,7 @@ const TR = { buffers: 15, small: 2, coils: 5, diagSecs: Number(process.env.DIAG_
 const TR_SUBS = ['patternBuffers', 'targetingScanners', 'energizingCoils', 'heisenberg', 'biofilter'];
 // What's missing for the transporter to work (null: nothing), and whether the lock part works.
 function transporterFault(k, { lock = false } = {}) {
+  if (!isBase(k) && !classOf(k).transporter) return `a ${classOf(k).name.toLowerCase()} has no transporter`;
   const f = flow(k), p = powerOf(k);
   if (p.lateral <= 0) return 'the pattern buffers need the lateral sensors';
   const need = lock ? ['patternBuffers', 'targetingScanners'] : ['patternBuffers', 'targetingScanners', 'heisenberg', 'biofilter'];
@@ -3905,6 +3943,7 @@ wss.on('connection', (ws) => {
       if (!NAME_RE.test(ship)) return send(ws, { type: 'register-failed', reason: 'ship: use 1-32 letters, digits, spaces, \' . -' });
       if (!STATIONS.includes(msg.station)) return send(ws, { type: 'register-failed', reason: 'pick a station' });
       if (!hasComputer(ship)) return send(ws, { type: 'register-failed', reason: `the ${ship} has no ship's computer online` });
+      if (!hasStation(shipKey(ship), msg.station)) return send(ws, { type: 'register-failed', reason: `a ${classOf(shipKey(ship)).name.toLowerCase()} has no ${msg.station} station (it has ${stationsOf(shipKey(ship)).join(', ')})` });
       const id = userId(name, ship);
       if (users.has(id)) return send(ws, { type: 'register-failed', reason: `${name} is already aboard the ${shipName(shipKey(ship))}` });
       ws.id = id;
@@ -3939,6 +3978,7 @@ wss.on('connection', (ws) => {
     // an operator moving elsewhere leaves it.
     if (msg.type === 'change-station' && ws.id) {
       if (msg.station !== OPS_STATION && !STATIONS.includes(msg.station)) return send(ws, { type: 'notice', text: 'No such station' });
+      { const where = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey; if (present(where) && !hasStation(where, msg.station)) return send(ws, { type: 'station-failed', reason: `the ${shipName(where)} (${classOf(where).name} class) has no ${msg.station} station` }); }
       // Force fields: nobody walks out of an isolated station, or into one (aboard here or across a dock).
       const target = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey;
       if (!ws.operator && sealed(ws.shipKey, ws.station)) return send(ws, { type: 'station-failed', reason: `a Security force field isolates ${ws.station}: nobody walks out (the transporter can beam you)` });

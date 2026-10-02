@@ -10,6 +10,8 @@
 //   node tools/shipcore.js --relay wss://relay.example.com --data ./ship-data --key secret Enterprise
 //   node tools/shipcore.js --position 500,480 Enterprise   (where a new ship starts; else docked at a starbase)
 //   node tools/shipcore.js --warm Enterprise   (a new ship starts powered up and fuelled, not cold)
+//   node tools/shipcore.js --class runabout Rubicon (a new ship's class: galaxy (the default),
+//                                                 dreadnought, intrepid, runabout or shuttle; kept in its .nav.json)
 //
 // Files live in <data>/<ship>/ (default ./shipcore-data, next to where you run
 // it), with an index (.index.json) that also remembers deletions, so a file
@@ -34,6 +36,7 @@ function parseArgs(argv) {
     else if (a === '--key') opts.key = argv[++i];
     else if (a === '--position') { const [x, y] = argv[++i].split(',').map(Number); opts.position = { x, y }; }
     else if (a === '--warm') opts.warm = true;
+    else if (a === '--class') opts.class = String(argv[++i] || '').toLowerCase();
     else if (a === '-h' || a === '--help') opts.help = true;
     else opts.ships.push(a);
   }
@@ -102,7 +105,7 @@ for (const store of stores.values()) {
     // A new ship: where --position says, or the relay docks it at a starbase.
     // It starts cold (reactor offline, no fuel) unless --warm.
     const p = opts.position || { x: 400 + Math.random() * 200, y: 400 + Math.random() * 200 };
-    store.nav = { x: p.x, y: p.y, heading: Math.floor(Math.random() * 360), warp: 0, dest: null, ...(opts.position ? {} : { spawn: true }), ...(opts.warm ? { warm: true } : {}) };
+    store.nav = { x: p.x, y: p.y, heading: Math.floor(Math.random() * 360), warp: 0, dest: null, ...(opts.position ? {} : { spawn: true }), ...(opts.warm ? { warm: true } : {}), ...(opts.class ? { class: opts.class } : {}) };
   }
   // (Older saves had one life support setting: it goes to its three systems.)
   const was = store.nav.power || {};
@@ -344,7 +347,7 @@ module.exports = { createShipcore, parseArgs };
 if (require.main === module) {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help || !opts.ships.length) {
-    console.log('usage: node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] [--position x,y] [--warm] <ship> [ship...]');
+    console.log('usage: node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] [--position x,y] [--warm] [--class galaxy|dreadnought|intrepid|runabout|shuttle] <ship> [ship...]');
     process.exit(opts.help ? 0 : 1);
   }
   const core = createShipcore(opts, { onFail: () => process.exit(1) });

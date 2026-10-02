@@ -87,7 +87,7 @@
         if (sh.name === selected) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.strokeRect(x - 16, y - 16, 32, 32); g.lineWidth = 1; }
         g.fillStyle = css(color);
         g.font = '13px Antonio, sans-serif';
-        g.fillText(`${sh.name.toUpperCase()}${sh.warp > 0 ? ` · ${speedName(sh.warp).toUpperCase()}` : ''}`, x + 12, y - 8);
+        g.fillText(`${sh.name.toUpperCase()}${sh.class ? ` · ${sh.class.toUpperCase()}` : ''}${sh.warp > 0 ? ` · ${speedName(sh.warp).toUpperCase()}` : ''}`, x + 12, y - 8);
       }
     }
 
@@ -259,7 +259,7 @@
         contacts.replaceChildren(...(others.length ? others : []).map((s) => {
           const li = el('li', { className: s.name === selected ? 'selected' : '' },
             el('span', { className: 'nav-contact-name', textContent: s.name }),
-            el('span', { className: 'nav-contact-info', textContent: `${Math.round(s.distance)} units · ${speedName(s.warp)}${s.distance <= nav.ranges.comms ? ' · in comms range' : ''}` }),
+            el('span', { className: 'nav-contact-info', textContent: `${s.class ? `${s.class} class · ` : ''}${Math.round(s.distance)} units · ${speedName(s.warp)}${s.distance <= nav.ranges.comms ? ' · in comms range' : ''}` }),
             button('Scan', '', () => { selected = s.name; send({ type: 'scan', ship: s.name }); renderControls(); draw(); }),
             // Lock: the scan, tracked each second (tap again to release).
             (() => { const b = button(sciLock === s.name ? 'Release lock' : 'Lock', '', () => { selected = s.name; send({ type: 'sci-lock', ship: sciLock === s.name ? null : s.name }); renderControls(); draw(); }, sciLock === s.name); b.classList.add('nav-sci-lock'); b.setAttribute('aria-pressed', String(sciLock === s.name)); return b; })(),
@@ -297,6 +297,7 @@
           el('h3', { className: 'ops-subhead', textContent: `${msg.tracking ? 'Tracking' : 'Scan'}: the ${msg.ship}` }),
           el('ul', { className: 'nav-scan-list' },
             ...[
+              ...(d.class ? [['Class', d.class]] : []),
               ['Distance', `${d.distance} units${d.inTransporterRange ? ' (transporter range)' : d.inCommsRange ? ' (comms range)' : ''}`],
               ['Position', `${Math.round(d.x)}, ${Math.round(d.y)}`],
               ['Heading · speed', `${String(Math.round(d.heading)).padStart(3, '0')} · ${speedName(d.warp)}`],

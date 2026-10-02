@@ -28,7 +28,7 @@ const START = { Enterprise: '500,500', Defiant: '510,500', "K'Vatch": '505,505',
 function startComputer(folder, ...ships) {
   const opts = typeof ships[ships.length - 1] === 'object' ? ships.pop() : {};
   const proc = spawn(process.execPath, [path.join(__dirname, '..', 'tools', 'shipcore.js'),
-    '--relay', `ws://localhost:${process.env.PORT}`, '--data', path.join(DATA_DIR, folder), ...(opts.cold ? [] : ['--warm', '--position', opts.position || START[ships[0]] || '500,500']), ...ships], { stdio: ['ignore', 'pipe', 'pipe'] });
+    '--relay', `ws://localhost:${process.env.PORT}`, '--data', path.join(DATA_DIR, folder), ...(opts.cold ? [] : ['--warm', '--position', opts.position || START[ships[0]] || '500,500']), ...(opts.class ? ['--class', opts.class] : []), ...ships], { stdio: ['ignore', 'pipe', 'pipe'] });
   proc.stdout.on('data', (d) => process.stdout.write(String(d).replace(/^(?=.)/gm, `  [computer ${folder}] `)));
   proc.stderr.on('data', (d) => process.stdout.write(String(d).replace(/^(?=.)/gm, `  [computer ${folder} ERR] `)));
   computers.add(proc);
@@ -1541,6 +1541,29 @@ const audioBytes = (page) => page.evaluate(async () => {
       sbComms.close();
       sbEng.close(); sbHelm.close(); sbTac.close();
       step('Starbase 47 ran its own power grid (no warp drive; drydock connections and industrial replicators, set by a light bar), moved at impulse under its Helm (warp refused) and back, raised shields, and opened a data link with Starbase 74; it has four phaser arrays, 24 locks and an EPS of 3000');
+    }
+
+    // Ship classes: a runabout (a cockpit's stations, a small EPS, one docking port, warp 5 at
+    // most) and a shuttle (no warp core or transporter; Helm and Ops only).
+    {
+      const rc = startComputer('rb', 'Rubicon', { class: 'runabout', position: '300,300' });
+      const sc = startComputer('sh', 'Goddard', { class: 'shuttle', position: '310,300' });
+      const listed = (name, cls) => [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.some((x) => x.name === name && x.class === cls);
+      await waitFor(() => listed('Rubicon', 'Runabout') && listed('Goddard', 'Shuttle'), 15000);
+      const rb = await crewWs('chakotay', 'Rubicon', 'Engineering');
+      await waitFor(() => rb.nav()?.own?.class === 'Runabout' && rb.nav().own.grid);
+      assert.equal(rb.nav().own.grid.totals.EPS.fullMax, 250, "a runabout's EPS");
+      assert.deepEqual(Object.keys(rb.nav().own.grid.ports), ['port'], 'a runabout has one docking port');
+      assert.ok(rb.nav().speed.warp <= 5, `a runabout's top warp is 5 (${rb.nav().speed.warp})`);
+      await assert.rejects(crewWs('janeway', 'Rubicon', 'Captain'), /no Captain station/);
+      const sh = await crewWs('paris', 'Goddard', 'Helm');
+      await waitFor(() => sh.nav()?.own?.class === 'Shuttle' && sh.nav().own.grid);
+      assert.equal(sh.nav().own.grid.core, 'ejected', 'a shuttle has no warp core');
+      assert.equal(sh.nav().speed.warp, 0, 'a shuttle has no warp');
+      await assert.rejects(crewWs('kim', 'Goddard', 'Transporter'), /no Transporter station/);
+      rb.close(); sh.close();
+      await stopComputer(rc); await stopComputer(sc);
+      step('ship classes: the Rubicon (Runabout: an EPS of 250, one docking port, warp 5 at most, no Captain station) and the Goddard (Shuttle: no warp core or warp, no transporter station)');
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;

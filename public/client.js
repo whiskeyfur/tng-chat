@@ -1841,6 +1841,7 @@ async function onMessage(msg) {
     case 'ships':
       ships = msg.ships;
       renderShips(msg.ships);
+      if (!me) fillStations(); // (the stations follow the ship picked)
       renderShipState();
       tryRejoin();
       break;
@@ -1878,12 +1879,16 @@ function fillStations() {
   const placeholder = new Option('Station', '');
   placeholder.disabled = true;
   const all = ['Operations', ...stations];
-  sel.replaceChildren(placeholder, ...all.map((n) => new Option(n, n)));
-  sel.value = all.includes(keep) ? keep : '';
+  // A ship's class sets its stations (a runabout's cockpit, a shuttle's Helm): the others are greyed.
+  const pick = (typeof ships !== 'undefined' ? ships : []).find((x) => x.name.toLowerCase() === ($('ship')?.value || '').toLowerCase());
+  const aboard = (n) => n === 'Operations' || !pick?.stations || pick.stations.includes(n);
+  sel.replaceChildren(placeholder, ...all.map((n) => Object.assign(new Option(aboard(n) ? n : `${n} (not aboard a ${pick.class})`, n), { disabled: !aboard(n) })));
+  sel.value = all.includes(keep) && aboard(keep) ? keep : '';
   updateSignInMode();
   fillReassign();
 }
 fillStations();
+$('ship')?.addEventListener('change', () => fillStations());
 
 $('register-form').onsubmit = (e) => {
   e.preventDefault();
