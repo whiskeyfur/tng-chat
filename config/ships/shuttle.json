@@ -8,15 +8,15 @@
   "shields": 0.2,
   "arrays": 1,
   "warpCore": false,
-  "refit": false,
   "transporter": false,
+  "ports": 1,
+  "bay": 0,
+  "refit": false,
   "spore": false,
+  "torpedoes": 10,
   "stations": [
     "Helm"
   ],
-  "ports": 1,
-  "bay": 0,
-  "torpedoes": 10,
   "ties": {
     "system:replicators": [],
     "system:recreation": [],
@@ -121,5 +121,8 @@
         ]
       }
     ]
+  },
+  "solar": {
+    "output": 25
   }
 }

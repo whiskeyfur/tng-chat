@@ -223,6 +223,14 @@
       el('h3', { className: 'ops-subhead', textContent: 'Limits' }),
       num('Low buses (each)', 'bus'), num('EPS', 'eps', 10), num('Warp core ×', 'core', 0.1), num('Top warp', 'maxWarp'), num('Shields ×', 'shields', 0.1), num('Phaser arrays', 'arrays'), num('Torpedoes', 'torpedoes'),
       num('Docking ports', 'ports', 1, { nullable: true }), num('Shuttle bay', 'bay'),
+      // Solar arrays (their output; 0: none) and fusion reactors (none: a pure-solar design).
+      (() => {
+        const input = el('input', { className: 'ops-input design-num', type: 'number', step: 5, min: 0, value: d.solar?.output ?? 0, ariaLabel: 'solar output', id: 'design-solar' });
+        const set = (v) => { if (v > 0) d.solar = { ...(d.solar || {}), output: v }; else delete d.solar; renderDesigns(); };
+        input.onchange = () => set(Math.max(0, Number(input.value) || 0));
+        return field('solar', pick('Solar output', btn('−', 'design-solar-down', () => set(Math.max(0, (d.solar?.output || 0) - 5))), input, btn('+', 'design-solar-up', () => set((d.solar?.output || 0) + 5))));
+      })(),
+      field('fusion', pillBar('Fusion reactors', [tap('Aboard', 'on', d.fusion !== false, () => { delete d.fusion; renderDesigns(); }), tap('None (pure solar)', 'off', d.fusion === false, () => { d.fusion = false; renderDesigns(); })], { groupId: 'design-fusion' })),
       pick('Has', el('div', { className: 'tr-taps', id: 'design-flags' }, flag('Warp core', 'warpCore'), flag('Transporter', 'transporter'), flag('Spore drive', 'spore'), flag('Warp core replaceable', 'refit'))),
       el('h3', { className: 'ops-subhead', textContent: 'Stations' }), field('stations', stations),
       el('h3', { className: 'ops-subhead', textContent: 'Places' }), field('places', el('div', { id: 'design-places' }, ...places, btn('Add a place', 'design-add-place', () => { d.places = [...(d.places || []), { name: 'New place', deck: 1, stations: [], rows: [] }]; renderDesigns(); }))),

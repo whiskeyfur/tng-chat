@@ -1,8 +1,8 @@
 {
-  "about": "A subspace relay: an unmanned, self-powered relay platform, one a star system (placed by its starsystem file), linking every station in the system into one data network, and the systems to each other. No crew, stations, weapons, warp, impulse or transporter; never docked with, boarded or towed.",
+  "about": "A subspace relay: an unmanned, pure-solar relay platform, one a star system (placed by its starsystem file), linking every station in the system into one data network, and the systems to each other. Its transceiver (the subspace subsystem) needs power: without it, its links lose signal. A maintenance console (Bridge 1) to tend its grid; no weapons, warp, impulse or transporter; never docked with or towed.",
   "kind": "relay",
   "name": "Subspace Relay",
-  "bus": 0,
+  "bus": 100,
   "eps": 0,
   "core": 0,
   "maxWarp": 0,
@@ -12,5 +12,33 @@
   "transporter": false,
   "ports": 0,
   "bay": 0,
-  "stations": []
+  "stations": [],
+  "places": [
+    {
+      "name": "Maintenance Deck",
+      "deck": 1,
+      "stations": [
+        "Bridge 1"
+      ],
+      "rows": [
+        "sub:subspace",
+        "sub:radio",
+        "sub:rf",
+        "sub:computer1",
+        "system:lighting",
+        "system:lights",
+        "system:gravity",
+        "system:thermal",
+        "system:atmosphere",
+        "system:sensors",
+        "system:shields"
+      ]
+    }
+  ],
+  "solar": {
+    "output": 80
+  },
+  "fusion": false,
+  "antimatter": false,
+  "indestructible": true
 }

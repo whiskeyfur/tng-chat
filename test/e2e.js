@@ -138,7 +138,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     const early = await (await browser.newContext()).newPage();
     await early.goto(URL);
     await early.waitForSelector('#ship option[value="Starbase 47"]:has-text("automated")', { state: 'attached' });
-    assert.deepEqual(await early.$$eval('#ship option:not([disabled])', (os) => os.map((o) => o.value)), ['Deep Space 4', 'Starbase 12', 'Starbase 47', 'Starbase 74', 'Utopia Planitia']);
+    assert.deepEqual(await early.$$eval('#ship option:not([disabled])', (os) => os.map((o) => o.value)), ['Deep Space 4', 'Sol Subspace Relay', 'Starbase 12', 'Starbase 47', 'Starbase 74', 'Utopia Planitia']);
     // The station picker comes from the relay and includes every station.
     await early.waitForSelector('#station option[value="Transporter"]', { state: 'attached' });
     assert.equal(await early.locator('#station option:not([disabled])').count(), 20); // 19 (the Shuttle Bay, the Brig, the Spore Lab and the five bridge consoles too) + Operations

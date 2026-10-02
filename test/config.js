@@ -133,6 +133,53 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
       fs.rmSync(ED, { recursive: true, force: true }); fs.rmSync(SHIPS, { recursive: true, force: true });
       step('a design edited: the shuttle kept its class across restarts (saved with it), came up warm with its design\'s ties, then took the new bus limit (90) and its lateral sensors\' new place (Sensor Pod, tied on Bus C) with its own ties kept');
     }
+    // The subspace relay: its own design (config/ships, kind relay), a grid of its own (pure solar,
+    // the output its design gives), a maintenance console (Bridge 1) to tend it; its links lose
+    // signal while its transceiver (the subspace subsystem) has no power.
+    {
+      const RD = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-relaydesign-')), RS = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-relaydata-'));
+      fs.cpSync(CONFIG.DIR, RD, { recursive: true });
+      const relayFile = Object.keys(classes).length && fs.readdirSync(path.join(RD, 'ships')).find((f) => JSON.parse(fs.readFileSync(path.join(RD, 'ships', f), 'utf8')).kind === 'relay');
+      const rd = JSON.parse(fs.readFileSync(path.join(RD, 'ships', relayFile), 'utf8'));
+      rd.solar = { output: 70 };
+      fs.writeFileSync(path.join(RD, 'ships', relayFile), JSON.stringify(rd, null, 2));
+      const P = PORT + 10, env = { PORT: P, CONFIG_DIR: RD, RELAY_DATA: RS, STARBASES_FILE: path.join(RS, 'starbases.json') };
+      const rp = run(['server.js'], env);
+      await wait(1200);
+      const sock = async (hello) => { const ws = new WebSocket(`ws://localhost:${P}`), m = []; ws.on('message', (x) => m.push(JSON.parse(x))); await new Promise((r) => ws.on('open', r)); if (hello) ws.send(JSON.stringify(hello)); return { ws, m }; };
+      const tech = await sock();
+      const listed = await until(() => [...tech.m].reverse().find((x) => x.type === 'ships')?.ships.find((s) => s.relay));
+      assert.deepEqual([listed.name, listed.classId, listed.stations], ['Sol Subspace Relay', relayFile.slice(0, -5), ['Bridge 1']]);
+      tech.ws.send(JSON.stringify({ type: 'register', name: 'tech', ship: 'Sol Subspace Relay', station: 'Bridge 1' }));
+      await until(() => tech.m.some((x) => x.type === 'registered'));
+      tech.ws.send(JSON.stringify({ type: 'console-mode', mode: 'Engineering' }));
+      const grid = () => [...tech.m].reverse().find((x) => x.type === 'nav' && x.own?.grid)?.own.grid;
+      await wait(1500);
+      await until(() => grid());
+      const g = grid();
+      assert.equal(g.solarOut, 70, 'its solar arrays: the output its design gives');
+      assert.ok(g.cells.solar.B > 0 && g.core === 'ejected' && Object.values(g.drives).every((d) => d.state === 'off'), `pure solar: solar ${JSON.stringify(g.cells.solar)}, core ${g.core}`);
+      assert.ok(g.subOk.subspace !== false, 'its transceiver powered');
+      // (No antimatter aboard a relay: nothing to contain, so nothing to breach, and nothing to blow up near the ships around it.)
+      assert.ok(Object.values(g.fuel.am.tanks).every((t) => t.level === 0), `no antimatter: ${JSON.stringify(g.fuel.am.tanks.map((t) => [t.name, t.level]))}`);
+      await wait(3000);
+      assert.equal(grid().core, 'ejected');
+      assert.ok(!tech.m.some((x) => x.type === 'notice' && /containment|breach|destroyed/i.test(x.text)), 'no containment trouble on the relay');
+      tech.ws.send(JSON.stringify({ type: 'grid', reactor: { name: 'aux1', start: true } }));
+      await until(() => tech.m.some((x) => x.type === 'notice' && /no fusion reactors aboard/.test(x.text)));
+      // Its links: Starbase 47's to it lose signal while the transceiver is untied; tied again, they carry.
+      const ops = await sock({ type: 'operator', name: 'watch', ship: 'Starbase 47' });
+      const relayLinks = () => { const gr = [...ops.m].reverse().find((x) => x.type === 'roster')?.graph; return gr ? gr.links.filter((l) => l.includes('Sol Subspace Relay')).map((l) => (gr.lost || []).some((x) => x.includes('Sol Subspace Relay') && x.includes(l.find((n) => n !== 'Sol Subspace Relay'))) ) : null; };
+      await until(() => relayLinks()?.length > 0 && relayLinks().every((lost) => !lost));
+      tech.ws.send(JSON.stringify({ type: 'grid', ties: { 'sub:subspace': [] } }));
+      await until(() => relayLinks()?.length > 0 && relayLinks().every((lost) => lost));
+      tech.ws.send(JSON.stringify({ type: 'grid', ties: { 'sub:subspace': ['B'] } }));
+      await until(() => relayLinks().every((lost) => !lost));
+      tech.ws.close(); ops.ws.close();
+      await new Promise((r) => { rp.once('exit', r); rp.kill(); });
+      fs.rmSync(RD, { recursive: true, force: true }); fs.rmSync(RS, { recursive: true, force: true });
+      step("the subspace relay: its own design (solar 70, no fusion reactors, no warp core), signed into at its maintenance console (Bridge 1) for its grid; its links lost signal with its transceiver untied, and carried again tied");
+    }
     ok = true;
   } catch (err) {
     console.error('FAIL:', err.message);

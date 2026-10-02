@@ -37,6 +37,10 @@ const SHIP_FIELDS = {
   ties: [(v) => isObj(v) && Object.values(v).every((x) => Array.isArray(x) && x.every(isStr)), 'an object of tie lists', false],
   places: [(v) => Array.isArray(v) && v.every((p) => isStr(p?.name) && isNum(p?.deck) && Array.isArray(p?.stations) && p.stations.every(isStr) && (p.via === undefined || isStr(p.via))), 'a list of { name, deck, stations, rows?, via?, default? }', false],
   seats: [(v) => isObj(v) && Object.values(v).every((s) => Array.isArray(s) && s.length === 2 && s.every(isNum)), 'an object of [x, y] seats', false],
+  solar: [(v) => isObj(v) && isNum(v.output) && v.output >= 0, 'its solar arrays: { output } (power, 0 for none)', false],
+  antimatter: [isBool, 'true or false (antimatter carried: false for none, no tanks to fill or contain)', false],
+  indestructible: [isBool, 'true or false (never destroyed: its safety systems eject the core instead)', false],
+  fusion: [isBool, 'true or false (impulse and auxiliary fusion reactors aboard)', false],
   org: [(v) => isObj(v) && Array.isArray(v.command) && v.command.every(isPosition) && (v.departments === undefined || (Array.isArray(v.departments) && v.departments.every((d) => isStr(d?.name) && Array.isArray(d.positions) && d.positions.every(isPosition)))),
     'its org chart: { command: [positions], departments: [{ name, positions }] }, a position { id, title, rank, station, n? }', false],
 };
@@ -72,12 +76,15 @@ function loadFolder(sub, fields, log) {
   return out;
 }
 
-// The ship classes (starbase.json apart: the starbases' own design).
+// The designs by kind: the ship classes, the starbases' (starbase.json), the subspace relays'
+// (the first file of kind "relay"); probes and planets will be kinds too.
 function loadShips(log = console.warn) {
   const all = loadFolder('ships', SHIP_FIELDS, log);
   const classes = {}, starbase = all.starbase || null;
+  const relayId = Object.keys(all).find((id) => all[id].kind === 'relay') || null;
   for (const [id, c] of Object.entries(all)) if (id !== 'starbase' && c.kind !== 'starbase' && c.kind !== 'relay') classes[id] = { kind: 'ship', refit: true, spore: false, torpedoes: 10, stations: null, ties: {}, places: [], seats: {}, ...c };
-  return { classes, starbase: starbase && { refit: false, spore: false, torpedoes: 10, stations: null, ties: {}, places: [], seats: {}, ...starbase } };
+  return { classes, starbase: starbase && { refit: false, spore: false, torpedoes: 10, stations: null, ties: {}, places: [], seats: {}, ...starbase },
+    relay: relayId && { id: relayId, refit: false, spore: false, torpedoes: 0, stations: [], ties: {}, places: [], seats: {}, ...all[relayId] } };
 }
 
 // The star charts.

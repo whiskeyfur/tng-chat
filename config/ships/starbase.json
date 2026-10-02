@@ -528,5 +528,9 @@
         ]
       }
     ]
-  }
+  },
+  "solar": {
+    "output": 25
+  },
+  "indestructible": true
 }

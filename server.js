@@ -61,7 +61,10 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, ...
 // The designs (config/ships/<class>.json; see tools/config.js).
 const CONFIG = require('./tools/config');
-const { classes: CLASSES, starbase: BASE_DESIGN } = CONFIG.loadShips((line) => console.warn(line));
+const { classes: CLASSES, starbase: BASE_DESIGN, relay: RELAY_FILE } = CONFIG.loadShips((line) => console.warn(line));
+// The subspace relays' design (config/ships/<id>.json, kind "relay"): a pure-solar platform.
+const RELAY_DESIGN = RELAY_FILE || { id: 'subspace-relay', kind: 'relay', name: 'Subspace Relay', bus: 100, eps: 0, core: 0, maxWarp: 0, shields: 0, arrays: 0, warpCore: false, transporter: false, ports: 0, bay: 0, refit: false, spore: false, torpedoes: 0, stations: [], ties: {}, places: [], seats: {}, solar: { output: 80 }, fusion: false };
+const ALL_DESIGNS = [...Object.values(CLASSES), BASE_DESIGN, RELAY_DESIGN];
 if (!Object.keys(CLASSES).length || !BASE_DESIGN) { console.error(`config: ${!BASE_DESIGN ? 'no starbase design (config/ships/starbase.json)' : 'no ship classes'} in ${CONFIG.DIR}: the relay can't start`); process.exit(1); }
 const DEFAULT_CLASS = CLASSES.galaxy ? 'galaxy' : Object.keys(CLASSES)[0];
 const OPS_STATION = 'Operations';   // operators only
@@ -401,9 +404,9 @@ function networkGraph() {
 // targets. People already aboard when its computer goes offline stay on, so
 // the ship is still listed (computer: false) until they leave.
 function shipList() {
-  const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys(), ...BASE_KEYS]);
+  const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys(), ...BASE_KEYS, ...[...RELAY_KEYS].filter((k) => relayOf(k)?.system === SYSTEM_ID)]);
   return [...live].map((k) => ({
-    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, system: SYSTEM_ID, ...(isBase(k) ? { starbase: true, classId: 'starbase' } : { class: classOf(k).name, classId: classId(k), stations: stationsOf(k) }), org: orgOf(k), filled: filledOf(k),
+    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, system: SYSTEM_ID, ...(isBase(k) ? { starbase: true, classId: 'starbase' } : { ...(isRelay(k) ? { relay: true } : {}), class: classOf(k).name, classId: classId(k), stations: stationsOf(k) }), org: orgOf(k), filled: filledOf(k),
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
 // Starbases run themselves (no ship's computer needed), so they're always there.
@@ -1002,7 +1005,7 @@ const LIFE_SUPPORT = ['atmosphere', 'thermal', 'gravity', 'lights', 'lighting'];
 // power. Emergency lighting lights any place whose lights are on but unpowered.
 // Places with life support: every station, and the designs' places without one
 // (a nacelle, the computer core...); a vessel has its own (locationsOf), in deck order.
-const LOCATIONS = [...STATIONS, OPS_STATION, ...new Set([...Object.values(CLASSES), BASE_DESIGN].flatMap((c) => (c.places || []).filter((p) => !p.stations.length).map((p) => p.name)))];
+const LOCATIONS = [...STATIONS, OPS_STATION, ...new Set(ALL_DESIGNS.flatMap((c) => (c.places || []).filter((p) => !p.stations.length).map((p) => p.name)))];
 const locationsOf = (k) => {
   const places = [...placesOf(k)].sort((a, b) => a.deck - b.deck), has = (st) => hasStation(k, st) || st === OPS_STATION;
   const listed = places.flatMap((p) => (p.stations.length ? p.stations.filter(has) : [p.name]));
@@ -1788,8 +1791,8 @@ const BUS_MAX = { A: 300, B: 300, C: 300, EPS: 1000 };
 // config/ships/starbase.json: see tools/config.js. Ships of a class not there
 // are the default class.)
 const shipClasses = new Map(); // ship key -> class id
-const classOf = (k) => CLASSES[shipClasses.get(k)] || CLASSES[DEFAULT_CLASS];
-const classId = (k) => (CLASSES[shipClasses.get(k)] ? shipClasses.get(k) : DEFAULT_CLASS);
+const classOf = (k) => (isRelay(k) ? RELAY_DESIGN : CLASSES[shipClasses.get(k)] || CLASSES[DEFAULT_CLASS]);
+const classId = (k) => (isRelay(k) ? RELAY_DESIGN.id : CLASSES[shipClasses.get(k)] ? shipClasses.get(k) : DEFAULT_CLASS);
 // A vessel's design: its class's, or the starbases' own.
 const designOf = (k) => (isBase(k) ? BASE_DESIGN : classOf(k));
 // The vessel's org chart (its design's "org"): the command, then each department,
@@ -1819,7 +1822,9 @@ const placesOf = (k) => designOf(k).places || [];
 const roomOfStation = (k, st) => placesOf(k).find((p) => p.stations.includes(st))?.name || st;
 // The stations aboard (ops always: a runabout's cockpit and a shuttle have Ops too).
 // (The Spore Lab: only aboard a ship with a spore drive.)
-const hasStation = (k, st) => st === 'Operations' || (st === 'Spore Lab' ? !isBase(k) && !!classOf(k).spore : isBase(k) || !classOf(k).stations || classOf(k).stations.includes(st));
+// (A design's stations: its list (none: all of them), and any its places name.)
+const designStations = (k) => { const d = designOf(k); return d.stations == null ? null : [...d.stations, ...(d.places || []).flatMap((p) => p.stations)]; };
+const hasStation = (k, st) => st === 'Operations' || (st === 'Spore Lab' ? !isBase(k) && !!classOf(k).spore : isBase(k) || !designStations(k) || designStations(k).includes(st));
 const stationsOf = (k) => STATIONS.filter((st) => hasStation(k, st));
 // A starbase's EPS carries three times a ship's; a ship's follow its class.
 const busMaxOf = (k) => { const c = designOf(k); return { A: c.bus, B: c.bus, C: c.bus, EPS: c.eps }; };
@@ -2115,7 +2120,7 @@ const tieNodes = (key) => SOURCE_NODES[key] || (key.startsWith('place:') ? NODES
 // (life support for its systems, the warp coils for the plasma injectors). Untie
 // one and everything past it is cut off from that bus (its demand doesn't count).
 // Conduits draw nothing. Antimatter containment is never cut off this way.
-const PLACE_NAMES = [...new Set([...Object.values(CLASSES), BASE_DESIGN].flatMap((c) => (c.places || []).map((pl) => pl.name)))];
+const PLACE_NAMES = [...new Set(ALL_DESIGNS.flatMap((c) => (c.places || []).map((pl) => pl.name)))];
 const CONDUITS = [...PLACE_NAMES.map((n) => `place:${n}`), 'system:lifeSupport'];
 const PARENT_SYSTEM = { injectors: 'system:engines', ...Object.fromEntries(LIFE_SUPPORT.map((x) => [x, 'system:lifeSupport'])) };
 const conduitMemo = new Map();
@@ -2181,6 +2186,8 @@ const STARBASES = STAR_SYSTEM.starbases.map((b) => ({ name: b.name, x: b.x, y: b
 const RELAYS = Object.entries(SYSTEMS_CONFIG).filter(([, sys]) => sys.relay).map(([id, sys]) => ({ name: sys.relay.name, x: sys.relay.x, y: sys.relay.y, system: id }));
 const relayOff = new Set();
 const relayOf = (k) => RELAYS.find((r) => shipKey(r.name) === k);
+// A relay's transceiver has power (its grid's subspace subsystem).
+const relayLive = (r) => { try { return flow(r).subOk.subspace !== false; } catch { return true; } };
 // A relay links its own system's stations, and the other systems' relays (while it's on).
 function relayReach(a, b) {
   const r = isRelay(a) ? a : b, o = r === a ? b : a;
@@ -2196,6 +2203,12 @@ function relayTick() {
     const want = relayOff.has(r) ? [] : [...BASE_KEYS, ...RELAY_KEYS].filter((o) => o !== r && relayReach(r, o));
     for (const o of linkedTo(r)) if (!want.includes(o)) { links.delete(linkKey(r, o)); changed = true; }
     for (const o of want) if (!links.has(linkKey(r, o))) { addLink(linkKey(r, o)); changed = true; }
+    // (Its transceiver, the subspace subsystem, without power: its links stay, signal lost.)
+    const dark = !relayLive(r);
+    for (const o of linkedTo(r)) {
+      const l = linkKey(r, o), lost = dark || (isRelay(o) && !relayLive(o));
+      if (lost !== lostLinks.has(l)) { if (lost) lostLinks.add(l); else lostLinks.delete(l); changed = true; }
+    }
   }
   if (changed) { refreshNetworks([...RELAY_KEYS, ...BASE_KEYS]); broadcastAllOps(); schedulePresence(); }
 }
@@ -2226,7 +2239,7 @@ const isRelay = (k) => RELAY_KEYS.has(k);
 const isBase = (k) => BASE_KEYS.has(k);
 const present = (k) => cores.has(k) || BASE_KEYS.has(k) || RELAY_KEYS.has(k);
 for (const b of STARBASES) { const k = registerShip(b.name); BASE_KEYS.add(k); navState.set(k, { x: b.x, y: b.y, heading: 0, warp: 0, dest: null }); }
-for (const r of RELAYS) RELAY_KEYS.add(registerShip(r.name));
+for (const r of RELAYS) { const k = registerShip(r.name); RELAY_KEYS.add(k); navState.set(k, { x: r.x, y: r.y, heading: 0, warp: 0, dest: null }); }
 
 function autoAcceptLink(id) {
   const req = linkRequests.get(id);
@@ -2405,9 +2418,11 @@ function freshEng(saved, { cold = false, k = null } = {}) {
 }
 const engOf = (k) => {
   if (!eng.has(k)) {
-    eng.set(k, { ...freshEng(isBase(k) ? baseSettings[shipName(k)]?.eng : undefined, { k }), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
+    const kept = isBase(k) || isRelay(k) ? baseSettings[shipName(k)]?.eng : undefined; // (the relay keeps the starbases' and the relays')
+    eng.set(k, { ...freshEng(kept, { k }), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
     for (const c of CONDUITS) eng.get(k).ties[c] ||= [];
-    if (isBase(k) && !eng.get(k).conduits) deriveConduits(k);
+    if (isRelay(k)) designReactors(k, !kept); // (every load: no antimatter, no reactors)
+    if ((isBase(k) || isRelay(k)) && !eng.get(k).conduits) deriveConduits(k);
     reconcileConduits(k);
   }
   return eng.get(k);
@@ -2434,8 +2449,29 @@ for (const b of STARBASES) {
 }
 function saveBaseSettings() {
   // Each starbase: its settings, its grid, its condition, where it is and its limiters.
+  // Each relay: its grid (and whether it's off).
+  for (const k of RELAY_KEYS) if (eng.has(k)) baseSettings[shipName(k)] = { ...baseSettings[shipName(k)], eng: savedEng(k), combat: savedCombat(k) };
   for (const k of BASE_KEYS) { const n = navState.get(k); baseSettings[shipName(k)] = { ...(STARBASES.find((b) => shipKey(b.name) === k)?.created ? { created: true } : {}), remoteBlock: !!engOf(k).remoteBlock, eng: savedEng(k), combat: savedCombat(k), nav: n ? { x: n.x, y: n.y, heading: n.heading } : undefined, power: n?.power }; }
   try { fs.mkdirSync(path.dirname(BASE_SETTINGS_FILE), { recursive: true }); fs.writeFileSync(BASE_SETTINGS_FILE, JSON.stringify(baseSettings, null, 2)); } catch (err) { console.warn(`could not save starbase settings: ${err.message}`); }
+}
+// A design without a warp core, or without fusion reactors (a pure-solar one): none aboard.
+// (fresh: a new grid, its reactor ties cleared too.)
+function designReactors(k, fresh = false) {
+  const d = designOf(k), e = eng.get(k);
+  if (!e) return;
+  if (d.warpCore === false) Object.assign(e, { core: 'ejected', antimatter: 0 });
+  if (d.fusion === false) {
+    for (const x of DRIVES) Object.assign(e.drives[x], { state: 'off', pressure: 0, epsTap: false });
+    for (const x of AUX) Object.assign(e.aux[x], { state: 'off', pressure: 0, epsTap: false });
+    if (fresh) for (const x of ['impulsePort', 'impulseStarboard', 'aux1', 'aux2', 'core']) if (e.ties[x]) e.ties[x] = [];
+  }
+  // (A design that carries no antimatter (its file's "antimatter": false): nothing to contain, nothing to breach.)
+  if (d.antimatter === false) { for (const n of Object.keys(e.tanks.am)) e.tanks.am[n] = 0; e.antimatter = 0; e.breach = 0; }
+  // (A new relay: only what its places hold is tied, and its own consoles.)
+  if (fresh && d.kind === 'relay') {
+    const rows = new Set((d.places || []).flatMap((p) => p.rows || [])), here = new Set(designStations(k) || []);
+    for (const x of Object.keys(e.ties)) if ((/^(system|sub):/.test(x) && !CONDUITS.includes(x) && !rows.has(x)) || (x.startsWith('console:') && !here.has(x.slice(8)))) e.ties[x] = [];
+  }
 }
 const savedEng = (k) => {
   const e = engOf(k);
@@ -2521,7 +2557,7 @@ function flow(k) {
   const thrustTop = running.reduce((n, d) => n + driveTop(e.drives[d]), 0);
   const share = thrustTop > 0 ? Math.min(1, impulseNow / thrustTop) : 0;
   const driveGen = (d) => (running.includes(d) && (e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length ? GRID.impulse * (1 - share) : 0);
-  const cap = { ship: conns.reduce((n, cn) => n + (cn.net < 0 ? Math.min(-cn.net, cn.theirFed) : 0), 0), shipEps: conns.reduce((n, cn) => n + (cn.netEps < 0 ? Math.min(-cn.netEps, cn.theirFedEps) : 0), 0), solar: GRID.solar,
+  const cap = { ship: conns.reduce((n, cn) => n + (cn.net < 0 ? Math.min(-cn.net, cn.theirFed) : 0), 0), shipEps: conns.reduce((n, cn) => n + (cn.netEps < 0 ? Math.min(-cn.netEps, cn.theirFedEps) : 0), 0), solar: designOf(k).solar?.output ?? 0,
     dock: e.docked && connOf(e, 'station').power.imp ? GRID.dock : 0, dockEps: e.docked && connOf(e, 'station').eps.imp ? GRID.dock : 0,
     ...Object.fromEntries(EMERG.names.map((n) => [n, Math.min(EMERG.out, e.emerg[n])])), impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), ...Object.fromEntries(AUX.map((a) => [a, e.aux[a].state === 'running' && e.deuterium > 0 ? FUSION.aux : 0])), core: (c.damage.conduits || 0) < SUB_FAIL_DAMAGE ? coreOutput(e) * (isBase(k) ? 1 : classOf(k).core) : 0, ...Object.fromEntries(Object.entries(STORES).map(([name, node]) => [name, Math.min(node === 'EPS' ? GRID.epsOut : GRID.batteryOut, e.stores[name])])) };
   // A source tied to several buses shares its output evenly between them.
@@ -2884,7 +2920,7 @@ function gridView(k) {
     // Ties that carry nothing: a conduit on their way untied from that bus (key -> the buses cut off).
     cutOff: Object.fromEntries(Object.keys(e.ties).map((x) => [x, (e.ties[x] || []).filter((X) => !effTies(k, e, x).includes(X))]).filter(([, v]) => v.length)),
     conduits: CONDUITS.filter((c) => c === 'system:lifeSupport' || placesOf(k).some((pl) => `place:${pl.name}` === c)), systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, brigField: !!e.brigField, brigSealed: brigSealed(k), stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
-    tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: busMaxOf(k),
+    tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: busMaxOf(k), solarOut: designOf(k).solar?.output ?? 0,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
   };
 }
@@ -2947,6 +2983,7 @@ function gridCommand(ws, msg) {
   // A fusion reactor (an impulse drive, or aux1/aux2): light its chamber or
   // shut it down; its EPS tap; a drive's accelerators (0-100) and gear.
   const rx = msg.impulse || msg.reactor;
+  if (rx && designOf(key).fusion === false) return note('there are no fusion reactors aboard (a pure-solar design)');
   const rName = rx && (msg.impulse ? rx.drive : rx.name);
   const r = rName && (DRIVES.includes(rName) ? e.drives[rName] : AUX.includes(rName) ? e.aux[rName] : null);
   if (r) {
@@ -3589,8 +3626,8 @@ const commsReach = (u) => !present(u.shipKey) || isBase(u.shipKey) || !consoleDa
 // A ship is destroyed: it takes ships close by with it (some), and comes back
 // docked at a starbase picked at random, good as new.
 function destroy(k, cause) {
-  // A starbase isn't lost: its safety systems eject the core and the antimatter first.
-  if (isBase(k)) {
+  // An indestructible design (a starbase's, a relay's: its file says) isn't lost: its safety systems eject the core and the antimatter first.
+  if (designOf(k).indestructible) {
     const e = engOf(k);
     Object.assign(e, { core: 'ejected', start: 0, breach: 0, antimatter: 0, contain: { field: 100, reserve: reserveCap() }, dirty: true });
     e.tanks.am.core = 0; e.tanks.deu.core = 0; e.wc.breachT = null; e.wc.actual = 0;
@@ -3682,7 +3719,7 @@ function freshCombat(saved, carried = TORPEDO.carried) {
   };
 }
 const torpedoesOf = (k) => designOf(k).torpedoes ?? TORPEDO.carried;
-const combatOf = (k) => { if (!combat.has(k)) combat.set(k, freshCombat(isBase(k) ? baseSettings[shipName(k)]?.combat : undefined, torpedoesOf(k))); return combat.get(k); };
+const combatOf = (k) => { if (!combat.has(k)) combat.set(k, freshCombat(isBase(k) || isRelay(k) ? baseSettings[shipName(k)]?.combat : undefined, torpedoesOf(k))); return combat.get(k); };
 const round1 = (v) => Math.round(v * 10) / 10;
 const savedCombat = (k) => {
   const c = combatOf(k);
@@ -3910,7 +3947,7 @@ setInterval(() => {
   dropPowerlessCalls();
   const now = Date.now();
   let changed = false;
-  for (const k of new Set([...cores.keys(), ...BASE_KEYS])) {
+  for (const k of new Set([...cores.keys(), ...BASE_KEYS, ...RELAY_KEYS])) {
     if (!navState.has(k)) continue;
     const c = combatOf(k), e = engOf(k);
     const state = () => JSON.stringify([c.hull, c.shield, c.damage, c.torpedoes, c.repair, c.arrays.map(Math.floor), c.locks, e.core, e.start, e.breach, Math.round(Object.values(e.stores).reduce((a, b) => a + b, 0) / 30), e.docked, e.shipDocks, Math.floor(e.antimatter), Math.floor(e.deuterium), e.transfer?.left, e.drives]);
@@ -5321,7 +5358,7 @@ function greet(ws) {
   send(ws, { type: 'hello', accounts: needLogin(), ...(ws.account ? { account: { username: ws.account.username, role: ws.account.role } } : {}), relay: RELAY_NAME, stations: STATIONS, opsKey: !!OPERATOR_KEY, version: require('./package.json').version,
     // The star chart, and each design's places and bridge seats (for listing consoles by where they are, and the room mic).
     system: { id: SYSTEM_ID, name: STAR_SYSTEM.name, size: STAR_SYSTEM.size, bodies: STAR_SYSTEM.bodies, waypoints: STAR_SYSTEM.waypoints },
-    designs: Object.fromEntries([...Object.entries(CLASSES), ['starbase', BASE_DESIGN]].map(([id, c]) => [id, { name: c.name, kind: id === 'starbase' ? 'starbase' : 'ship', places: c.places, seats: c.seats }])) });
+    designs: Object.fromEntries([...Object.entries(CLASSES), ['starbase', BASE_DESIGN], [RELAY_DESIGN.id, RELAY_DESIGN]].map(([id, c]) => [id, { name: c.name, kind: id === 'starbase' ? 'starbase' : c.kind === 'relay' ? 'relay' : 'ship', places: c.places, seats: c.seats }])) });
   send(ws, { type: 'ships', ships: shipList() });
 }
 

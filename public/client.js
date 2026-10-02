@@ -382,7 +382,7 @@ function renderShips(all) {
   const keep = sel.value || urlParams.get('ship') || savedReg?.ship || '';
   const placeholder = new Option(ships.length ? 'Ship' : "No ships: start a ship's computer", '');
   placeholder.disabled = true;
-  sel.replaceChildren(placeholder, ...ships.map((s) => new Option(s.starbase ? `${s.name} (starbase${s.ops ? '' : ', automated'})` : s.ops ? s.name : `${s.name} (ops offline)`, s.name)));
+  sel.replaceChildren(placeholder, ...ships.map((s) => new Option(s.starbase ? `${s.name} (starbase${s.ops ? '' : ', automated'})` : s.relay ? `${s.name} (subspace relay, automated)` : s.ops ? s.name : `${s.name} (ops offline)`, s.name)));
   const match = ships.find((s) => s.name.toLowerCase() === keep.toLowerCase());
   sel.value = match?.name || '';
   updateSignInMode();
