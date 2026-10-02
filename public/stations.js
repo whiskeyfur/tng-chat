@@ -309,6 +309,7 @@
       panel('st-command', 'Command', 'red', true, h('div', { 'data-command': '' })),
       // Real hull, shields, speed and damage (client.js fills it in).
       panel('st-status', 'Ship status', 'gold', true, h('div', { 'data-ship-status': '' })),
+      panel('st-msd', 'Master systems display', 'orange', false, h('div', { class: 'msd', 'data-msd': '' })),
       panel('st-tactical', 'Tactical plot', 'red', false, sweep(240, 'red', 4, 'Tactical plot')),
       panel('st-dept', 'Department readiness', 'blue', false, h('ul', { class: 'st-depts', 'data-depts': '' })),
       panel('st-roster', 'Senior staff on duty', 'lilac', true, h('ul', { class: 'st-roster', 'data-roster': '' })),
@@ -325,6 +326,7 @@
         live(readout('Shift', 'sky'), () => ['Alpha', 'Beta', 'Gamma'][Math.floor(new Date().getHours() / 8)]),
         live(readout('Shuttles available', 'orange'), () => 8),
         live(readout('Drills scheduled', 'peach'), () => 2)),
+      panel('st-msd', 'Master systems display', 'orange', false, h('div', { class: 'msd', 'data-msd': '' })),
       panel('st-log', 'Duty log', 'lilac', true, logView([
         ['Security drill scheduled, deck 8'], [`${ship}: personnel evaluations due`], ['Shore leave rotation approved'], ['Away team readiness confirmed']])),
     ] }),
@@ -366,6 +368,8 @@
     Engineering: (ship) => {
       const core = drift(0.92, 0.85, 0.98, 0.01);
       return { code: 'ENG 06', color: 'orange', panels: [
+        // The master systems display (msd.js, filled in by client.js): Engineering's main screen.
+        panel('st-msd', 'Master systems display', 'orange', true, h('div', { class: 'msd', 'data-msd': '' })),
         panel('st-ship', `Ship systems · ${ship}`, 'orange', true, shipSide(ship)),
         // The warp core's reaction: client.js fills in the controls.
         panel('st-core', 'Warp core', 'sky', true,

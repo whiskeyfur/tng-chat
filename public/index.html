@@ -201,6 +201,26 @@
     @keyframes xflow-left { from { background-position: 36px 0; } to { background-position: 0 0; } }
     @media (prefers-reduced-motion: reduce) { .xflow-bar::before { animation: none; } }
     .lcars-elbow--top[role="button"] { cursor: pointer; }
+    /* The master systems display. */
+    .msd { display: flex; flex-direction: column; gap: 12px; }
+    .msd-card { border: 2px solid var(--lcars-orange); border-radius: 12px; padding: 8px 12px; }
+    .msd-card h3 { margin: 0 0 6px; color: var(--lcars-orange); text-transform: uppercase; font-size: 16px; letter-spacing: 0.08em; }
+    .msd-card--budget { border-color: var(--lcars-lilac); } .msd-card--budget h3 { color: var(--lcars-lilac); }
+    .msd-card--status { border-color: var(--lcars-blue); } .msd-card--status h3 { color: var(--lcars-blue); }
+    .msd-canvas { width: 100%; height: 260px; display: block; cursor: pointer; }
+    .msd-overall { margin: 0 0 4px; font-size: 20px; text-transform: uppercase; }
+    .msd-overall[data-state="ok"] { color: #66cc66; } .msd-overall[data-state="warn"] { color: var(--lcars-gold); } .msd-overall[data-state="bad"] { color: var(--lcars-red); }
+    .msd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; }
+    @media (max-width: 760px) { .msd-grid { grid-template-columns: 1fr; } }
+    .msd-bar { display: grid; grid-template-columns: 9em 1fr 5em; align-items: center; gap: 8px; margin: 4px 0; text-transform: uppercase; font-size: 14px; }
+    .msd-bar__track { height: 12px; background: #222; border-radius: 6px; overflow: hidden; }
+    .msd-bar__fill { display: block; height: 100%; border-radius: 6px; }
+    .msd-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+    .msd-tile { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; background: #111; color: var(--lcars-text); border: 1px solid #333; border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px; text-transform: uppercase; cursor: pointer; text-align: left; }
+    .msd-pill { padding: 0 8px; border-radius: 9px; color: #000; background: #444; font-size: 12px; }
+    .msd-pill[data-state="ok"] { background: #66cc66; } .msd-pill[data-state="warn"] { background: var(--lcars-gold); } .msd-pill[data-state="bad"] { background: var(--lcars-red); } .msd-pill[data-state="busy"] { background: var(--lcars-sky); } .msd-pill[data-state="off"] { background: #444; color: #ccc; }
+    .msd-log { list-style: none; margin: 0; padding: 0; max-height: 160px; overflow-y: auto; font-size: 13px; }
+    .msd-log li[data-cls="bad"] { color: var(--lcars-red); } .msd-log li[data-cls="ok"] { color: #66cc66; } .msd-log li[data-cls="info"] { color: var(--lcars-sky); }
     button.lcars-back { border: 0; font: inherit; color: #000; cursor: pointer; display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 14px 6px 0; letter-spacing: 0.1em; }
     /* Dim: only the label, so the corner stays the colour of the bar it joins. */
     button.lcars-back:disabled { cursor: default; }
@@ -519,6 +539,7 @@
   <script src="stations.js"></script>
   <script src="nav.js"></script>
   <script src="ops.js"></script>
+  <script src="msd.js"></script>
   <script src="client.js"></script>
 </body>
 </html>

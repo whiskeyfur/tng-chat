@@ -1242,6 +1242,15 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await geordi.getAttribute('#auto-refuel-antimatter', 'aria-pressed'), 'false', 'one at a time');
     await geordi.click('#auto-refuel-deuterium');
     await geordi.waitForSelector('#auto-refuel-deuterium[aria-pressed="false"]');
+    // The master systems display: the ship profile, the power budget, a tile per system (tap one to open it).
+    await screen(geordi, 'st-msd');
+    await geordi.waitForSelector('.msd-tile[data-system="warp"] .msd-pill[data-state="ok"]:has-text("Running")');
+    assert.match(await geordi.textContent('#msd-budget'), /Generation.*EPS demand.*Warp core output.*Fusion.*Battery charge.*Readiness/s);
+    assert.match(await geordi.textContent('#msd-overall'), /^(All systems operational|Partial power)$/);
+    assert.ok(await geordi.$eval('.msd-canvas', (cv) => cv.width > 0), 'the profile is drawn');
+    await geordi.click('.msd-tile[data-system="warp"]');
+    await geordi.waitForSelector('[data-screen="st-core"]:not([hidden])');
+    step(`the master systems display: ${await geordi.textContent('#msd-overall')}, the warp core tile Running, and tapping it opened the warp core panel`);
     // The Warp core panel: the reaction's state, readouts and controls.
     await screen(geordi, 'st-core');
     await geordi.waitForSelector('#wc-state:has-text("Running")');
@@ -1270,10 +1279,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Back (the bottom-left corner): to the power grid, where geordi was before Damage control (and before the refresh).
     await geordi.click('#back-button');
     await geordi.waitForSelector('[data-screen="st-grid"]:not([hidden])');
-    // Home (the top-left corner): the station's main screen.
+    // Home (the top-left corner): the station's main screen, the master systems display.
     await geordi.click('.lcars-elbow--top');
-    await geordi.waitForSelector('[data-screen="st-ship"]:not([hidden])');
-    step('Back returned to the power grid; Home (top-left) went to the ship systems screen');
+    await geordi.waitForSelector('[data-screen="st-msd"]:not([hidden])');
+    step('Back returned to the power grid; Home (top-left) went to the master systems display');
     // Shift-click the name in the header: back to sign-in, to start somewhere new (nothing signs back in).
     await geordi.click('#station-sub', { modifiers: ['Shift'] });
     await geordi.waitForSelector('[data-screen="register"]:not([hidden])');

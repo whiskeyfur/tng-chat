@@ -259,6 +259,10 @@ function showStation() {
     return b;
   }));
   stationView.setCrew(comms.users);
+  // The master systems display, where this station has one.
+  const msdRoot = document.querySelector('[data-msd]');
+  msd = msdRoot ? createMSD(msdRoot, { open: openSystem, starbase: !!ships.find((x) => x.name.toLowerCase() === me.ship.toLowerCase())?.starbase }) : null;
+  renderMSD();
   // Helm and Science fly and watch the ship on the sector map.
   const navRoot = document.querySelector('[data-helm], [data-sensors]');
   navPanel = navRoot ? createNavPanel(navRoot, { mode: navRoot.hasAttribute('data-helm') ? 'helm' : 'science', send }) : null;
@@ -512,6 +516,24 @@ function placeFlows(row) {
   }
 }
 window.addEventListener('resize', () => { for (const row of document.querySelectorAll('#ties-crosslink')) placeFlows(row); });
+// The master systems display: what it shows, and where its labels and tiles lead.
+let msd = null;
+const engEvents = [];
+function renderMSD() {
+  if (!msd || !lastNav?.own?.grid) return;
+  msd.update({ ...lastNav.own, speed: lastNav.speed, shieldsUp: !!ownShip()?.shields }, engEvents);
+}
+const MSD_SCREENS = {
+  warp: ['st-core', 'st-grid'], fuel: ['st-grid'], eps: ['st-grid'], comp: ['st-grid'], fusion: ['st-grid'], deut: ['st-grid'], batt: ['st-grid'], ext: ['st-grid'],
+  env: ['st-power', 'st-grid'], atmo: ['st-power', 'st-grid'], thermal: ['st-power', 'st-grid'], gravity: ['st-power', 'st-grid'], lighting: ['st-power', 'st-grid'],
+  sif: ['st-power', 'st-grid'], idf: ['st-power', 'st-grid'], defl: ['st-nav', 'st-power', 'st-grid'], sens: ['st-sensors', 'st-power', 'st-grid'], lrs: ['st-sensors', 'st-power', 'st-grid'],
+  trans: ['st-transporter', 'st-grid'], comm: ['st-links', 'st-traffic', 'st-grid'], prop: ['st-nav', 'st-core', 'st-power'], impulse: ['st-nav', 'st-grid'],
+  shld: ['st-shieldctl', 'st-power'], tractor: ['st-weapons', 'st-grid'],
+};
+function openSystem(k) {
+  const id = (MSD_SCREENS[k] || []).find((x) => document.querySelector(`[data-screen="${x}"]`)) || (document.querySelector('[data-screen="st-status"]') ? 'st-status' : null);
+  if (id) showScreen(id);
+}
 // Damage control's core eject: armed by the first press, fired by a second within 5 s.
 let ejectArmedAt = 0;
 const ejectArmed = () => Date.now() - ejectArmedAt < 5000;
@@ -1413,6 +1435,12 @@ async function onMessage(msg) {
   if (ops?.handle(msg)) return;
   if (await bc.handle(msg)) return;
   if (msg.type === 'notice' && /^(Helm|Sensors|Science|Course plotted|No ship's computer is flying)/.test(msg.text)) navPanel?.status(msg.text);
+  // Engineering's event log (on the master systems display), coloured by what happened.
+  if (msg.type === 'notice' && /^Engineering/.test(msg.text)) {
+    engEvents.push({ at: Date.now(), text: msg.text.replace(/^Engineering(\s*\([^)]*\))?:\s*/, ''), cls: /fail|crash|breach|collapse|shut down|flameout|lost|tripped|damaged|no power/i.test(msg.text) ? 'bad' : /online|running|passed|energized|restored|averted|pressurized/i.test(msg.text) ? 'ok' : 'info' });
+    engEvents.splice(0, Math.max(0, engEvents.length - 100));
+    renderMSD();
+  }
   if (msg.type === 'notice' && /^(Engineering|Tactical)/.test(msg.text)) {
     const st = document.getElementById(msg.text.startsWith('Tactical') ? 'weapons-status' : /^Engineering: (warp core|EPS|batteries|solar|dock|antimatter|not enough)/.test(msg.text) ? 'grid-status' : 'damage-status');
     if (st) st.textContent = msg.text;
@@ -1490,6 +1518,7 @@ async function onMessage(msg) {
       break;
     case 'nav':
       lastNav = msg;
+      renderMSD();
       comms.setTextBlocked(msg.own?.grid?.computers && !msg.own.grid.computers.some((x) => x.state === 'online') ? 'Computer core offline: no text messages' : '');
       navPanel?.update(msg);
       stationView?.setNav(msg.own);
