@@ -1097,6 +1097,14 @@ const audioBytes = (page) => page.evaluate(async () => {
     await bob.waitForSelector('.bcast--order:has-text("Medical: report when ready")', { state: 'attached' });
     await bob.$eval('.bcast--order', (p) => [...p.querySelectorAll('button')].find((b) => b.textContent === 'Ready').click());
     await picard.waitForSelector('#st-dept li[data-dept="Medical"][data-ready="ready"]', { state: 'attached' });
+    // Laid out one row per department (label, state, Check): nothing overlaps or runs off the side, even narrow.
+    const vp = picard.viewportSize();
+    await picard.setViewportSize({ width: 480, height: 800 });
+    const rows = await picard.$$eval('#st-dept li[data-dept]', (lis) => lis.map((li) => [...li.children].map((c) => { const r = c.getBoundingClientRect(); return [r.left, r.right, c.scrollWidth <= c.clientWidth + 1 || c.classList.contains('st-dept-count')]; })));
+    for (const r of rows) for (let i = 1; i < r.length; i++) assert.ok(r[i][0] >= r[i - 1][1] - 1, `department readiness cells overlap: ${JSON.stringify(r)}`);
+    assert.ok(rows.every((r) => r.every(([, right]) => right <= 480)), 'department readiness runs off the side');
+    assert.ok(await picard.$eval('#st-dept li[data-dept] .st-dept-check', (b) => b.scrollWidth <= b.clientWidth + 1), 'the Check tap is clipped');
+    await picard.setViewportSize(vp);
     await carol.$eval('.bcast--order', (p) => [...p.querySelectorAll('button')].find((b) => b.textContent === 'Ready')?.click());
     step('readiness call-outs: the Captain checked Tactical (carol tapped Ready: green), then all departments (Medical amber until bob checked in; an empty department: no crew)');
 
