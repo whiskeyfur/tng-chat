@@ -127,8 +127,25 @@
     root.replaceChildren(el('div', { className: 'nav-panel' }, wrap, side));
 
     const destSel = el('select', { className: 'ops-select', id: `${mode}-dest`, ariaLabel: 'destination' });
-    const speedSel = el('select', { className: 'ops-select', id: 'helm-speed', ariaLabel: 'speed' }, ...SPEEDS.map(([v, t]) => new Option(t, v)));
+    // The speed picked (a select kept off-screen holds it; Helm taps the pill bar).
+    const speedSel = el('select', { ariaLabel: 'speed' }, ...SPEEDS.map(([v, t]) => new Option(t, v)));
     speedSel.value = '5';
+    const speedTaps = SPEEDS.filter(([v]) => v !== '0').map(([v, t]) => {
+      const b = el('button', { type: 'button', className: 'lcars-button tr-tap', id: `helm-speed-${v}`, textContent: t });
+      b.dataset.value = v;
+      b.onclick = () => { speedSel.value = v; syncSpeed(); };
+      return b;
+    });
+    // (The taps follow the select: picked, and greyed out where there's no power for it.)
+    const syncSpeed = () => {
+      for (const b of speedTaps) {
+        const o = [...speedSel.options].find((x) => x.value === b.dataset.value);
+        b.disabled = o.disabled;
+        b.title = o.disabled ? 'No power for it' : '';
+        b.setAttribute('aria-pressed', String(speedSel.value === b.dataset.value));
+      }
+    };
+    syncSpeed();
     const button = (text, id, onclick, alert) => { const b = el('button', { type: 'button', className: `lcars-button lcars-button--pill${alert ? ' lcars-button--alert' : ''}`, id, textContent: text }); b.onclick = onclick; return b; };
     const plotted = el('div', { className: 'nav-plotted', hidden: true });
     // Autopilot: tap a known contact or a starbase; the ship's computer flies
@@ -240,13 +257,14 @@
 
     if (mode === 'helm') {
       controls.append(
-        el('div', { className: 'ops-form' }, el('span', { textContent: 'Course' }), destSel),
-        el('div', { className: 'ops-form' }, el('span', { textContent: 'Speed' }), speedSel,
+        pillBar('Course', [destSel]),
+        pillBar('Speed', speedTaps, { groupId: 'helm-speed' }),
+        pillBar(null, [
           button('Engage', 'helm-engage', () => {
             const dest = destValue();
             send({ type: 'helm', warp: Number(speedSel.value), ...(dest ? { dest } : {}) });
           }),
-          button('All stop', 'helm-stop', () => send({ type: 'helm', warp: 0 }), true)),
+          button('All stop', 'helm-stop', () => send({ type: 'helm', warp: 0 }), true)]),
         sporeBox,
         el('h3', { className: 'ops-subhead', textContent: 'Docking' }),
         dockBox,
@@ -285,6 +303,7 @@
           o.textContent = SPEEDS.find(([v]) => v === o.value)[1] + (over ? ' (no power)' : '');
         }
         if (speedSel.selectedOptions[0]?.disabled) speedSel.value = [...speedSel.options].filter((o) => !o.disabled).pop().value;
+        syncSpeed();
         // Show what Helm picked, or else where the ship is actually heading.
         const keep = destSel.value.startsWith('base:') ? destSel.value : selected ? `ship:${selected}` : waypoint ? 'waypoint' : own?.dest?.name ? `${(nav.bases || []).some((b) => b.name === own.dest.name) ? 'base' : 'ship'}:${own.dest.name}` : '';
         renderDock();

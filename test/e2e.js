@@ -1448,9 +1448,15 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.match(await geordi.textContent('#msd-budget'), /Generation.*EPS demand.*Warp core output.*Fusion.*Battery charge.*Readiness/s);
     assert.match(await geordi.textContent('#msd-overall'), /^(All systems operational|Partial power)$/);
     assert.ok(await geordi.$eval('.msd-canvas', (cv) => cv.width > 0), 'the profile is drawn');
+    // Its places by deck: each an LCARS bar (deck and place, its power path), then its consoles and systems.
+    const msdPlaces = await geordi.$$eval('#msd-places .msd-place', (xs) => xs.map((x) => ({ place: x.dataset.place, label: x.querySelector('.place-label').textContent, items: [...x.querySelectorAll('li')].map((li) => li.textContent) })));
+    const msdDecks = msdPlaces.map((x) => Number(/^Deck (\d+)/.exec(x.label)[1]));
+    assert.deepEqual(msdDecks, [...msdDecks].sort((a, b) => a - b), 'in deck order');
+    assert.ok(msdPlaces.find((x) => x.place === 'Bridge').items.some((t) => /^Helm console(Online|No power)$/.test(t)), JSON.stringify(msdPlaces[0]));
+    assert.ok(msdPlaces.some((x) => x.items.some((t) => /^long-range sensors/i.test(t))), 'systems listed where they are');
     await geordi.click('.msd-tile[data-system="warp"]');
     await geordi.waitForSelector('[data-screen="st-core"]:not([hidden])');
-    step(`the master systems display: ${await geordi.textContent('#msd-overall')}, the warp core tile Running, and tapping it opened the warp core panel`);
+    step(`the master systems display: ${await geordi.textContent('#msd-overall')}, the warp core tile Running, and tapping it opened the warp core panel; its ${msdPlaces.length} places listed by deck with their consoles and systems`);
     // Life support place by place: switching gravity off in a place takes its share off the draw.
     await screen(geordi, 'st-lifesupport');
     await geordi.waitForSelector('#ls-table .ls-tap[data-loc="Crew"][data-sys="gravity"][aria-pressed="true"]');
@@ -1486,6 +1492,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.match(await geordi.textContent('[data-warpcore]'), /Output\s*\d+ of 1000.*Efficiency\s*\d+%.*Dilithium alignment/s);
     assert.equal(await geordi.locator('#core-rate button').count(), 10, 'a light bar for the reaction rate');
     await geordi.waitForSelector('#wc-scram');
+    // (Pill bars: the mixture a bar of taps, the readouts in a capsule, the controls a right-capped cluster.)
+    assert.equal(await geordi.locator('#core-mix.tr-pick .tr-label:has-text("Mixture")').count(), 1);
+    assert.equal(await geordi.locator('#core-mix button[aria-pressed="true"]').count(), 1);
+    assert.equal(await geordi.locator('#wc-monitor.capsule .capsule-cap').count(), 2);
+    assert.equal(await geordi.locator('.tr-pick--right #wc-scram').count(), 1);
     await screen(geordi, 'st-grid');
     // The warp core's Start / Stop is on its row in the grid, in every order.
     await geordi.waitForSelector('#ties-core-parent #core-stop');
@@ -1955,6 +1966,11 @@ const audioBytes = (page) => page.evaluate(async () => {
       const troi = await openAs(browser, 'troi', 'troi', 'Enterprise', 'Bridge 1');
       const crusher = await openAs(browser, 'crusher', 'crusher', 'Enterprise', 'Helm');
       const ogawa = await openAs(browser, 'ogawa', 'ogawa', 'Enterprise', 'Medical');
+      // (Helm's speed: a pill bar of taps, one picked; greyed where there's no power for it.)
+      await crusher.waitForSelector('#helm-speed button[aria-pressed="true"]', { state: 'attached' });
+      const speedTap = await crusher.evaluate(() => { const b = [...document.querySelectorAll('#helm-speed button:not([disabled])')].find((x) => x.getAttribute('aria-pressed') !== 'true'); b?.click(); return b?.dataset.value; });
+      if (speedTap) await crusher.waitForSelector(`#helm-speed button[data-value="${speedTap}"][aria-pressed="true"]`, { state: 'attached' });
+      assert.equal(await crusher.locator('#helm-speed button[aria-pressed="true"]').count(), 1);
       await troi.click('#room-mic');
       await troi.waitForSelector('#room-mic[aria-pressed="true"]:has-text("live")');
       await crusher.waitForFunction(() => window.__room.listening.some((l) => l.from === 'troi' && l.connected && l.pan < -0.3 && l.gain < 1), null, { timeout: 20000 });

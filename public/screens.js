@@ -52,3 +52,34 @@
     showScreen(tab.dataset.screenTab);
   });
 })();
+
+// The shared LCARS controls (styled in lcars.css):
+// a pill bar, (] [LABEL] [tap] [tap] [)  (with no label: a right-capped cluster);
+// a pill cluster, a few buttons rounded only at the ends; a capsule, a closed
+// frame for a critical monitor, [( contents )].
+window.pillBar = function pillBar(label, taps, { id, groupId, accent } = {}) {
+  const bar = document.createElement('div');
+  bar.className = label ? 'tr-pick' : 'tr-pick tr-pick--right';
+  if (id) bar.id = id;
+  if (accent) bar.style.setProperty('--accent', accent);
+  const group = Object.assign(document.createElement('div'), { className: 'tr-taps' });
+  group.setAttribute('role', 'group');
+  if (label) group.setAttribute('aria-label', label);
+  if (groupId) group.id = groupId;
+  group.append(...taps.filter(Boolean));
+  if (label) bar.append(Object.assign(document.createElement('span'), { className: 'tr-label', textContent: label }));
+  bar.append(group);
+  return bar;
+};
+window.pillCluster = function pillCluster(...buttons) {
+  const c = Object.assign(document.createElement('span'), { className: 'pill-cluster' });
+  c.append(...buttons.filter(Boolean));
+  return c;
+};
+window.capsule = function capsule(body, { id } = {}) {
+  const c = Object.assign(document.createElement('div'), { className: 'capsule' });
+  if (id) c.id = id;
+  body.classList.add('capsule-body');
+  c.append(Object.assign(document.createElement('span'), { className: 'capsule-cap capsule-cap--l' }), body, Object.assign(document.createElement('span'), { className: 'capsule-cap capsule-cap--r' }));
+  return c;
+};

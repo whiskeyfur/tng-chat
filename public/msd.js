@@ -91,6 +91,34 @@
     ['lrs', 'Long-range sensors'], ['sens', 'Lateral sensors'], ['comm', 'Communications'], ['warp', 'Warp core'], ['defl', 'Deflector'], ['shld', 'Shields'], ['trans', 'Transporters'],
     ['impulse', 'Impulse'], ['prop', 'Warp drive'], ['ext', 'Dock and solar power'], ['tractor', 'Tractor beam']];
 
+  // The ship's places, by deck (the design's, window.PLACES): each one's power path
+  // (its conduit) and what's in it, its consoles and systems, with their state.
+  const WORST = ['ok', 'busy', 'off', 'warn', 'bad'];
+  function placeStates(own) {
+    const g = own.grid, p = own.power || {};
+    const tied = (key) => g.ties?.[key] || [], cut = (key) => g.cutOff?.[key] || [];
+    const via = (key) => tied(key).filter((n) => !cut(key).includes(n));
+    const item = (key, name) => {
+      if (!g.tieNodes?.[key]) return null;
+      if (tied(key).length && !via(key).length) return [name, 'bad', 'Cut off'];
+      if (!tied(key).length) return [name, 'off', 'Untied'];
+      if (key.startsWith('sub:') && g.subOk?.[key.slice(4)] === false) return [name, 'bad', 'No power'];
+      const v = p[key.slice(7)];
+      if (key.startsWith('system:') && typeof v === 'number') return [name, v >= 90 ? 'ok' : v > 0 ? 'warn' : 'off', `${v}%`];
+      return [name, 'ok', 'Powered'];
+    };
+    return (window.PLACES || []).slice().sort((a, b) => a.deck - b.deck).map((pl) => {
+      const conduit = `place:${pl.name}`;
+      const items = [
+        ...pl.stations.filter((st) => g.consoleOk && st in g.consoleOk).map((st) => [`${st} console`, g.consoleOk[st] ? 'ok' : 'off', g.consoleOk[st] ? 'Online' : 'No power']),
+        ...(pl.rows || []).map((key) => item(key, key.startsWith('sub:') ? g.subsystems?.[key.slice(4)]?.name || key.slice(4) : g.sysNames?.[key.slice(7)] || key.replace(/^\w+:/, ''))).filter(Boolean),
+      ];
+      const path = !g.tieNodes?.[conduit] ? null : via(conduit).length ? ['ok', via(conduit).map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(', ')] : tied(conduit).length ? ['bad', 'Cut off'] : ['off', 'No power path'];
+      const worst = [path?.[0], ...items.map((x) => x[1])].filter(Boolean).reduce((a, b) => (WORST.indexOf(b) > WORST.indexOf(a) ? b : a), 'ok');
+      return { name: pl.name, deck: pl.deck, path, items, state: worst };
+    }).filter((x) => x.items.length || x.path);
+  }
+
   window.createMSD = function createMSD(root, { open = () => {}, starbase = false } = {}) {
     const h = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
     const cv = h('canvas', { className: 'msd-canvas', ariaLabel: 'Ship profile: tap a label to open that system' });
@@ -98,12 +126,14 @@
     const budget = h('div', { className: 'msd-budget', id: 'msd-budget' });
     const tiles = h('div', { className: 'msd-tiles', id: 'msd-tiles' });
     const log = h('ol', { className: 'msd-log', id: 'msd-log' });
+    const places = h('div', { className: 'msd-places', id: 'msd-places' });
     root.replaceChildren(
       h('section', { className: 'msd-card msd-card--ship' }, h('h3', { textContent: 'Master systems display' }), overall, cv,
         h('p', { className: 'ops-hint', textContent: `${starbase ? 'Station outline' : 'Port profile, bow to the left'}. Labels light as systems come up. Select a label to open that console.` })),
       h('div', { className: 'msd-grid' },
         h('section', { className: 'msd-card msd-card--budget' }, h('h3', { textContent: 'Power budget' }), budget),
         h('section', { className: 'msd-card msd-card--status' }, h('h3', { textContent: 'System status' }), tiles)),
+      h('section', { className: 'msd-card msd-card--places' }, h('h3', { textContent: 'Locations aboard' }), places),
       h('section', { className: 'msd-card msd-card--log' }, h('h3', { textContent: 'Engineering event log' }), log));
     let own = null, st = {};
     const marks = starbase ? BASEMARK : SHIPMARK;
@@ -219,6 +249,18 @@
         b.onclick = () => open(k);
         return b;
       }));
+      // The places by deck: an LCARS bar each (deck and place, its power path), then what's in it.
+      const pl = placeStates(own);
+      places.replaceChildren(...(pl.length ? pl.map((x) => {
+        const pill = (state, text) => { const s = h('span', { className: 'msd-pill', textContent: text }); s.dataset.state = state; return s; };
+        const box = h('div', { className: 'msd-place' },
+          h('div', { className: 'place-bar' }, h('span', { className: 'place-cap place-cap--l' }), h('span', { className: 'place-label', textContent: `Deck ${x.deck} - ${x.name}` }),
+            ...(x.path ? [h('span', { className: 'msd-place__path' }, pill(x.path[0], x.path[1]))] : []), h('span', { className: 'place-cap place-cap--r' })),
+          h('ul', { className: 'msd-place__items' }, ...x.items.map(([name, s, text]) => h('li', {}, h('span', { textContent: name }), pill(s, text)))));
+        box.dataset.place = x.name;
+        box.dataset.state = x.state;
+        return box;
+      }) : [h('p', { className: 'ops-hint', textContent: 'No places in this design' })]));
       log.replaceChildren(...(events.length ? events.slice(-30).reverse().map((ev) => { const li = h('li', { textContent: `${new Date(ev.at).toTimeString().slice(0, 8)} ${ev.text}` }); li.dataset.cls = ev.cls; return li; }) : [h('li', { className: 'empty', textContent: 'No events' })]));
       kick();
     }

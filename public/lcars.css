@@ -268,3 +268,31 @@ body { font-family: var(--font); font-size: 18px; letter-spacing: 0.04em; min-he
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* Pill bars: the one look for a set of choices or controls, app-wide.
+     (] [LABEL] [tap] [tap] [tap] [)
+   A .tr-pick is one: its .tr-label the left cap and label, its .tr-taps flat
+   segments, a right cap after. .tr-pick--right: a right-capped cluster (no label
+   cap; situational controls). .pill-cluster: a small group of buttons inside a
+   table cell or a line, rounded only at its two ends. */
+.tr-taps { display: flex; flex-wrap: wrap; gap: 4px; }
+.tr-tap { min-height: 32px; font-size: 13px; }
+.tr-tap[aria-pressed='true'] { outline: 3px solid #fff; outline-offset: 2px; }
+.tr-tap:disabled { opacity: 0.35; cursor: default; }
+.tr-pick { --bar: color-mix(in srgb, var(--accent, var(--lcars-orange)) 70%, #000); display: flex; align-items: stretch; gap: 4px; margin: 0 0 6px; min-width: 0; }
+.tr-pick::after { content: ''; flex: 1 0 22px; min-height: 32px; background: var(--bar); border-radius: 0 16px 16px 0; }
+.tr-pick > .tr-label { display: flex; align-items: center; flex: 0 0 auto; min-width: 90px; min-height: 32px; padding: 0 12px 0 18px; background: var(--bar); color: #000; border-radius: 16px 0 0 16px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; }
+.tr-pick > .tr-taps { flex: 0 1 auto; min-width: 0; align-items: stretch; align-content: flex-start; }
+.tr-pick > .tr-taps > .lcars-button, .tr-pick > .tr-taps > .tr-tap { border-radius: 0; margin: 0; }
+.tr-pick > .tr-taps > :not(button) { align-self: center; }
+.tr-pick [aria-pressed='true'], .pill-cluster > [aria-pressed='true'] { outline: 0; box-shadow: inset 0 0 0 3px #fff; }
+.tr-pick--right > .tr-taps > :first-child { border-radius: 16px 0 0 16px; }
+.pill-cluster { display: inline-flex; gap: 3px; vertical-align: middle; }
+.pill-cluster > .lcars-button { border-radius: 0; margin: 0; }
+.pill-cluster > :first-child { border-radius: 999px 0 0 999px; }
+.pill-cluster > :last-child { border-radius: 0 999px 999px 0; }
+.pill-cluster > :only-child { border-radius: 999px; }
+@media (max-width: 600px) {
+  .tr-pick > .tr-label { min-width: 0; padding: 0 8px 0 14px; font-size: 12px; }
+  .tr-pick::after { flex-basis: 14px; }
+}

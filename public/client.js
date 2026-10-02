@@ -375,13 +375,13 @@ function renderConsoleBar() {
   const bar = $('console-bar');
   bar.hidden = !me?.console;
   if (!me?.console) return bar.replaceChildren();
-  bar.replaceChildren(Object.assign(document.createElement('span'), { className: 'console-bar__name', textContent: me.console }), ...CONSOLE_MODES.map((m) => {
+  bar.replaceChildren(pillBar(me.console, CONSOLE_MODES.map((m) => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: m });
     b.dataset.mode = m;
     b.setAttribute('aria-pressed', String(m === me.station));
     b.onclick = () => { if (m !== me.station) send({ type: 'console-mode', mode: m }); };
     return b;
-  }));
+  })));
 }
 
 // The Station screen: any other station, Operations included.
@@ -811,8 +811,8 @@ function renderBrig(grid) {
   box.dataset.sig = sig;
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   box.replaceChildren(el('p', { className: 'st-brig-title', textContent: 'BRIG' }),
-    el('p', { className: 'st-state', id: 'brig-state', textContent: grid.brigSealed ? 'Force field up: nobody walks in or out' : 'Force field down' }),
-    el('ul', { className: 'st-list', id: 'brig-held' }, ...(held.length ? held.map((u) => el('li', { textContent: u.title || u.name })) : [el('li', { className: 'empty', textContent: 'Nobody held' })])));
+    capsule(el('div', {}, el('p', { className: 'st-state', id: 'brig-state', textContent: grid.brigSealed ? 'Force field up: nobody walks in or out' : 'Force field down' }),
+      el('ul', { className: 'st-list', id: 'brig-held' }, ...(held.length ? held.map((u) => el('li', { textContent: u.title || u.name })) : [el('li', { className: 'empty', textContent: 'Nobody held' })]))), { id: 'brig-monitor' }));
 }
 // Department readiness: call one department (or all) to report ready.
 window.__callReadiness = (dept) => send({ type: 'readiness', dept });
@@ -906,12 +906,12 @@ function renderCrewPanels() {
       form.onsubmit = (e) => { e.preventDefault(); issueOrder(text); };
       cmd.append(
         el('p', { className: 'st-state', id: 'alert-state' }),
-        el('div', { className: 'ops-form', id: 'alert-buttons' },
-          ...[['green', 'Condition green', ''], ['yellow', 'Yellow alert', 'alert-yellow'], ['red', 'Red alert', 'lcars-button--alert'], ['black', 'Black alert', 'alert-black']].map(([lvl, t, c]) => {
-            const b = button(t, () => send({ type: 'alert', level: lvl }), c);
-            b.dataset.level = lvl;
-            return b;
-          })),
+        pillBar('Alert', [['green', 'Condition green', ''], ['yellow', 'Yellow alert', 'alert-yellow'], ['red', 'Red alert', 'lcars-button--alert'], ['black', 'Black alert', 'alert-black']].map(([lvl, t, c]) => {
+          const b = button(t, () => send({ type: 'alert', level: lvl }), c);
+          b.dataset.level = lvl;
+          if (lvl === 'green') b.style.setProperty('--accent', '#66cc66');
+          return b;
+        }), { groupId: 'alert-buttons' }),
         el('p', { className: 'ops-hint', textContent: 'Red alert raises shields if they have power, and turns every console aboard red.' }),
         form);
     }
@@ -950,9 +950,9 @@ function renderCrewPanels() {
       el('div', { className: 'st-control' },
         el('p', { className: 'st-state', textContent: lockout ? 'Transporter lockout: force field up' : 'Transporter lockout: off' }),
         button(lockout ? 'Drop force field' : 'Raise force field', () => send({ type: 'lockout', on: !lockout }), lockout ? '' : 'lcars-button--alert')),
-      el('div', { className: 'st-control' },
+      capsule(el('div', { className: 'st-control' },
         el('p', { className: 'st-state', id: 'brig-field-state', textContent: lastNav?.own?.grid?.brigSealed ? 'Brig force field: up' : 'Brig force field: down' }),
-        button(lastNav?.own?.grid?.brigField ? 'Drop brig field' : 'Raise brig field', () => send({ type: 'brig-field', on: !lastNav?.own?.grid?.brigField }), lastNav?.own?.grid?.brigField ? '' : 'lcars-button--alert')),
+        button(lastNav?.own?.grid?.brigField ? 'Drop brig field' : 'Raise brig field', () => send({ type: 'brig-field', on: !lastNav?.own?.grid?.brigField }), lastNav?.own?.grid?.brigField ? '' : 'lcars-button--alert')), { id: 'brig-field-monitor' }),
       el('h3', { className: 'ops-subhead', textContent: 'Force fields (isolate a station)' }),
       el('div', { className: 'tr-taps', id: 'sec-fields' }, ...placeNodes(stations, (st) => st, (st) => {
         const on = fields.includes(st);
@@ -989,9 +989,9 @@ function renderCrewPanels() {
   if (med && changed(med, crewSig, ownPower()?.lifeSupport, emhOn)) {
     const p = ownPower();
     med.replaceChildren(
-      el('div', { className: 'st-control' },
+      capsule(el('div', { className: 'st-control' },
         el('p', { className: 'st-state', id: 'emh-state', textContent: emhOn ? 'Emergency medical hologram: active' : 'Emergency medical hologram: off' }),
-        button(emhOn ? 'Deactivate EMH' : 'Activate EMH', () => send({ type: 'emh', on: !emhOn }), emhOn ? '' : 'lcars-button--alert')),
+        button(emhOn ? 'Deactivate EMH' : 'Activate EMH', () => send({ type: 'emh', on: !emhOn }), emhOn ? '' : 'lcars-button--alert')), { id: 'emh-monitor' }),
       el('p', { className: 'ops-hint', textContent: p ? `Life support ${p.lifeSupport}%${p.lifeSupport < 50 ? ': crew at risk' : ''}` : '' }),
       el('ul', { className: 'st-list st-patients' }, ...crew.map((u) => {
         const li = el('li', {}, `${u.name}${u.id === me.id ? ' (you)' : ''}`, el('span', { textContent: `${u.station} · ${status(u)}` }),
@@ -1253,24 +1253,26 @@ function renderCombat() {
     const rate = lightBar('Reaction rate', 100, (v) => send({ type: 'grid', coreRate: v }));
     rate.id = 'core-rate';
     rate.set(w.rate, live ? Math.min(w.actual, w.rate) : 0);
-    const mixes = el('span', { className: 'grid-gears' }, ...[10, 12, 15, 20].map((m) => { const b = button(`${m}:1`, `core-mix-${m}`, () => send({ type: 'grid', coreMix: m })); b.setAttribute('aria-pressed', String(w.mix === m)); return b; }));
+    const mixes = pillBar('Mixture (deuterium : antimatter)', [10, 12, 15, 20].map((m) => { const b = button(`${m}:1`, `core-mix-${m}`, () => send({ type: 'grid', coreMix: m })); b.classList.add('tr-tap'); b.setAttribute('aria-pressed', String(w.mix === m)); return b; }), { id: 'core-mix' });
     const tog = (text, id, on, onTap) => { const b = button(text, id, onTap, 'lcars-toggle'); b.setAttribute('aria-pressed', String(!!on)); return b; };
     // Why the injectors won't open, if they won't.
     const coreTank = (bus) => grid.fuel?.[bus]?.tanks.find((t) => t.name === 'core')?.pct ?? 0;
     const blocks = [grid.contain?.field < need.field && `containment field ${grid.contain.field}% (needs ${need.field}%)`, coreTank('deu') < need.light && `its deuterium tank ${coreTank('deu')}% (needs ${need.light}%)`, coreTank('am') < need.light && `its antimatter tank ${coreTank('am')}% (needs ${need.light}%)`, w.mix < need.mix && `mixture ${w.mix}:1 (cold ignition needs ${need.mix}:1 or richer)`].filter(Boolean);
     wcp.replaceChildren(
       el('p', { className: 'st-state', id: 'wc-state', textContent: `Warp core: ${state}${w.breachT != null ? ` · BREACH IN ${w.breachT} s` : ''}` }),
-      el('div', { className: 'ops-readouts' },
+      // (The core's readouts: a capsule, a closed critical monitor.)
+      capsule(el('div', { className: 'ops-readouts' },
         ...[['Output', `${w.output} of ${grid.coreMax}`], ['Efficiency', `${w.eff}%`], ['Core temperature', `${Math.round(w.temp)}%${w.temp > need.hot ? ' · HOT' : ''}`], ['Containment field', `${grid.contain?.field}%`],
           ['Dilithium alignment', `${w.align}%`], ['Crystal integrity', `${w.crystal}%`], ['Core tanks', `deuterium ${coreTank('deu')}% · antimatter ${coreTank('am')}%`], ['Mixture', `${w.mix}:1 (best ${need.bestMix}:1)`]]
-          .map(([k, v]) => el('div', { className: 'lcars-readout wc-readout' }, el('span', { textContent: k }), el('b', { textContent: v })))),
+          .map(([k, v]) => el('div', { className: 'lcars-readout wc-readout' }, el('span', { textContent: k }), el('b', { textContent: v })))), { id: 'wc-monitor' }),
       el('div', { className: 'ops-form' }, el('span', { textContent: 'Reaction rate' }), rate),
-      el('div', { className: 'ops-form' }, el('span', { textContent: 'Mixture (deuterium : antimatter)' }), mixes),
-      el('div', { className: 'ops-form' },
-        grid.core === 'offline' ? button('Cold ignition', 'wc-start', () => send({ type: 'grid', core: 'start' })) : grid.core === 'ejected' ? el('span') : button('SCRAM', 'wc-scram', () => send({ type: 'grid', core: 'scram' }), 'lcars-button--alert'),
+      mixes,
+      // (Its controls: a right-capped cluster.)
+      pillBar(null, [
+        grid.core === 'offline' ? button('Cold ignition', 'wc-start', () => send({ type: 'grid', core: 'start' })) : grid.core === 'ejected' ? null : button('SCRAM', 'wc-scram', () => send({ type: 'grid', core: 'scram' }), 'lcars-button--alert'),
         tog(`Plasma conduits to nacelles: ${w.plasma ? 'open' : 'closed'}`, 'wc-plasma', w.plasma, () => send({ type: 'grid', plasma: !w.plasma })),
         button('Trim dilithium', 'wc-trim', () => send({ type: 'grid', trim: true })),
-        tog(`Auto-trim: ${w.autoTrim ? 'on' : 'off'}`, 'wc-autotrim', w.autoTrim, () => send({ type: 'grid', autoTrim: !w.autoTrim }))),
+        tog(`Auto-trim: ${w.autoTrim ? 'on' : 'off'}`, 'wc-autotrim', w.autoTrim, () => send({ type: 'grid', autoTrim: !w.autoTrim }))]),
       el('p', { className: 'ops-hint', id: 'wc-hint', textContent: grid.core === 'offline' && blocks.length ? `The injectors won't open: ${blocks.join('; ')}.` : `Cold ignition runs at ${need.rate}% or less for ${grid.startSecs} s, then the rate climbs to its setting. Auto-trim needs all three computer cores (${w.cores} online). Over ${need.hot}% the core wears the containment field down; when either of its tanks runs dry it flames out.` }));
     wcp.querySelector('#wc-state').toggleAttribute('data-up', w.breachT != null);
   }
@@ -1290,7 +1292,8 @@ function renderCombat() {
     const COLS = ['ODN', 'A', 'B', 'C', 'EPS', 'Deu', 'AM'];
     const FUEL_COL = { deu: 'Deu', am: 'AM' };
     // Every row's buttons (Fill / Drain, Import / Export, Light, Start, On / Off, ...) sit in the Controls column.
-    const ctlCell = (controls = []) => el('td', { className: 'grid-controls' }, ...controls);
+    // (A row's buttons together: a pill cluster.)
+    const ctlCell = (controls = []) => el('td', { className: 'grid-controls' }, ...(controls.length > 1 && controls.every((c) => c?.tagName === 'BUTTON') ? [pillCluster(...controls)] : controls));
     // The column a node's cell is in (after the System and Controls columns).
     const colAt = (tr, n) => tr.children[2 + COLS.indexOf(n)];
     // A row: label (with a note), its controls, then a cell per node:
@@ -1368,7 +1371,7 @@ function renderCombat() {
         const bar = lightBar(`${label} accelerators`, 100, (v) => send({ type: 'grid', reactor: { name: rn, accel: v } }));
         bar.id = `accel-${rn}`;
         bar.set(x.accel);
-        const gears = el('span', { className: 'grid-gears' }, ...['low', 'high'].map((g) => { const b = small(g === 'low' ? 'Low' : 'High', `${rn}-gear-${g}`, () => send({ type: 'grid', reactor: { name: rn, gear: g } })); b.setAttribute('aria-pressed', String(x.gear === g)); return b; }));
+        const gears = pillCluster(...['low', 'high'].map((g) => { const b = small(g === 'low' ? 'Low' : 'High', `${rn}-gear-${g}`, () => send({ type: 'grid', reactor: { name: rn, gear: g } })); b.setAttribute('aria-pressed', String(x.gear === g)); return b; }));
         rows.push(
           spanRow(`${rn}-accel`, 'Accelerators', 2, bar, `throttle ${x.accel}%`),
           spanRow(`${rn}-coils`, 'Driver coils', 2, null, x.gear === 'low' ? 'Low gear: quick, a quarter impulse at most' : 'High gear: full impulse, slower to build', [gears]),
@@ -1711,11 +1714,11 @@ function renderCombat() {
           }))));
     };
     // Three orders for the table: Startup and Shutdown checklists, and Operations (management).
-    const orderTaps = () => el('div', { className: 'ops-form grid-orders', role: 'group', ariaLabel: 'grid order' }, ...GRID_ORDERS.map(([v, text]) => {
+    const orderTaps = () => { const bar = pillBar('Grid order', GRID_ORDERS.map(([v, text]) => {
       const b = button(text, `grid-order-${v}`, () => { setGridOrder(v); renderCombat(); });
       b.setAttribute('aria-pressed', String(gridOrder === v));
       return b;
-    }));
+    })); bar.classList.add('grid-orders'); return bar; };
     // Startup done: ready for departure. Shutdown done: back to a cold ship.
     const banner = () => {
       const manned = Object.keys(grid.consoleOk).filter((st) => comms.users.some((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st));
@@ -1744,7 +1747,7 @@ function renderCombat() {
       banner(),
       table(),
       supplies(),
-      el('p', { className: 'st-state grid-containment', id: 'containment-state', textContent: grid.core === 'ejected' ? 'Warp core ejected: no antimatter aboard' : !grid.antimatter ? 'No antimatter aboard: containment not needed' : grid.breach != null ? `CONTAINMENT FAILING: field ${grid.contain?.field}%, breach in ${grid.breach} s` : grid.contain?.onReserve ? `Containment on its internal reserve: ${grid.contain.reserveSecs} s left` : `Containment holding (field ${grid.contain?.field}%), fed from ${feeds(grid.ties.containment)}` }),
+      capsule(el('p', { className: 'st-state grid-containment', id: 'containment-state', textContent: grid.core === 'ejected' ? 'Warp core ejected: no antimatter aboard' : !grid.antimatter ? 'No antimatter aboard: containment not needed' : grid.breach != null ? `CONTAINMENT FAILING: field ${grid.contain?.field}%, breach in ${grid.breach} s` : grid.contain?.onReserve ? `Containment on its internal reserve: ${grid.contain.reserveSecs} s left` : `Containment holding (field ${grid.contain?.field}%), fed from ${feeds(grid.ties.containment)}` }), { id: 'containment-monitor' }),
 
       el('p', { className: 'ops-notice', id: 'grid-status', textContent: status }),
       el('p', { className: 'ops-hint', textContent: `The core burns antimatter and deuterium for the power it gives (the impulse reactor burns deuterium, and while it gives power the ship is held to slow impulse). Tie each source to any of Bus A, Bus B and the EPS; the EPS reaches a bus through its open tap. The core starts on Bus A power (${grid.startSecs} s). Antimatter containment must always have power from one of its feeds, or the core breaches in seconds (ejecting the core ends that). Power goes to containment first, then consoles, then is shared among systems. EPS carrying ${grid.eps}; total drawn ${grid.drawn} (that's what other ships' sensors see).` }));
