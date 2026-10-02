@@ -875,13 +875,14 @@ function renderCrewPanels() {
     const reachable = crew.filter((u) => u.id !== me.id && !skip.includes(u.station));
     for (const id of [...orderPick]) if (!reachable.some((u) => u.id === id)) orderPick.delete(id);
     const byDept = (list) => [...new Set(list.map((u) => u.station))].map((st) => [st, list.filter((u) => u.station === st)]);
+    // (One look for both lists: a department pill and name chips, taps where they do something.)
     const chip = (u, state, onclick) => { const b = el('button', { type: 'button', className: 'order-chip', textContent: u.name, onclick, disabled: !onclick }); b.dataset.state = state; b.dataset.who = u.id; return b; };
+    const deptPill = (st, onclick, on) => { const b = el('button', { type: 'button', className: 'order-dept', textContent: st, onclick, disabled: !onclick }); if (onclick) b.setAttribute('aria-pressed', String(!!on)); return b; };
     if (changed(targets, reachable.map((u) => [u.id, u.station]), [...orderPick])) {
       targets.replaceChildren(el('p', { className: 'ops-hint', textContent: orderPick.size ? `To ${orderPick.size} picked · tap again to unpick` : 'To all hands · or tap a department or names to pick who' }),
         ...byDept(reachable).map(([st, us]) => {
           const all = us.every((u) => orderPick.has(u.id));
-          const label = el('button', { type: 'button', className: 'order-dept', textContent: st, onclick: () => { for (const u of us) if (all) orderPick.delete(u.id); else orderPick.add(u.id); renderCrewPanels(); } });
-          label.setAttribute('aria-pressed', String(all));
+          const label = deptPill(st, () => { for (const u of us) if (all) orderPick.delete(u.id); else orderPick.add(u.id); renderCrewPanels(); }, all);
           const row = el('div', { className: 'order-row' }, label, el('span', { className: 'order-chips' }, ...us.map((u) => { const c = chip(u, orderPick.has(u.id) ? 'picked' : 'idle', () => { if (orderPick.has(u.id)) orderPick.delete(u.id); else orderPick.add(u.id); renderCrewPanels(); }); c.setAttribute('aria-pressed', String(orderPick.has(u.id))); return c; })));
           row.dataset.dept = st;
           return row;
@@ -889,12 +890,13 @@ function renderCrewPanels() {
     }
     const log = lastNav?.own?.orders || [];
     if (changed(history, log)) {
-      history.replaceChildren(...log.map((o) => {
+      if (!log.length) history.replaceChildren(el('p', { className: 'ops-hint order-none', textContent: 'No orders given yet' }));
+      else history.replaceChildren(...log.map((o) => {
         const waiting = o.to.filter((u) => !o.acked.includes(u.id) && !(o.declined && o.declined === u.name));
         const sec = el('section', { className: 'order-entry' },
           el('h4', { className: 'order-title', textContent: o.text }),
           el('small', { className: 'grid-note', textContent: `${new Date(o.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${o.from.title || o.from.name}${o.declined ? ` · declined by ${o.declined}` : waiting.length ? ` · ${o.acked.length} acknowledged · waiting for ${waiting.map((u) => u.name).join(', ')}` : o.to.length ? ` · all ${o.acked.length} acknowledged` : ' · nobody to acknowledge'}` }),
-          ...byDept(o.to).map(([st, us]) => el('div', { className: 'order-row' }, el('span', { className: 'order-dept', textContent: st }), el('span', { className: 'order-chips' }, ...us.map((u) => chip(u, o.acked.includes(u.id) ? 'acked' : o.declined === u.name ? 'declined' : 'pending'))))));
+          ...byDept(o.to).map(([st, us]) => el('div', { className: 'order-row' }, deptPill(st), el('span', { className: 'order-chips' }, ...us.map((u) => chip(u, o.acked.includes(u.id) ? 'acked' : o.declined === u.name ? 'declined' : 'pending'))))));
         sec.dataset.order = o.id;
         return sec;
       }));

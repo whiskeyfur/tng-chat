@@ -137,6 +137,9 @@ function onChange(file) {
   timer = setTimeout(apply, DELAY);
 }
 async function apply() {
+  try { await applyChanges(); } catch (err) { log(`RELOAD FAILED: ${err.stack || err.message} (run npm start again)`); }
+}
+async function applyChanges() {
   const files = [...changed];
   changed.clear();
   const kind = (f) => (f.split(path.sep).includes('public') ? 'pages' : path.basename(f) === 'shipcore.js' ? 'computers' : path.basename(f) === 'supervisor.js' ? 'self' : 'relay');
@@ -148,10 +151,14 @@ async function apply() {
   else if (kinds.has('pages') && relay?.connected) relay.send({ type: 'reload', restart: false });
 }
 
+// A single file is watched through its folder (by name): a file watcher on
+// the file itself goes deaf once the file is replaced (a git checkout, an
+// editor's save-by-rename), and a change after that would be missed.
 for (const target of WATCH) {
   try {
     const dir = fs.statSync(target).isDirectory();
-    fs.watch(target, { recursive: dir }, (event, name) => onChange(dir ? path.join(target, name || '') : target));
+    if (dir) fs.watch(target, { recursive: true }, (event, name) => onChange(path.join(target, name || '')));
+    else fs.watch(path.dirname(target), (event, name) => { if (name === path.basename(target)) onChange(target); });
   } catch (err) { log(`not watching ${target}: ${err.message}`); }
 }
 

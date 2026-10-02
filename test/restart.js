@@ -85,7 +85,11 @@ async function look() {
     await stop(c); await stop(r);
     const WATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-watch-'));
     fs.mkdirSync(path.join(WATCH, 'public'));
-    const sup = run(['tools/supervisor.js'], { SHIPCORE_DATA: DATA, SUPERVISE_DELAY: '800', SUPERVISE_WATCH: [path.join(WATCH, 'code'), path.join(WATCH, 'public')].join(path.delimiter) });
+    // (And a single file watched on its own, as server.js is.)
+    const LONE = path.join(WATCH, 'lone', 'public', 'lone.html');
+    fs.mkdirSync(path.dirname(LONE), { recursive: true });
+    fs.writeFileSync(LONE, 'one');
+    const sup = run(['tools/supervisor.js'], { SHIPCORE_DATA: DATA, SUPERVISE_DELAY: '800', SUPERVISE_WATCH: [path.join(WATCH, 'code'), path.join(WATCH, 'public'), LONE].join(path.delimiter) });
     fs.mkdirSync(path.join(WATCH, 'code'));
     await wait(3500);
     const ws = new WebSocket(`ws://localhost:${PORT}`);
@@ -98,6 +102,14 @@ async function look() {
     const until = async (fn, ms = 10000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return; await wait(100); } throw new Error('timed out'); };
     await until(() => got.some((m) => m.type === 'reload' && m.restart === false));
     assert.equal(ws.readyState, WebSocket.OPEN, 'a page change should not restart the relay');
+    // A single watched file replaced (as git checkout does: a new file, renamed into place), twice:
+    // both changes are noticed (a watcher on the old file would have gone deaf).
+    for (const n of [1, 2]) {
+      const before = got.filter((m) => m.type === 'reload').length;
+      fs.writeFileSync(`${LONE}.tmp`, `version ${n}`); fs.renameSync(`${LONE}.tmp`, LONE);
+      await until(() => got.filter((m) => m.type === 'reload').length > before);
+    }
+    step('a single watched file replaced twice (as a git checkout does): the supervisor noticed both');
     step('the supervisor: a change to the pages told the consoles to reload, without restarting the relay');
     // The admin panel's requests: what the supervisor runs, who's connected; restart a ship's computer.
     ws.send(JSON.stringify({ type: 'admin', action: 'status' }));

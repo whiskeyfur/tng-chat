@@ -440,6 +440,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await martok.waitForSelector('#st-dept li[data-dept="Engineering"][data-manned] .st-chip:has-text("kor")', { state: 'attached' });
     await martok.waitForSelector('#st-dept li[data-dept="Operations"][data-manned]', { state: 'attached' });
     assert.match(await martok.textContent('#st-dept li[data-dept="Medical"]'), /Unmanned/);
+    await martok.waitForSelector('[data-command] .order-history:has-text("No orders given yet")', { state: 'attached' });
     assert.equal(await martok.locator('#st-dept li[data-dept="Medical"][data-manned]').count(), 0);
     assert.equal(await kor.locator('#st-msd .msd-canvas').count(), 1, 'engineering console has the master systems display');
     step('each ship sees only its own crew; ops see the other ship; stations get their own displays');
@@ -1115,6 +1116,9 @@ const audioBytes = (page) => page.evaluate(async () => {
     await bob.waitForSelector('.bcast--order:has-text("prepare for first contact")', { state: 'attached' });
     assert.equal(await picard.locator('.bcast--order').count(), 0, 'the Captain is not asked to acknowledge his own order');
     await bob.click('.bcast--order:has-text("prepare for first contact") button');
+    // (The picker's and the history's pills and chips look the same.)
+    const looks = await picard.$$eval('.order-targets .order-dept, .order-history .order-dept, .order-targets .order-chip, .order-history .order-chip', (bs) => [...new Set(bs.map((b) => { const c = getComputedStyle(b); return `${b.className}|${c.fontFamily}|${c.fontSize}|${c.fontWeight}|${c.height}`; }))]);
+    assert.equal(new Set(looks.map((x) => x.split('|')[0])).size, looks.length, `pills or chips styled differently: ${JSON.stringify(looks)}`);
     // Each order given: its section (text, when, who has acknowledged: green, and who hasn't: amber).
     await picard.waitForSelector('.order-history .order-entry:has-text("prepare for first contact") .order-chip[data-state="acked"]:has-text("bob")', { state: 'attached' });
     assert.equal(await picard.locator('.order-history .order-entry:has-text("prepare for first contact") .order-chip:has-text("picard")').count(), 0, 'the Captain was asked to acknowledge his own order');
