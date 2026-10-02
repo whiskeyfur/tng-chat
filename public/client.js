@@ -712,7 +712,9 @@ function openSystem(k) {
 // taps on the right): the sources on the left feeding the bus (the EPS manifold)
 // in the middle, branching to the places on it, then their consoles, systems and
 // subsystems. Each is a pill with its live value and state: LIVE, OPEN (not tied
-// to this bus), DEAD (tied, nothing flowing) or CUT OFF (a conduit above it untied).
+// to this bus), DEAD (tied, nothing flowing) or CUT OFF (a conduit above it untied). A source
+// with something to give that's switched off (untied, its breaker open, not running) is STANDBY;
+// dead only when it's empty.
 // Lines are lit where power flows. Tap a pill to tie it to this bus or untie it,
 // as on the grid. Deu. and AM show the fuel bus: the main storage, the tanks on it.
 let distBus = 'EPS';
@@ -737,9 +739,9 @@ function renderDistribution(grid) {
   const left = [], right = [];
   let mid;
   if (!fuel) {
-    for (const [key, label] of Object.entries(SRC)) if (grid.tieNodes[key]?.includes(X)) { const v = Math.max(0, grid.cells[key]?.[X] || 0); left.push({ key, label, value: `${Math.round(v)} MW`, st: state(key, v) }); }
+    for (const [key, label] of Object.entries(SRC)) if (grid.tieNodes[key]?.includes(X)) { const v = Math.max(0, grid.cells[key]?.[X] || 0); { const st = state(key, v); left.push({ key, label, value: `${Math.round(v)} MW`, st, ...(st === 'dead' || st === 'open' ? { word: 'standby' } : {}) }); } }
     const store = grid.stores?.[X];
-    if (store) left.push({ label: X === 'EPS' ? 'EPS pressure' : `Battery ${X}`, value: `${store.level}%${store.supplying ? ` · ${store.supplying} out` : store.charging ? ` · charging ${store.charging}` : ''}`, st: store.supplying > 0 ? 'live' : store.breaker === false ? 'open' : 'dead' });
+    if (store) left.push({ label: X === 'EPS' ? 'EPS pressure' : `Battery ${X}`, value: `${store.level}%${store.supplying ? ` · ${store.supplying} out` : store.charging ? ` · charging ${store.charging}` : ''}`, st: store.supplying > 0 ? 'live' : store.breaker === false ? 'open' : 'dead', ...(store.supplying > 0 ? {} : { word: store.level > 0 ? 'standby' : 'dead' }) });
     const t = grid.totals?.[X] || {};
     mid = { label: busName, value: `${Math.round(t.used || 0)} of ${Math.round(t.available || 0)} MW`, st: (t.available || 0) > 0 ? 'live' : 'dead',
       notes: X === 'EPS' ? [] : [`crosslink: TIE ${grid.ties.crosslink.includes(X) ? 'CLOSED' : 'OPEN'}`, `EPS tap: ${grid.taps?.[X] ? `up to ${grid.taps[X]}` : 'closed'}`] };
@@ -760,7 +762,7 @@ function renderDistribution(grid) {
     const fb = grid.fuel?.[X === 'Deu' ? 'deu' : 'am'];
     const tanks = fb?.tanks || [];
     const main = tanks.find((t) => t.name === 'main');
-    if (main) left.push({ label: main.label || 'Main storage', value: `${main.level} of ${main.cap}`, st: main.tied ? (fb.flow ? 'live' : 'dead') : 'open', tank: 'main' });
+    if (main) left.push({ label: main.label || 'Main storage', value: `${main.level} of ${main.cap}`, st: main.tied ? (fb.flow ? 'live' : 'dead') : 'open', ...(main.tied && fb.flow ? {} : { word: main.level > 0 ? 'standby' : 'dead' }), tank: 'main' });
     mid = { label: busName, value: fb?.down ? fb.why : fb?.flow ? `moving ${fb.flow}/s` : 'idle', st: fb?.down ? 'dead' : fb?.flow ? 'live' : 'dead', notes: [] };
     for (const t of tanks.filter((x) => x.name !== 'main')) right.push({ label: `${cap(t.name)} tank`, value: `${t.level} of ${t.cap}`, st: t.tied ? (fb.flow ? 'live' : 'dead') : 'open', tank: t.name, kind: 'load' });
   }
@@ -774,7 +776,7 @@ function renderDistribution(grid) {
     const g = svgEl('g', { class: `dist-node dist-node--${n.st}`, transform: `translate(${x} ${y})`, role: 'button', tabindex: 0, 'data-key': n.key || n.tank || n.label });
     g.append(svgEl('rect', { width: w, height: PH, rx: PH / 2, fill: COLOR[n.st], opacity: n.st === 'dead' ? 0.6 : 1, ...(n.st === 'cut' ? { stroke: 'var(--lcars-red)', 'stroke-width': 2 } : {}) }),
       svgEl('text', { x: 16, y: 17, 'font-size': 14, fill: n.st === 'open' || n.st === 'cut' ? 'var(--lcars-text)' : '#000' }, n.label.toUpperCase()),
-      svgEl('text', { x: 16, y: 32, 'font-size': 11, fill: n.st === 'open' || n.st === 'cut' ? '#aaa' : '#000' }, `${n.value} · ${{ live: 'live', dead: 'dead', open: 'open', cut: 'CUT OFF' }[n.st]}`));
+      svgEl('text', { x: 16, y: 32, 'font-size': 11, fill: n.st === 'open' || n.st === 'cut' ? '#aaa' : '#000' }, `${n.value} · ${n.word || { live: 'live', dead: 'no power', open: 'standby', cut: 'CUT OFF' }[n.st]}`));
     if (n.key || n.tank) g.addEventListener('click', () => (n.tank ? send({ type: 'grid', tank: { bus: X === 'Deu' ? 'deu' : 'am', name: n.tank, tied: n.st === 'open' } }) : toggle(n.key)));
     svg.append(g);
     return { x, y, w };
@@ -1363,6 +1365,7 @@ function renderCombat() {
     const ties = (key, label, cellKey = key, { level = 0, note = '', controls = [], sign } = {}) => {
       const cut = grid.cutOff?.[key];
       if (cut?.length) note = `${note ? `${note} · ` : ''}CUT OFF (${cut.map((n) => NODE_NAMES[n]).join(', ')}): a conduit above isn't tied`;
+      else if (grid.tieNodes[key]?.length && !grid.ties[key]?.length && !SOURCE_ROWS.has(cellKey)) note = note ? `STANDBY · ${note}` : 'STANDBY';
       const th = el('th', { scope: 'row' }, el('span', { textContent: label }), ...(note ? [el('small', { className: 'grid-note', textContent: note })] : []));
       if (level) th.className = `grid-indent grid-indent--${level}`;
       const tr = el('tr', { id: `ties-${key.replace(':', '-')}` }, th, ctlCell(controls));
@@ -1891,10 +1894,12 @@ function renderServices() {
   const box = document.querySelector('[data-services]');
   const p = ownPower();
   if (!box || !p) return;
+  // (Nothing to a service: Standby if it's untied or limited to 0, switched off on purpose; No power if it's tied but unfed.)
+  const idle = (sys) => ((lastNav.own.grid?.ties?.[`system:${sys}`] || []).length && lastNav.own.allocated?.[sys] !== 0 ? 'No power' : 'Standby');
   const state = [
     ['Alert status', lastNav.own.alert && lastNav.own.alert !== 'green' ? `${lastNav.own.alert[0].toUpperCase()}${lastNav.own.alert.slice(1)} alert` : 'Condition green', 'sky'],
-    ['Replicators', p.replicators <= 0 ? 'Offline' : p.replicators < 20 ? `Rationed (${p.replicators}%)` : `Online (${p.replicators}%)`, 'orange'],
-    ['Recreation · holodecks', p.recreation <= 0 ? 'Closed' : `Open (${p.recreation}%)`, 'gold'],
+    ['Replicators', p.replicators <= 0 ? idle('replicators') : p.replicators < 20 ? `Rationed (${p.replicators}%)` : `Online (${p.replicators}%)`, 'orange'],
+    ['Recreation · holodecks', p.recreation <= 0 ? `Closed · ${idle('recreation').toLowerCase()}` : `Open (${p.recreation}%)`, 'gold'],
   ];
   const sig = JSON.stringify(state);
   if (box.dataset.sig === sig) return;

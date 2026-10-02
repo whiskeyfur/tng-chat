@@ -254,7 +254,7 @@
     .msd-canvas { width: 100%; height: 260px; display: block; cursor: pointer; }
     .msd-overall { margin: 0 0 4px; font-size: 20px; text-transform: uppercase; }
     .msd-overall[data-state="ok"] { color: #66cc66; } .msd-overall[data-state="warn"] { color: var(--lcars-gold); } .msd-overall[data-state="bad"] { color: var(--lcars-red); }
-    .msd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; }
+    .msd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
     @media (max-width: 760px) { .msd-grid { grid-template-columns: 1fr; } }
     .msd-bar { display: grid; grid-template-columns: 9em 1fr 5em; align-items: center; gap: 8px; margin: 4px 0; text-transform: uppercase; font-size: 14px; }
     .msd-bar__track { height: 12px; background: #222; border-radius: 6px; overflow: hidden; }

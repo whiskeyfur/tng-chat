@@ -1305,10 +1305,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); return n?.own.warp === 0 && n.own.x < 260; }, 30000);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     obrien.send({ type: 'power', power: { engines: 0, injectors: 0, shields: 0, sensors: 20, lateral: 0, deflector: 0, sif: 0, idf: 0, transporter: 0, weapons: 0, atmosphere: 60, thermal: 60, gravity: 0, lights: 0, replicators: 0, recreation: 0, amBus: 0 } }); // (the AM bus's containment draws all the time it's on)
-    await nog.waitForSelector('[data-readout="Replicators"]:has-text("Offline")', { state: 'attached' });
+    await nog.waitForSelector('[data-readout="Replicators"]:has-text("Standby")', { state: 'attached' });
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'detached' });
     await carol.waitForSelector('#weapons-lock-state:has-text("No weapons lock")');
-    step(`the Defiant powered down (replicators and holodecks too: its Crew consoles show them offline) to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 250 units away, and the weapons lock was lost`);
+    step(`the Defiant powered down (replicators and holodecks too: its Crew consoles show them on standby) to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 250 units away, and the weapons lock was lost`);
     obrien.send({ type: 'power', power: { engines: 80, injectors: 80, shields: 60, sensors: 100, lateral: 100, deflector: 100, sif: 100, idf: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, replicators: 40, recreation: 10, amBus: 100 } });
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     step('powered up again, the Defiant showed up on sensors');

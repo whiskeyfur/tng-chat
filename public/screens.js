@@ -83,3 +83,27 @@ window.capsule = function capsule(body, { id } = {}) {
   c.append(Object.assign(document.createElement('span'), { className: 'capsule-cap capsule-cap--l' }), body, Object.assign(document.createElement('span'), { className: 'capsule-cap capsule-cap--r' }));
   return c;
 };
+
+// Sidebar labels never clip: a label wider than its button (a long word in a narrow
+// column) shrinks a pixel at a time, down to 9px; its full text is its title too.
+(function () {
+  const fit = () => {
+    for (const b of document.querySelectorAll('.lcars-nav-button')) {
+      if (!b.offsetParent) continue;
+      b.style.fontSize = '';
+      b.title = b.textContent.trim();
+      let size = parseFloat(getComputedStyle(b).fontSize);
+      while (b.scrollWidth > b.clientWidth + 1 && size > 9) b.style.fontSize = `${--size}px`;
+    }
+  };
+  let queued = false;
+  const later = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; fit(); }); } };
+  window.addEventListener('resize', later);
+  window.addEventListener('screenchange', later);
+  const start = () => {
+    later();
+    for (const s of document.querySelectorAll('.lcars-sidebar')) new MutationObserver(later).observe(s, { childList: true, subtree: true, characterData: true, attributeFilter: ['hidden'] });
+    document.fonts?.ready.then(later);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();

@@ -48,7 +48,16 @@ button.lcars-nav-button { font: inherit; font-size: 17px; letter-spacing: inheri
 .lcars-button:disabled { filter: grayscale(1) brightness(0.5); cursor: not-allowed; }
 .lcars-button--alert { --accent: var(--lcars-red); }
 .ops-hint { margin: 0; font-size: 14px; color: var(--lcars-tan); text-transform: uppercase; }
-.ops-subhead { margin: 4px 0 0; color: var(--accent); font-size: 16px; font-weight: 400; text-transform: uppercase; opacity: 0.85; }
+/* A group's heading, the LCARS way: a left cap, the label, then a bar running to a right cap
+   at the edge; the group's items listed under it. (The Comms directory's ships too.) */
+.ops-subhead, .comms-dir .comms-ship {
+  --head: var(--accent);
+  display: flex; align-items: center; gap: 6px;
+  margin: 10px 0 4px; min-height: 18px;
+  color: var(--head); font-size: 15px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.15;
+}
+.ops-subhead::before, .comms-dir .comms-ship::before { content: ''; flex: 0 0 18px; align-self: stretch; min-height: 16px; background: var(--head); border-radius: 999px 0 0 999px; }
+.ops-subhead::after, .comms-dir .comms-ship::after { content: ''; flex: 1 1 24px; height: 10px; background: var(--head); border-radius: 0 999px 999px 0; opacity: 0.85; }
 .ops-readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 28px; }
 
 /* Sidebar button that opens Comms: flashes on an incoming call, glows in a call. */
@@ -121,21 +130,16 @@ button.lcars-nav-button { font: inherit; font-size: 17px; letter-spacing: inheri
 .lcars-modal__bar::before { content: ''; align-self: stretch; width: 30px; background: var(--accent); }
 .lcars-modal__title { color: var(--accent); font-size: 30px; text-transform: uppercase; line-height: 1; padding: 0 8px; }
 .lcars-modal__fill { flex: 1; height: var(--bar); background: var(--lcars-peach); border-radius: 0 999px 999px 0; }
-.lcars-modal__net { color: var(--lcars-sky); text-transform: uppercase; font-size: 15px; }
+.lcars-modal__net { color: var(--lcars-sky); text-transform: uppercase; font-size: 15px; min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .lcars-modal .lcars-note:empty, .ops-notice:empty { display: none; }
 .ops-notice { margin: 0; color: var(--lcars-sky); text-transform: uppercase; }
 
 .comms-dir { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; text-transform: uppercase; }
-.comms-dir .comms-ship {
-  margin-top: 10px;
-  padding: 2px 14px;
-  border-radius: 999px 0 0 999px;
-  background: var(--lcars-lilac);
-  color: #000;
-  font-size: 14px;
-}
-.comms-dir .comms-ship--home { background: var(--lcars-gold); }
-.comms-dir .comms-entry { display: flex; align-items: center; gap: 12px; padding: 4px 0 4px 6px; border-bottom: 2px solid #1a1a1a; }
+.comms-dir .comms-ship { --head: var(--lcars-lilac); }
+.comms-dir .comms-ship--home { --head: var(--lcars-gold); }
+/* (Its people under it, indented; their place a small caption above.) */
+.comms-dir .place-head { padding-left: 24px; white-space: normal; }
+.comms-dir .comms-entry { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 4px 0 4px 24px; border-bottom: 2px solid #1a1a1a; }
 .comms-dir .comms-entry span { flex: 1; color: var(--lcars-gold); font-size: 20px; }
 .comms-dir .comms-entry small { color: var(--lcars-tan); font-size: 15px; margin-left: 8px; }
 .comms-dir .comms-entry .lcars-button { min-height: 34px; }
@@ -221,7 +225,7 @@ body[data-alert='black'] .lcars-elbow, body[data-alert='black'] .lcars-bar__seg,
    logs scroll inside themselves; a nested scroller keeps its scroll to itself.
    A drag that starts on a tap scrolls rather than taps: taps act on click.) */
 .lcars-sidebar, .screen, .screen .lcars-panel__body, .lcars-modal__frame, .lcars-modal.admin-dialog, .admin-dialog .admin-log,
-.lcars-log, .v-chatlog, .comms-msgs, .msd-log, .nav-side, .ls-table, #ops-view .screen, dialog {
+.lcars-log, .v-chatlog, .comms-msgs, .msd-log, .nav-side, .ls-table, #ops-view .screen, dialog, .lcars-pane, .lcars-sidebar__col, .comms-dir, .msd-places {
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y;
   overscroll-behavior: contain;
@@ -240,6 +244,8 @@ body[data-alert='black'] .lcars-elbow, body[data-alert='black'] .lcars-bar__seg,
 .lcars-sidebar__col { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
 .lcars-sidebar__col .lcars-nav-button { flex-shrink: 0; min-height: 52px; }
 .lcars-sidebar__col--left .lcars-nav-button { justify-content: flex-start; text-align: left; }
+/* (LCARS blocks: the buttons a column of contiguous blocks, thin black gaps between them.) */
+.lcars-sidebar, .lcars-sidebar__col { gap: 4px; }
 /* The left pane: closed, nothing; open, it takes its share beside the station screen (all of it on a narrow screen). */
 .lcars-app { grid-template-columns: var(--side) 0 minmax(0, 1fr); }
 /* (The slide only while the pane opens or closes: a resize doesn't animate.) */
@@ -247,11 +253,13 @@ body.pane-moving .lcars-app { transition: grid-template-columns 0.25s ease; }
 .lcars-header, .lcars-footer { grid-column: 1 / -1; }
 .lcars-pane { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 18px; padding-top: 4px; border-right: 0 solid var(--lcars-tan); }
 body[data-pane] .lcars-app { grid-template-columns: var(--side) min(560px, 44vw) minmax(0, 1fr); }
-body[data-pane] .lcars-pane { overflow-y: auto; border-right-width: 8px; border-radius: 0 24px 24px 0; padding-right: 12px; }
+body[data-pane] .lcars-pane { overflow-y: auto; border-right-width: 8px; border-radius: 0 24px 24px 0; padding-right: 12px; padding-left: var(--gutter); }
 .lcars-pane .screen { flex: 1 1 auto; }
 .lcars-modal.lcars-modal--pane { position: static; width: auto; max-width: none; max-height: none; margin: 0; flex: 1 1 auto; min-height: 0; }
 .lcars-modal.lcars-modal--pane:not([open]) { display: none; }
-.lcars-modal--pane .lcars-modal__frame { max-height: 100%; }
+/* (In the pane, Comms fills it and its frame is what scrolls.) */
+.lcars-modal.lcars-modal--pane[open] { display: flex; flex-direction: column; }
+.lcars-modal--pane .lcars-modal__frame { flex: 1 1 auto; min-height: 0; max-height: none; }
 @media (max-width: 900px) {
   body[data-pane] .lcars-app { grid-template-columns: var(--side) minmax(0, 1fr) 0; }
   body[data-pane] .lcars-content { visibility: hidden; }
@@ -259,6 +267,7 @@ body[data-pane] .lcars-pane { overflow-y: auto; border-right-width: 8px; border-
 /* (A phone-narrow screen: the two columns stack in one narrow sidebar, ship-wide first.) */
 @media (max-width: 600px) {
   :root { --side: 92px; }
+  .lcars-nav-button { font-size: 12px; padding: 0 6px 4px; }
   .lcars-sidebar { display: flex; flex-direction: column; overflow-y: auto; }
   .lcars-sidebar__col { overflow: visible; flex: 0 0 auto; }
   .lcars-sidebar__col .lcars-sidebar__fill { display: none; }

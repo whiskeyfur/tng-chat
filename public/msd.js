@@ -56,12 +56,14 @@
     const g = own.grid, p = own.power, cs = g.computers || [];
     const drives = Object.values(g.drives || {}), aux = Object.values(g.aux || {}), tr = own.transporter || {};
     const level = (v, full = 100) => (v >= full ? 'ok' : v > 0 ? 'warn' : 'off');
+    // (Nothing coming in: Standby when it's untied or limited to 0, switched off on purpose; No power when it's tied but unfed.)
+    const pct = (sys, v, full = 100) => (v > 0 ? [level(v, full), `${v}%`] : (g.ties?.[`system:${sys}`] || []).length && own.allocated?.[sys] !== 0 ? ['warn', 'No power'] : ['off', 'Standby']);
     const fusionUp = [...drives, ...aux].filter((x) => x.state === 'running').length;
     return {
-      sens: [level(p.lateral), `${p.lateral}%`],
-      lrs: [level(p.sensors), `${p.sensors}%`],
+      sens: pct('lateral', p.lateral),
+      lrs: pct('sensors', p.sensors),
       env: [p.lifeSupport >= 100 ? 'ok' : p.lifeSupport >= 50 ? 'warn' : p.lifeSupport > 0 ? 'bad' : 'off', `${p.lifeSupport}%`],
-      atmo: [level(p.atmosphere), `${p.atmosphere}%`], thermal: [level(p.thermal), `${p.thermal}%`], gravity: [level(p.gravity), `${p.gravity}%`], lighting: [level(p.lighting), `${p.lighting}%`],
+      atmo: pct('atmosphere', p.atmosphere), thermal: pct('thermal', p.thermal), gravity: pct('gravity', p.gravity), lighting: pct('lighting', p.lighting),
       comp: [cs.every((x) => x.state === 'online') ? 'ok' : cs.some((x) => x.state === 'booting') ? 'busy' : cs.some((x) => x.state === 'online') ? 'warn' : cs.some((x) => x.state === 'crashed') ? 'bad' : 'off',
         cs.some((x) => x.state === 'booting') ? 'Booting' : `${cs.filter((x) => x.state === 'online').length} of ${cs.length}`],
       trans: [tr.fault ? 'bad' : tr.diag?.state === 'passed' ? 'ok' : tr.diag?.state === 'running' ? 'busy' : 'warn', tr.fault ? 'Offline' : tr.diag?.state === 'passed' ? 'Ready' : tr.diag?.state === 'running' ? 'Diagnostic' : 'Needs diagnostic'],
@@ -78,12 +80,12 @@
       deut: (() => { const sys = ['deu', 'am'].flatMap((b) => g.fuel?.[b]?.tanks.filter((t) => t.name !== 'main' && t.name !== 'torpedo') || []); const low = sys.filter((t) => t.pct < (g.fuel?.deu?.light ?? 30));
         return [g.fuel?.am?.down ? 'bad' : !low.length ? 'ok' : g.fuel?.deu?.flow || g.fuel?.am?.flow ? 'busy' : 'warn', g.fuel?.am?.down ? 'AM bus offline' : `D ${g.deuterium} · AM ${g.antimatter}`]; })(),
       eps: [g.epsLive ? 'ok' : g.epsGen >= g.epsChargeGen ? 'busy' : 'off', g.epsLive ? 'Energized' : g.epsGen >= g.epsChargeGen ? 'Charging' : 'Dead'],
-      sif: [p.sif >= 90 ? 'ok' : p.sif >= 50 ? 'warn' : p.sif > 0 ? 'bad' : 'off', `${p.sif}%`],
-      idf: [p.idf >= 90 ? 'ok' : p.idf >= 50 ? 'warn' : p.idf > 0 ? 'bad' : 'off', `${p.idf}%`],
+      sif: p.sif > 0 ? [p.sif >= 90 ? 'ok' : p.sif >= 50 ? 'warn' : 'bad', `${p.sif}%`] : pct('sif', 0),
+      idf: p.idf > 0 ? [p.idf >= 90 ? 'ok' : p.idf >= 50 ? 'warn' : 'bad', `${p.idf}%`] : pct('idf', 0),
       shld: [own.shieldsUp ? 'ok' : 'off', own.shieldsUp ? `Up ${own.combat?.shield ?? ''}%` : 'Down'],
       batt: (() => { const b = ['A', 'B', 'C'].map((n) => g.stores?.[n]).filter(Boolean); const avg = Math.round(b.reduce((a, x) => a + x.level, 0) / (b.length || 1)); return [b.some((x) => x.breaker) ? (avg >= 25 ? 'ok' : 'warn') : 'off', `${avg}%${b.some((x) => x.supplying) ? ' · supplying' : ''}`]; })(),
       ext: [g.docked || Object.values(g.ports || {}).some((v) => v?.ship) ? (Object.values(g.cells?.dock || {}).some((v) => v) || Object.values(g.cells?.ship || {}).some((v) => v) ? 'ok' : 'warn') : 'off', g.docked ? `Docked: ${g.docked}` : 'Not docked'],
-      tractor: [g.towing ? 'ok' : 'off', g.towing ? `Towing the ${g.towing}` : 'Off'],
+      tractor: [g.towing ? 'ok' : 'off', g.towing ? `Towing the ${g.towing}` : 'Standby'],
     };
   }
   const TILES = [['fuel', 'Antimatter containment'], ['batt', 'Bus batteries'], ['comp', 'Computer cores'], ['deut', 'Fuel buses'], ['fusion', 'Fusion reactors'], ['eps', 'EPS grid'],
@@ -101,7 +103,7 @@
     const item = (key, name) => {
       if (!g.tieNodes?.[key]) return null;
       if (tied(key).length && !via(key).length) return [name, 'bad', 'Cut off'];
-      if (!tied(key).length) return [name, 'off', 'Untied'];
+      if (!tied(key).length) return [name, 'off', 'Standby']; // (untied: switched off on purpose)
       if (key.startsWith('sub:') && g.subOk?.[key.slice(4)] === false) return [name, 'bad', 'No power'];
       const v = p[key.slice(7)];
       if (key.startsWith('system:') && typeof v === 'number') return [name, v >= 90 ? 'ok' : v > 0 ? 'warn' : 'off', `${v}%`];
@@ -113,7 +115,7 @@
         ...pl.stations.filter((st) => g.consoleOk && st in g.consoleOk).map((st) => [`${st} console`, g.consoleOk[st] ? 'ok' : 'off', g.consoleOk[st] ? 'Online' : 'No power']),
         ...(pl.rows || []).map((key) => item(key, key.startsWith('sub:') ? g.subsystems?.[key.slice(4)]?.name || key.slice(4) : g.sysNames?.[key.slice(7)] || key.replace(/^\w+:/, ''))).filter(Boolean),
       ];
-      const path = !g.tieNodes?.[conduit] ? null : via(conduit).length ? ['ok', via(conduit).map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(', ')] : tied(conduit).length ? ['bad', 'Cut off'] : ['off', 'No power path'];
+      const path = !g.tieNodes?.[conduit] ? null : via(conduit).length ? ['ok', via(conduit).map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(', ')] : tied(conduit).length ? ['bad', 'Cut off'] : ['off', 'Standby'];
       const worst = [path?.[0], ...items.map((x) => x[1])].filter(Boolean).reduce((a, b) => (WORST.indexOf(b) > WORST.indexOf(a) ? b : a), 'ok');
       return { name: pl.name, deck: pl.deck, path, items, state: worst };
     }).filter((x) => x.items.length || x.path);

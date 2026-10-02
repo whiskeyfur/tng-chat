@@ -18,6 +18,7 @@
   --side: 300px;     /* sidebar (two columns) and elbow width */
   --bar: 22px;       /* thickness of the horizontal bars */
   --gap: 6px;        /* black gutter between LCARS blocks */
+  --gutter: clamp(6px, 1.2vw, 12px); /* black gutter between the sidebar and the content beside it */
   --fillet: 28px;    /* inner curve of the elbows */
   --font: 'Antonio', 'Arial Narrow', 'Roboto Condensed', sans-serif;
   color-scheme: dark;
@@ -142,7 +143,10 @@ body { font-family: var(--font); font-size: 18px; letter-spacing: 0.04em; min-he
   text-transform: uppercase;
   font-size: 17px;
   text-align: right;
-  overflow-wrap: anywhere;
+  /* (Whole words: a label too wide for its button shrinks to fit, screens.js; never broken mid-word.) */
+  overflow-wrap: normal;
+  word-break: normal;
+  line-height: 1.1;
   transition: filter 0.15s;
 }
 .lcars-nav-button:hover { filter: brightness(1.2); }
