@@ -49,6 +49,7 @@
     if (opts.extras) $('comms-extras').append(opts.extras);
 
     let users = [];
+    let hardLinks = []; // ships we're linked to by a docking port's hard line
     let prev = 'idle';
     // Text messages, no call needed: to one person or a group, by tapping Msg in the directory.
     const recipients = new Set();
@@ -114,7 +115,7 @@
         const isHome = ship.toLowerCase() === home;
         ul.append(Object.assign(document.createElement('li'), {
           className: `comms-ship${isHome ? ' comms-ship--home' : ''}`,
-          textContent: isHome ? `Aboard the ${ship}` : `The ${ship} · data link`,
+          textContent: isHome ? `Aboard the ${ship}` : `The ${ship} · ${hardLinks.includes(ship) ? 'hard link: docking port' : 'data link'}`,
         }));
         const crew = others.filter((u) => u.ship === ship)
           .sort((a, b) => (b.station === 'Operations') - (a.station === 'Operations') || a.name.localeCompare(b.name));
@@ -205,6 +206,7 @@
       switch (msg.type) {
         case 'users':
           users = msg.users;
+          hardLinks = msg.hardLinks || [];
           setOps(msg.ops);
           $('comms-net').textContent = msg.network?.length > 1 ? `Data network: ${msg.network.join(' · ')}` : '';
           renderDirectory();

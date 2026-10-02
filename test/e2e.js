@@ -1192,18 +1192,21 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /containment can't be switched off/.test(m.text)));
     step('the A-B crosslink on; the warp core (EPS only) refused other ties; containment could not be left without a feed');
 
-    // Docked, a hard line: the Enterprise links to Starbase 12 with its subspace relay untied.
+    // Docked, a hard line: docking left the starbase connection untied; tying its
+    // ODN opens a hard link to Starbase 12 with the subspace relay untied. Ops
+    // can't close it; untying the ODN does.
+    assert.deepEqual(laforge.nav()?.own.grid.connections.find((x) => x.kind === 'station').ties, { deu: false, am: false, odn: false }, 'docking left the starbase connection tied');
     laforge.send({ type: 'grid', ties: { 'sub:subspace': [] } });
     await waitFor(() => laforge.nav()?.own.grid.subOk.subspace === false);
-    await screen(op, 'link');
-    await op.selectOption('#link-ship', 'Starbase 12');
-    await op.click('#link-form button');
+    laforge.send({ type: 'grid', connTie: { res: 'odn', on: true } });
     await op.waitForFunction(() => window.__operator.network.includes('Starbase 12'), null, { timeout: 15000 });
     await screen(op, 'link');
-    await op.click('#links li:has-text("Starbase 12") button');
+    await op.waitForSelector('#links li:has-text("hard link: docking port")');
+    assert.equal(await op.$('#links li:has-text("Starbase 12") button'), null, 'Ops was offered Close on the hard link');
+    laforge.send({ type: 'grid', connTie: { res: 'odn', on: false } });
     await op.waitForFunction(() => !window.__operator.network.includes('Starbase 12'));
-    laforge.send({ type: 'grid', ties: { 'sub:subspace': ['B'] } });
-    step('docked at Starbase 12, the Enterprise opened a data link to it over the hard line with its subspace relay unpowered');
+    laforge.send({ type: 'grid', ties: { 'sub:subspace': ['B'], dock: ['B'] } }); // (and dock power back on Bus B)
+    step('docked at Starbase 12 with nothing tied; tying the ODN opened a hard link (subspace relay unpowered) that Ops could not close; untying it closed the link');
 
     // Every subsystem is listed under its console in the grid table, Security's emitters included.
     const geordi = await openAs(browser, 'geordi', 'geordi', 'Enterprise', 'Engineering');
@@ -1358,6 +1361,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /Released from the Defiant's tractor beam/.test(m.text)));
     sulu.send(JSON.stringify({ type: 'dock' }));
     await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.docked)) === 'Starbase 12');
+    laforge.send({ type: 'grid', ties: { dock: ['B'] } }); // (docking leaves the connection untied)
     laforge.send({ type: 'grid', refit: true });
     await waitFor(() => laforge.nav()?.own.grid.core === 'offline' && laforge.nav().own.grid.antimatter >= 900); // (full pods; the core's own tank takes some over the bus)
     // (If the EPS collapsed while the core was out, its manifold has to pressurize again for the SIF.)
@@ -1371,7 +1375,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Supplies: the Enterprise exports deuterium to the starbase; the Defiant
     // docks with the Enterprise and sends it some of its own.
     const deuBefore = laforge.nav().own.grid.deuterium;
-    laforge.send({ type: 'grid', conn: { with: 'station', res: 'deu', exp: true } });
+    laforge.send({ type: 'grid', conn: { with: 'station', res: 'deu', exp: true }, connTie: { res: 'deu', on: true } });
     await waitFor(() => laforge.nav()?.own.grid.deuterium <= deuBefore - 150, 15000);
     laforge.send({ type: 'grid', conn: { with: 'station', res: 'deu', exp: false } });
     const ent = laforge.nav().own;
@@ -1457,6 +1461,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     laforge.send({ type: 'grid', computer: { n: 1, on: true } }); // (texts need a computer core: it boots while we go on)
     await op.waitForSelector('#console-dark', { state: 'hidden' });
     step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt cold iron (nothing tied in, no fuel) docked at ${reborn.base}; tied to dock power, the ops console came back`);
+    // Rebuilt like a new ship, its starbase connection had only the ODN tied: a hard link to the starbase. Untied, the link closes.
+    await op.waitForFunction((b) => window.__operator.network.includes(b), reborn.base, { timeout: 10000 });
+    laforge.send({ type: 'grid', connTie: { res: 'odn', on: false } });
+    await op.waitForFunction((b) => !window.__operator.network.includes(b), reborn.base, { timeout: 10000 });
     laforge.close();
 
     // Automated starbases: a hail with nobody aboard gets the automated reply;
@@ -1637,6 +1645,9 @@ const audioBytes = (page) => page.evaluate(async () => {
       for (const name of names) barclay.send({ type: 'grid', tank: { bus, name, tied: true, fill: true } });
     }
     await waitFor(() => barclay.nav()?.own.grid.ties['system:sif'].join() === 'EPS'); assert.ok(Object.values(cold.drives).every((d) => d.state === 'off') && Object.values(cold.taps).every((t) => t === 0), 'drives off and taps closed');
+    // A new ship's starbase connection: only the ODN tied (no power, Deu. or AM), so a hard link to the starbase.
+    assert.deepEqual(cold.connections.find((x) => x.kind === 'station')?.ties, { deu: false, am: false, odn: true }, 'a new ship starts with only the ODN tied');
+    assert.deepEqual(cold.ties.dock, [], 'a new ship starts with dock power untied');
     ro.send({ type: 'lock', ship: 'Enterprise' });
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /console offline/.test(m.text)));
     // No computer core online: no text messages.
@@ -1682,12 +1693,12 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /needs antimatter and deuterium/.test(m.text)));
     // Supplies come through the starbase connection: Import. Antimatter needs its
     // containment powered (and the antimatter bus up): none comes aboard without them.
-    barclay.send({ type: 'grid', conn: { with: 'station', res: 'am', imp: true } });
+    barclay.send({ type: 'grid', conn: { with: 'station', res: 'am', imp: true }, connTie: { res: 'am', on: true } });
     barclay.send({ type: 'grid', ties: { containment: ['C'] } }); // nothing on Bus C
     await waitFor(() => /containment|antimatter bus/.test(barclay.nav()?.own.grid.connections?.[0]?.am.why || ''));
     assert.equal(barclay.nav().own.grid.antimatter, 0, 'no antimatter without its containment and the antimatter bus');
     barclay.send({ type: 'grid', ties: { containment: ['A'] } });
-    barclay.send({ type: 'grid', conn: { with: 'station', res: 'deu', imp: true } });
+    barclay.send({ type: 'grid', conn: { with: 'station', res: 'deu', imp: true }, connTie: { res: 'deu', on: true } });
     await waitFor(() => barclay.nav()?.own.grid.fuel.deu.tanks.reduce((a, x) => a + x.level, 0) >= 395, 20000); // (the systems' tanks take theirs over the bus as it comes in)
     // (The drives' tanks fill from the deuterium tank over the bus; a chamber lights at 30%.)
     await waitFor(() => { const ts = barclay.nav()?.own.grid.fuel.deu.tanks; return ts && ['port', 'starboard', 'core'].every((n) => ts.find((x) => x.name === n).pct >= 30); }, 10000);

@@ -13,7 +13,7 @@
     const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
     const voice = comms.voice;
     let roster = [], ships = [], incoming = [], outgoing = [];
-    let links = [], network = [], linkIncoming = [], linkOutgoing = [];
+    let links = [], hardLinks = [], network = [], linkIncoming = [], linkOutgoing = [];
     let graph = { ships: [], links: [], requests: [] };
     let broadcasts = [];
     let me = getMe(), ship = me.ship;
@@ -36,6 +36,7 @@
           logRosterChanges(roster, msg.users);
           logShipChanges(ships, msg.ships);
           ({ users: roster, ships, incoming, outgoing, links, network, linkIncoming, linkOutgoing } = msg);
+          hardLinks = msg.hardLinks || [];
           graph = msg.graph || graph;
           broadcasts = msg.broadcasts || [];
           remoteBlock = !!msg.remoteBlock;
@@ -177,7 +178,8 @@
       // Data link
       $('network').textContent = network.length ? `Data network: ${[ship, ...network].join(' · ')}` : 'Not linked';
       const linkList = $('links');
-      linkList.replaceChildren(...(links.length ? links.map((s) => el('li', { className: 'ops-hail' },
+      linkList.replaceChildren(...(links.length ? links.map((s) => (hardLinks || []).includes(s) ? el('li', { className: 'ops-hail' },
+        el('span', { className: 'ops-hail__text', textContent: `Linked with the ${s} · hard link: docking port` })) : el('li', { className: 'ops-hail' },
         el('span', { className: 'ops-hail__text', textContent: `Linked with the ${s}` }),
         el('button', { className: 'lcars-button lcars-button--pill lcars-button--alert', textContent: 'Close link',
           onclick: () => send({ type: 'link-close', ship: s }) }))) : [el('li', { className: 'empty', textContent: 'No open links' })]));

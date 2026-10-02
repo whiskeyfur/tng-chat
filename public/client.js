@@ -421,7 +421,7 @@ function renderCommLinks() {
     ...(commLinks.linkIncoming.length ? [el('h3', { className: 'ops-subhead', textContent: 'Requests to us' }), el('ul', { className: 'st-list', id: 'links-incoming' }, ...commLinks.linkIncoming.map((r) => el('li', {}, `The ${r.fromShip}`, el('span', {}, btn('Accept', () => send({ type: 'link-accept', request: r.id })), btn('Decline', () => send({ type: 'link-decline', request: r.id }), true)))))] : []),
     ...(commLinks.linkOutgoing.length ? [el('h3', { className: 'ops-subhead', textContent: 'Our requests' }), el('ul', { className: 'st-list' }, ...commLinks.linkOutgoing.map((r) => el('li', {}, `The ${r.toShip}`, el('span', {}, btn('Cancel', () => send({ type: 'link-cancel', request: r.id }), true)))))] : []),
     el('h3', { className: 'ops-subhead', textContent: 'Open links' }),
-    el('ul', { className: 'st-list', id: 'links-open' }, ...(commLinks.links.length ? commLinks.links.map((n) => { const li = el('li', {}, n, el('span', {}, btn('Close', () => send({ type: 'link-close', ship: n }), true))); li.dataset.ship = n; return li; }) : [el('li', { className: 'empty', textContent: 'No open links' })])),
+    el('ul', { className: 'st-list', id: 'links-open' }, ...(commLinks.links.length ? commLinks.links.map((n) => { const li = (commLinks.hardLinks || []).includes(n) ? el('li', {}, n, el('small', { className: 'ops-hint', textContent: ' · hard link: docking port' })) : el('li', {}, n, el('span', {}, btn('Close', () => send({ type: 'link-close', ship: n }), true))); li.dataset.ship = n; return li; }) : [el('li', { className: 'empty', textContent: 'No open links' })])),
     el('p', { className: 'ops-notice', id: 'links-status', textContent: status }));
 }
 
@@ -1147,7 +1147,16 @@ function renderCombat() {
       };
       const power = ties(x.kind === 'station' ? 'dock' : 'ship', 'Power', x.kind === 'station' ? 'dock' : 'ship', { level: 2, controls: io('power', x.power), note: `${x.power.imp && x.power.exp ? 'holding full · ' : ''}${x.powerIn > 0 ? `+${x.powerIn} in` : x.powerIn < 0 ? `${x.powerIn} out` : 'nothing moving'}` });
       power.id = `conn-${slug}-power`;
-      return [parentRow(`conn-${slug}`, x.kind === 'station' ? `${x.name} (${x.port} dock)` : `The ${x.name} (${x.port} dock)`, 1, x.kind === 'station' ? 'a starbase: it always has fuel to give and room to take' : ''),
+      const parent = parentRow(`conn-${slug}`, x.kind === 'station' ? `${x.name} (${x.port} dock)` : `The ${x.name} (${x.port} dock)`, 1, x.kind === 'station' ? `a starbase: it always has fuel to give and room to take${x.hardLink ? ' · hard link: docking port' : ''}` : '');
+      // The starbase connection ties to the Deu. and AM buses (its Import / Export need them) and the ODN (a hard data link).
+      if (x.kind === 'station' && x.ties) for (const [res, col] of [['deu', 'Deu'], ['am', 'AM'], ['odn', 'ODN']]) {
+        const box = el('input', { type: 'checkbox', checked: !!x.ties[res], ariaLabel: `${x.name} connection: ${NODE_NAMES[col]}` });
+        box.id = `conn-tie-${res}`;
+        box.onchange = () => send({ type: 'grid', connTie: { res, on: box.checked } });
+        const cell = parent.children[1 + COLS.indexOf(col)];
+        cell.className = ''; cell.replaceChildren(el('label', { className: 'grid-tie' }, box));
+      }
+      return [parent,
         fuelRow('deu', 'Deuterium', grid.deuterium, grid.fuelCaps.deuterium), fuelRow('am', 'Antimatter', grid.antimatter, grid.fuelCaps.antimatter), power];
     });
     // The stores, one per column under the headings: each bus's battery and

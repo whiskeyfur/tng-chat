@@ -91,6 +91,7 @@ const sockets = new Set();   // every connection, for the ship list
 const shields = new Set();   // ship keys with shields up
 const hails = new Map();     // hail id -> { id, fromShip, toShip, caller (user id) }
 const links = new Set();     // data links: "shipKeyA|shipKeyB", sorted
+const hardLinks = new Set(); // those that are a docked ship's hard link to its starbase (ODN tied through the docking port)
 const linkRequests = new Map(); // request id -> { id, fromShip, toShip }
 
 const clean = (s) => (typeof s === 'string' ? s.trim().replace(/\s+/g, ' ') : '');
@@ -153,7 +154,7 @@ function broadcastCrew(key) {
   for (const k of net) {
     const ops = opsOf(k).length > 0;
     for (const u of crewOf(k)) {
-      send(u, { type: 'users', users: everyone.map((x) => seenBy(u, x)), ops, network: [...net].map(shipName).sort() });
+      send(u, { type: 'users', users: everyone.map((x) => seenBy(u, x)), ops, network: [...net].map(shipName).sort(), hardLinks: linkedTo(k).filter((o) => hardLinks.has(linkKey(k, o))).map(shipName) });
       sendLibrary(u);
     }
     broadcastOps(k);
@@ -190,6 +191,7 @@ function broadcastOps(key) {
     incoming: all.filter((h) => h.toShip === key).map(describe),
     outgoing: all.filter((h) => h.fromShip === key).map(describe),
     links: linkedTo(key).map(shipName).sort(),
+    hardLinks: linkedTo(key).filter((o) => hardLinks.has(linkKey(key, o))).map(shipName).sort(),
     network: [...network(key)].filter((k) => k !== key).map(shipName).sort(),
     linkIncoming: requests.filter((r) => r.to === key).map(({ id, fromShip }) => ({ id, fromShip })),
     linkOutgoing: requests.filter((r) => r.from === key).map(({ id, toShip }) => ({ id, toShip })),
@@ -202,7 +204,7 @@ function broadcastOps(key) {
   // An ops console remote-controlling this vessel's ops gets its picture too.
   for (const u of users.values()) if (u.operator && u.controlling === key) send(u, msg);
   // Communications runs data links too: it gets the link picture.
-  const links = { type: 'comm-links', ships: otherShips, links: msg.links, network: msg.network, linkIncoming: msg.linkIncoming, linkOutgoing: msg.linkOutgoing };
+  const links = { type: 'comm-links', ships: otherShips, links: msg.links, hardLinks: msg.hardLinks, network: msg.network, linkIncoming: msg.linkIncoming, linkOutgoing: msg.linkOutgoing };
   for (const u of comms) send(u, links);
 }
 
@@ -462,6 +464,7 @@ function operatorMessage(op, msg) {
     }
     case 'link-close': {
       const other = shipKey(clean(msg.ship));
+      if (hardLinks.has(linkKey(op.shipKey, other))) return fail(`hard link: docking port. The ${shipName(other)} link ends only when its ODN tie is cut on the Engineering grid, or on undocking`);
       if (!links.delete(linkKey(op.shipKey, other))) return fail(`no data link with the ${clean(msg.ship)}`);
       opLog(other, `the ${shipName(op.shipKey)} closed the data link`);
       refreshNetworks([op.shipKey, other]);
@@ -937,7 +940,7 @@ function scheduleNav() {
       if (nav.warp === 0 && !nav.dest && now - ap.since > 2000) { // (the computer has had time to set off)
         const base = ap.base && STARBASES.find((b) => b.name === ap.target);
         if (base && Math.hypot(nav.x - base.x, nav.y - base.y) <= DOCK_RANGE && !engOf(k).docked) {
-          engOf(k).docked = base.name; engOf(k).dockedPort = freePort(k) || 'port'; engOf(k).dirty = true; flowCache.delete(k);
+          engOf(k).docked = base.name; engOf(k).dockedPort = freePort(k) || 'port'; engOf(k).dirty = true; untieDock(engOf(k)); flowCache.delete(k);
           opLog(k, `autopilot: docked at ${base.name}`);
           for (const u of crewOf(k)) send(u, { type: 'notice', text: `Helm: autopilot docked us at ${base.name}` });
         } else if (!base) for (const u of crewOf(k)) if (u.station === 'Helm') send(u, { type: 'notice', text: `Helm: autopilot arrived at the ${ap.target}${navState.has(ap.key) && sensorOk(k, ap.key) ? '' : "'s last known position"}` });
@@ -949,16 +952,7 @@ function scheduleNav() {
       if (!nav?.dest || !tgt || !core || !sensorOk(k, t)) { navTargets.delete(k); continue; } // lost: carry on to where it was
       if (Math.hypot(nav.dest.x - tgt.x, nav.dest.y - tgt.y) > 2) send(core, { type: 'core-helm', ship: shipName(k), dest: { x: tgt.x, y: tgt.y, name: shipName(t) } });
     }
-    for (const l of [...links]) {
-      const [a, b] = l.split('|');
-      const relayDown = !commsUp(a, 'subspace') || !commsUp(b, 'subspace');
-      if (!hardLine(a, b) && (!commsOk(a, b) || relayDown) && present(a) && present(b)) {
-        links.delete(l);
-        for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} lost: ${relayDown ? 'a subspace relay is down' : 'out of subspace range'}`);
-        refreshNetworks([a, b]);
-        broadcastAllOps();
-      }
-    }
+    linkTick();
     // Ops consoles list the ships in hailing range: refresh them when that changes.
     const keys = [...new Set([...cores.keys(), ...BASE_KEYS])].sort();
     const sig = keys.flatMap((a, i) => keys.slice(i + 1).filter((b) => commsOk(a, b)).map((b) => `${a}|${b}`)).join(',');
@@ -1641,6 +1635,10 @@ function freshEng(saved, { cold = false } = {}) {
       am: { imp: !!(typeof s.autoRefuel === 'object' ? s.autoRefuel?.antimatter : s.autoRefuel), exp: false },
       power: { imp: !cold, exp: false } } },
     connFlow: {},
+    // The starbase connection's ties: its Import / Export reach the deuterium and antimatter buses
+    // only when tied, and the ODN tie is a hard data link. Docking starts untied; a new ship
+    // (cold) has only the ODN tied; older saves (and warm starts) had everything tied.
+    connTies: s.connTies && typeof s.connTies === 'object' ? { deu: !!s.connTies.deu, am: !!s.connTies.am, odn: !!s.connTies.odn } : !s.conn && cold ? { deu: false, am: false, odn: true } : { deu: true, am: true, odn: true },
     // Each battery's main breaker (closed: in service). Older saves: closed if the old battery was tied in.
     breakers: Object.fromEntries(BUSES.map((X) => [X, typeof s.breakers?.[X] === 'boolean' ? s.breakers[X] : Array.isArray(s.ties?.battery) ? s.ties.battery.length > 0 : true])),
     // Each store's charge (older saves: one battery, shared out across A, B and C; the EPS starts unpressurized).
@@ -1685,7 +1683,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn,
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies,
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
   };
 };
@@ -2045,7 +2043,7 @@ function gridView(k) {
         ...(bus !== 'am' ? {} : n === 'main' ? { field: Math.round(e.contain.field), containKey: 'containment' } : { field: Math.round(e.tankContain[n].field), containKey: AM_CONTAIN[n], reserve: Math.round((100 * e.tankContain[n].reserve) / (tankContainDraw(n) * CONTAIN.reserveSecs)) }) })) }])),
     epsLive: e.epsLive, epsGen: Math.round(f.epsGen), epsChargeGen: EPS_CHARGE_GEN, impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
     // Connections: the starbase and each ship docked with us, with each resource's Import / Export and what moved.
-    connections: [...(e.docked ? [{ key: 'station', name: e.docked, kind: 'station', port: e.dockedPort }] : []), ...shipsDocked(k).map(([p, o]) => ({ key: o, name: shipName(o), kind: 'ship', port: p }))]
+    connections: [...(e.docked ? [{ key: 'station', name: e.docked, kind: 'station', port: e.dockedPort, ties: e.connTies, hardLink: hardLinks.has(linkKey(k, shipKey(e.docked))) }] : []), ...shipsDocked(k).map(([p, o]) => ({ key: o, name: shipName(o), kind: 'ship', port: p }))]
       .map((x) => ({ ...x, ...Object.fromEntries(CONN_RES.map((r) => [r, { ...connOf(e, x.key)[r], ...(e.connFlow[`${x.key}:${r}`] || {}) }])), powerIn: x.kind === 'station' ? Math.round(Object.values(f.cells.dock || {}).reduce((a, b) => a + b, 0)) : Math.round(e.fed[x.port] ? -e.fed[x.port] : Object.values(f.cells.ship || {}).reduce((a, b) => a + b, 0)) })),
     dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName),
     // What each port holds: a starbase, a ship (with its power offers), or nothing.
@@ -2203,6 +2201,15 @@ function gridCommand(ws, msg) {
     if (typeof msg.conn.imp === 'boolean') { c.imp = msg.conn.imp; said.push(`${what} import from ${name} ${c.imp ? 'on' : 'off'}`); }
     if (typeof msg.conn.exp === 'boolean') { c.exp = msg.conn.exp; said.push(`${what} export to ${name} ${c.exp ? 'on' : 'off'}`); }
   }
+  // The starbase connection's Deu. / AM / ODN ties: { connTie: { res: 'deu' | 'am' | 'odn', on } }.
+  if (msg.connTie && ['deu', 'am', 'odn'].includes(msg.connTie.res)) {
+    if (!e.docked) return note('not docked at a starbase');
+    const res = msg.connTie.res;
+    e.connTies[res] = !!msg.connTie.on;
+    const on = e.connTies[res], bus = { deu: 'the Deu. bus', am: 'the AM bus', odn: 'the ODN' }[res];
+    said.push(`${e.docked} connection ${on ? 'tied to' : 'untied from'} ${bus}${res === 'odn' && on ? ': hard data link through the docking port' : ''}`);
+    linkTick();
+  }
   if (msg.breaker && BUSES.includes(msg.breaker.bus)) {
     e.breakers[msg.breaker.bus] = !!msg.breaker.on;
     said.push(`Battery ${msg.breaker.bus} main breaker ${e.breakers[msg.breaker.bus] ? 'closed: in service' : 'open'}`);
@@ -2298,6 +2305,7 @@ function dockCommand(ws, msg) {
   if (!base) return note(`no starbase within docking range (${DOCK_RANGE} units)`);
   if (e.docked) return note(`already docked at ${e.docked}`);
   e.docked = base.name; e.dockedPort = port; e.dirty = true;
+  untieDock(e);
   opLog(key, `Helm (${ws.name}): docked at ${base.name} (${port} dock)`);
   for (const u of crewOf(key)) send(u, { type: 'notice', text: `Helm: docked at ${base.name}` });
   gridChanged(key);
@@ -2305,7 +2313,51 @@ function dockCommand(ws, msg) {
 
 // Docked vessels are joined by a hard line through the dock: always in data
 // link reach of each other, whatever their sensors or subspace relays.
-const hardLine = (a, b) => present(a) && present(b) && dockedWith(a).includes(b);
+// With a starbase, only while the ship's starbase connection has its ODN tied.
+const hardLine = (a, b) => present(a) && present(b) && dockedWith(a).includes(b) && (isBase(b) ? engOf(a).connTies.odn : isBase(a) ? engOf(b).connTies.odn : true);
+// Data links, kept up to date: a docked ship with its starbase connection's
+// ODN tied has a hard link to it (up whatever its relays, and Ops can't close
+// it); that ends only when the tie is cut or the ship undocks. Other links
+// drop out of subspace range or with a relay down.
+function linkTick() {
+  for (const [k, e] of eng) {
+    const b = e.docked && shipKey(e.docked), l = b && linkKey(k, b);
+    if (!b || !hardLine(k, b) || hardLinks.has(l)) continue;
+    hardLinks.add(l);
+    if (!links.has(l)) {
+      links.add(l);
+      for (const x of [k, b]) opLog(x, `data link with the ${shipName(x === k ? b : k)} open: hard link: docking port`);
+      refreshNetworks([k, b]);
+    }
+    broadcastAllOps();
+  }
+  for (const l of [...links]) {
+    const [a, b] = l.split('|');
+    if (hardLinks.has(l)) {
+      if (hardLine(a, b)) continue;
+      hardLinks.delete(l);
+      const s = isBase(a) ? b : a, base = s === a ? b : a;
+      links.delete(l);
+      const why = engOf(s).docked && shipKey(engOf(s).docked) === base ? 'its ODN tie was cut' : 'undocked';
+      for (const k of [a, b]) opLog(k, `hard link with the ${shipName(k === a ? b : a)} closed: ${why}`);
+      refreshNetworks([a, b]);
+      broadcastAllOps();
+      continue;
+    }
+    const relayDown = !commsUp(a, 'subspace') || !commsUp(b, 'subspace');
+    if (!hardLine(a, b) && (!commsOk(a, b) || relayDown) && present(a) && present(b)) {
+      links.delete(l);
+      for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} lost: ${relayDown ? 'a subspace relay is down' : 'out of subspace range'}`);
+      refreshNetworks([a, b]);
+      broadcastAllOps();
+    }
+  }
+}
+// A fresh starbase connection: nothing tied (no power, Deu., AM or ODN) until Engineering ties it.
+function untieDock(e) {
+  e.ties.dock = [];
+  e.connTies = { deu: false, am: false, odn: false };
+}
 
 // The vessels docked with this one: its starbase and the ship docked with it
 // (for a starbase, every ship docked there).
@@ -2479,13 +2531,15 @@ function moveConnections(k, e, f) {
         // Taking: from the starbase always; from a ship that's giving.
         const theirs = them ? wants(connOf(them, k)[res], pct(them, res)) : { out: true };
         const room = FUEL[r] - e[r], have = them ? them[r] : Infinity;
-        if (res === 'am' && !amOk(e, k)) why = 'antimatter containment or the antimatter bus is down';
+        if (!them && !e.connTies[res]) why = `not tied to the ${res === 'am' ? 'AM' : 'Deu.'} bus`;
+        else if (res === 'am' && !amOk(e, k)) why = 'antimatter containment or the antimatter bus is down';
         else if (!theirs.out) why = 'they aren\'t giving';
         else moved = Math.min(FUEL.transferRate, room, have);
         if (moved > 0) { e[r] += moved; if (them) { them[r] -= moved; them.dirty = true; } }
       } else if (mine.out && !them) {
         // Giving to the starbase: it takes all it's given.
-        if (res === 'am' && e.amBusDown) why = 'the antimatter bus is down';
+        if (!e.connTies[res]) why = `not tied to the ${res === 'am' ? 'AM' : 'Deu.'} bus`;
+        else if (res === 'am' && e.amBusDown) why = 'the antimatter bus is down';
         else { moved = -Math.min(FUEL.transferRate, e[r]); e[r] += moved; }
       }
       // (Giving to a ship happens when that ship takes it: its own turn.)

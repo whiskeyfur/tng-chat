@@ -143,7 +143,7 @@ Systems read `powerOf` for their effects: sensor ranges (`rangesOf`, line 813), 
 - The antimatter bus moves nothing unless its magnetic containment (`amBus`, an EPS system) gets what it asks for.
 - An antimatter tank only takes antimatter with its containment powered.
 
-**Connections** (`moveConnections`, line 2453) move fuel between the main storage and the starbase or a docked ship, by each side's Import/Export, 50 a second.
+**Connections** (`moveConnections`, line 2453) move fuel between the main storage and the starbase or a docked ship, by each side's Import/Export, 50 a second. The starbase connection also has ties (`connTies`: deu, am, odn): fuel to or from the starbase moves only on a tied bus, and a tied ODN keeps a hard data link to the starbase (`linkTick`, `hardLinks`) that Ops can't close. Docking at a starbase unties everything (`untieDock`).
 
 **Burn.**
 
