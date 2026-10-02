@@ -1052,6 +1052,12 @@ function coreNav(c, key, nav) {
     combat.set(key, { ...freshCombat(nav.combat), loaded: true });
     eng.set(key, freshEng(nav.eng, { cold: !nav.eng && !nav.warm }));
     if (!classOf(key).warpCore) Object.assign(engOf(key), { core: 'ejected', antimatter: 0 }); // (a shuttle has no warp core: impulse and batteries)
+    // A small craft brought up ready to go: wiring that fits its buses, and EPS taps no wider than they are.
+    if (!nav.eng && nav.warm) {
+      const e = engOf(key), b = busMaxOf(key);
+      Object.assign(e.ties, CLASS_TIES[classId(key)] || {});
+      for (const X of BUSES) e.taps[X] = Math.min(e.taps[X], b[X]);
+    }
     if (!nav.eng && nav.spawn) { spawnAt = STARBASES.find((b) => b.name === pendingSpawn.get(key)) || SPAWN_BASES[Math.floor(Math.random() * SPAWN_BASES.length)]; pendingSpawn.delete(key); engOf(key).docked = spawnAt.name; }
     flowCache.delete(key);
   }
@@ -1472,6 +1478,14 @@ const CLASSES = {
   intrepid: { name: 'Intrepid', bus: 250, eps: 700, core: 0.8, maxWarp: 9, shields: 0.8, arrays: 1, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2, bay: 2 },
   runabout: { name: 'Runabout', bus: 100, eps: 250, core: 0.3, maxWarp: 5, shields: 0.4, arrays: 1, warpCore: true, refit: false, transporter: true, stations: ['Helm', 'Tactical', 'Engineering', 'Transporter'], ports: 1, bay: 0 },
   shuttle: { name: 'Shuttle', bus: 60, eps: 80, core: 0, maxWarp: 0, shields: 0.2, arrays: 1, warpCore: false, refit: false, transporter: false, stations: ['Helm'], ports: 1, bay: 0 },
+};
+// A small craft's wiring when its computer brings it up ready to go (--warm):
+// what a Galaxy ties in, trimmed to its little buses (nothing for stations or
+// systems it hasn't got, and some life support moved to Bus C). A new ship
+// that starts cold has nothing tied but the ODN, whatever its class.
+const CLASS_TIES = {
+  runabout: { 'system:replicators': [], 'system:recreation': [], 'sub:forcefields': [], 'sub:bayDoors': [], 'sub:bayField': [], 'system:gravity': ['C'], 'system:lateral': ['C'] },
+  shuttle: { 'system:replicators': [], 'system:recreation': [], 'sub:forcefields': [], 'sub:bayDoors': [], 'sub:bayField': [], 'system:transporter': [], 'sub:patternBuffers': [], 'sub:targetingScanners': [], 'sub:heisenberg': [], 'sub:biofilter': [], 'sub:energizingCoils': [], 'system:amBus': [], 'sub:amTransfer': [], 'system:gravity': ['C'], 'system:lateral': ['C'] },
 };
 const shipClasses = new Map(); // ship key -> class id
 const classOf = (k) => CLASSES[shipClasses.get(k)] || CLASSES.galaxy;

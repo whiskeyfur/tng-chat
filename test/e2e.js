@@ -1606,6 +1606,9 @@ const audioBytes = (page) => page.evaluate(async () => {
       const listed = () => [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.some((x) => x.name === 'Galileo' && x.class === 'Shuttle');
       await waitFor(listed, 15000);
       const pilot = await crewWs('kim2', 'Galileo', 'Helm');
+      // (Its wiring fits a shuttle's small buses: nothing trips, and the Helm console has power.)
+      await waitFor(() => pilot.nav()?.own?.grid?.consoleOk?.Helm === true);
+      assert.deepEqual(pilot.nav().own.grid.tripped, [], 'a breaker tripped on the shuttle');
       await waitFor(() => pilot.nav()?.own?.grid?.bays?.some((b) => b.name === 'Enterprise'));
       assert.match(pilot.nav().own.grid.bays.find((b) => b.name === 'Enterprise').why, /doors are closed/);
       await screen(op, 'status');
@@ -1617,7 +1620,7 @@ const audioBytes = (page) => page.evaluate(async () => {
       const conn = laforge.nav().own.grid.connections.find((x) => x.name === 'Galileo');
       assert.ok(conn && conn.port === 'shuttle bay' && !conn.power.imp && !conn.power.exp, 'the landed shuttle is a connection with nothing tied');
       pilot.send({ type: 'helm', dest: { x: 10, y: 10 }, warp: 0.25 });
-      await waitFor(() => pilot.msgs.some((m) => m.type === 'notice' && /take off first|console offline/.test(m.text))).catch(() => { throw new Error(`Helm wasn't held: ${JSON.stringify(pilot.msgs.filter((m) => m.type === 'notice').slice(-4).map((m) => m.text))}`); });
+      await waitFor(() => pilot.msgs.some((m) => m.type === 'notice' && /take off first/.test(m.text))).catch(() => { throw new Error(`Helm wasn't held: ${JSON.stringify(pilot.msgs.filter((m) => m.type === 'notice').slice(-4).map((m) => m.text))}`); });
       pilot.send({ type: 'change-station', station: 'Shuttle Bay', ship: 'Enterprise' });
       await waitFor(() => pilot.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && m.station === 'Shuttle Bay'));
       pilot.send({ type: 'change-station', station: 'Helm', ship: 'Galileo' });
