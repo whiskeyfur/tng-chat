@@ -1440,13 +1440,26 @@ const storeOf = (node) => (node === 'EPS' ? 'pressure' : `battery${node}`);
 // Every tie is one class: Bus A/B, or the EPS only (the warp core's and
 // impulse drives' outputs). The warp core itself spans both: its
 // subsystems on A/B, its output on the EPS.
-// Solar and dock power come in on Bus B only.
-const SOURCE_NODES = { ship: AB, solar: ['B'], dock: ['B'], impulsePort: ['EPS'], impulseStarboard: ['EPS'], aux1: ['EPS'], aux2: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: AB, crosslink: AB };
+// Solar comes in on Bus B only; dock and docked-ship power on Bus B and/or the EPS (an exception: both kinds).
+const SOURCE_NODES = { ship: ['B', 'EPS'], solar: ['B'], dock: ['B', 'EPS'], impulsePort: ['EPS'], impulseStarboard: ['EPS'], aux1: ['EPS'], aux2: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: AB, crosslink: AB };
 // Low-power loads and sources may tie to several of Bus A, B and C (a load
 // split evenly over them, a source's output shared evenly); so may the
 // crosslink (the buses checked are one pool). EPS ties are one.
-const isMulti = (k) => k === 'crosslink' || ((['containment', 'ship', 'solar', 'dock'].includes(k) || /^(console|system|sub|contain):/.test(k)) && !tieNodes(k).includes('EPS'));
-const SHIP_FEED_MAX = 500; // what Engineering can offer a ship docked with us
+const isMulti = (k) => k === 'crosslink' || k === 'dock' || k === 'ship' || ((['containment', 'ship', 'solar', 'dock'].includes(k) || /^(console|system|sub|contain):/.test(k)) && !tieNodes(k).includes('EPS'));
+const SHIP_FEED_MAX = 100; // the power that goes across a ship-to-ship connection (export to an importing ship)
+// Connections: everything we're docked with (the starbase; the ships at our
+// ports). Per connection: Deuterium, Antimatter and Power, each with Import
+// and Export. Import only keeps ours full, Export only keeps ours empty; both
+// hold a set point (half the main storage for fuel, full for power). Fuel goes
+// to and from the main storage (antimatter only with the pods' containment
+// powered and the antimatter bus up), 50 a second; a starbase always has it to
+// give and room to take; a ship moves fuel only to a side that wants it. Power
+// comes in (and goes out) on Bus B and/or the EPS.
+const CONN_RES = ['deu', 'am', 'power'];
+const CONN_POINT = { deu: 50, am: 50, power: 100 };
+const connOf = (e, key) => (e.conn[key] ||= Object.fromEntries(CONN_RES.map((r) => [r, { imp: false, exp: false }])));
+// Does this side want to take (in) or give (out) a resource, at its level (%)?
+const wants = (c, level) => ({ in: c.imp && (!c.exp || level < CONN_POINT.deu) && level < 100, out: c.exp && (!c.imp || level > CONN_POINT.deu) && level > 0 });
 const PORTS = ['port', 'starboard']; // docking ports (starbases take any number)
 // The port a ship is docked to us at (or null), and the ships docked with us (both sides agreeing).
 const portFor = (k, other) => PORTS.find((p) => engOf(k).shipDocks[p] === other) || null;
@@ -1616,8 +1629,12 @@ function freshEng(saved, { cold = false } = {}) {
     shipDocks: Object.fromEntries(PORTS.map((p) => { const v = s.shipDocks?.[p] ?? (p === 'starboard' && typeof s.dockedShip === 'string' ? s.dockedShip : null); return [p, typeof v === 'string' ? shipKey(v) : null]; })),
     partnerGoneAt: { port: Date.now(), starboard: Date.now() },
     dockedPort: PORTS.includes(s.dockedPort) ? s.dockedPort : 'port',
-    // Top up each while docked at a starbase (older saves: one switch for both).
-    autoRefuel: Object.fromEntries(RESOURCES.map((r) => [r, typeof s.autoRefuel === 'object' && s.autoRefuel ? !!s.autoRefuel[r] : !!s.autoRefuel])),
+    // Connections' Import / Export (older saves: dock power imported if it was tied in; auto refuel became import).
+    conn: s.conn && typeof s.conn === 'object' ? JSON.parse(JSON.stringify(s.conn)) : { station: {
+      deu: { imp: !!(typeof s.autoRefuel === 'object' ? s.autoRefuel?.deuterium : s.autoRefuel), exp: false },
+      am: { imp: !!(typeof s.autoRefuel === 'object' ? s.autoRefuel?.antimatter : s.autoRefuel), exp: false },
+      power: { imp: !cold, exp: false } } },
+    connFlow: {},
     // Each battery's main breaker (closed: in service). Older saves: closed if the old battery was tied in.
     breakers: Object.fromEntries(BUSES.map((X) => [X, typeof s.breakers?.[X] === 'boolean' ? s.breakers[X] : Array.isArray(s.ties?.battery) ? s.ties.battery.length > 0 : true])),
     // Each store's charge (older saves: one battery, shared out across A, B and C; the EPS starts unpressurized).
@@ -1660,7 +1677,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, autoRefuel: e.autoRefuel,
+    dockedPort: e.dockedPort, conn: e.conn,
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
   };
 };
@@ -1707,7 +1724,13 @@ function flow(k) {
   // A ship docked with us: each side offers power (feed); whoever offers more
   // sends the difference, drawn from (or, received, fed into) the docked-ship ties.
   // Each connection on its own: per port, whoever offers more sends the difference.
-  const conns = shipsDocked(k).map(([p, o]) => { const theirs = portFor(o, k); return { p, o, net: e.feed[p] - engOf(o).feed[theirs], theirFed: engOf(o).fed[theirs] || 0 }; });
+  // Each ship connection: power goes from the side exporting to the side importing.
+  const conns = shipsDocked(k).map(([p, o]) => {
+    const theirs = portFor(o, k), me = connOf(e, o).power, them = connOf(engOf(o), k).power;
+    const send = me.exp && them.imp ? SHIP_FEED_MAX : 0, recv = them.exp && me.imp ? SHIP_FEED_MAX : 0;
+    e.feed[p] = send;
+    return { p, o, net: send - recv, theirFed: engOf(o).fed[theirs] || 0 };
+  });
   // Each running drive gives half impulse. With its thrusters tied in to the
   // EPS, whatever share of it isn't thrusting feeds the EPS; untied, it only thrusts.
   const nv = navState.get(k);
@@ -1716,7 +1739,7 @@ function flow(k) {
   const thrustTop = running.reduce((n, d) => n + driveTop(e.drives[d]), 0);
   const share = thrustTop > 0 ? Math.min(1, impulseNow / thrustTop) : 0;
   const driveGen = (d) => (running.includes(d) && (e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length ? GRID.impulse * (1 - share) : 0);
-  const cap = { ship: conns.reduce((n, cn) => n + (cn.net < 0 ? Math.min(-cn.net, cn.theirFed) : 0), 0), solar: GRID.solar, dock: e.docked ? GRID.dock : 0, impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), ...Object.fromEntries(AUX.map((a) => [a, e.aux[a].state === 'running' && e.deuterium > 0 ? FUSION.aux : 0])), core: (c.damage.conduits || 0) < SUB_FAIL_DAMAGE ? coreOutput(e) : 0, ...Object.fromEntries(Object.entries(STORES).map(([name, node]) => [name, Math.min(node === 'EPS' ? GRID.epsOut : GRID.batteryOut, e.stores[name])])) };
+  const cap = { ship: conns.reduce((n, cn) => n + (cn.net < 0 ? Math.min(-cn.net, cn.theirFed) : 0), 0), solar: GRID.solar, dock: e.docked && connOf(e, 'station').power.imp ? GRID.dock : 0, impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), ...Object.fromEntries(AUX.map((a) => [a, e.aux[a].state === 'running' && e.deuterium > 0 ? FUSION.aux : 0])), core: (c.damage.conduits || 0) < SUB_FAIL_DAMAGE ? coreOutput(e) : 0, ...Object.fromEntries(Object.entries(STORES).map(([name, node]) => [name, Math.min(node === 'EPS' ? GRID.epsOut : GRID.batteryOut, e.stores[name])])) };
   // A source tied to several buses shares its output evenly between them.
   const srcs = SOURCES.map((name) => {
     const t = isStore(name) ? (STORES[name] === 'EPS' || e.breakers[STORES[name]] ? [STORES[name]] : []) : e.ties[name], full = t.length ? cap[name] : 0;
@@ -1780,7 +1803,7 @@ function flow(k) {
   const reactorStarting = (key) => { const m = /^sub:(port|starboard|aux\d)(Chamber)$/.exec(key); return m && reactorsOf(e).find(([r]) => r === m[1])[1].state === 'starting'; };
   const sustained = (key, amt) => (key === 'sub:constriction' && e.core === 'starting' ? GRID.constriction.run : reactorStarting(key) ? 0 : amt);
   // Power for a docked ship goes out the way it comes in.
-  const tiesFor = (key) => (key.startsWith('feed:') ? e.ties.ship : e.ties[key]) || [];
+  const tiesFor = (key) => (key === 'feed:station' ? e.ties.dock : key.startsWith('feed:') ? e.ties.ship : e.ties[key]) || [];
   // A load tied to several buses is split evenly across them (each bus
   // serves its share); its cell row records where its power came from.
   // topUp: a second go at what a load is still short, once each source's even
@@ -1841,7 +1864,9 @@ function flow(k) {
     ['sub:energizingCoils', transporters.get(k)?.energizing ? TR.coils : 0],
     ...COMPUTERS.map((x, i) => [`sub:${x}`, ['booting', 'online'].includes(e.computers[i].state) ? COMPUTER.draw : 0]),
     ...PORTS.map((p) => [`feed:${p}`, Math.max(0, conns.find((cn) => cn.p === p)?.net || 0)]),
+    // Power exported to the starbase (it takes all it's given): last of all, below.
     ...SYSTEM_PRIORITY.map((sys) => [`system:${sys}`, sys === 'tractor' ? (e.towing ? TRACTOR.draw : 0) : (demand[sys] * ratingOf(sys)) / 100]),
+    ['feed:station', e.docked && connOf(e, 'station').power.exp && !connOf(e, 'station').power.imp ? 100 : 0],
   ];
   // Each bus serves the loads tied to it alone first (priority order), then
   // its batteries charge, then loads split over two buses, then over three.
@@ -1966,10 +1991,12 @@ function tripBreakers(k) {
     if (!over) return;
     const pick = f.trippable.filter((t) => poolOf(over).includes(t.node));
     const t = pick[Math.floor(Math.random() * pick.length)];
-    e.ties[t.key] = e.ties[t.key].filter((n) => n !== over);
-    (e.tripped ||= {})[t.key] = true; // shown as Tripped until Engineering re-ties it
+    // (Power going out to the starbase or a docked ship is untied at its own tie: dock, or ship.)
+    const tieKey = t.key === 'feed:station' ? 'dock' : t.key.startsWith('feed:') ? 'ship' : t.key;
+    e.ties[tieKey] = (e.ties[tieKey] || []).filter((n) => n !== over);
+    (e.tripped ||= {})[tieKey] = true; // shown as Tripped until Engineering re-ties it
     e.dirty = true;
-    const name = t.key.startsWith('console:') ? `${t.key.slice(8)} console` : t.key.startsWith('sub:') ? SUBSYSTEMS[t.key.slice(4)].name : SYSTEM_NAMES[t.key.slice(7)] || t.key;
+    const name = t.key.startsWith('console:') ? `${t.key.slice(8)} console` : t.key.startsWith('sub:') ? SUBSYSTEMS[t.key.slice(4)].name : t.key.startsWith('feed:') ? `power out to ${t.key === 'feed:station' ? 'the starbase' : 'a docked ship'}` : t.key.startsWith('contain:') ? 'antimatter tank containment' : SYSTEM_NAMES[t.key.slice(7)] || t.key;
     const p = poolOf(over);
     const where = over === 'EPS' ? 'the EPS' : `Bus ${p.join('+')}`;
     const load = Math.round(p.reduce((m, x) => m + f.tied[x], 0)), max = p.reduce((m, x) => m + f.totals[x].max, 0);
@@ -2009,8 +2036,10 @@ function gridView(k) {
         // An antimatter tank's own containment (the pods': the ship's main containment).
         ...(bus !== 'am' ? {} : n === 'main' ? { field: Math.round(e.contain.field), containKey: 'containment' } : { field: Math.round(e.tankContain[n].field), containKey: AM_CONTAIN[n], reserve: Math.round((100 * e.tankContain[n].reserve) / (tankContainDraw(n) * CONTAIN.reserveSecs)) }) })) }])),
     epsLive: e.epsLive, epsGen: Math.round(f.epsGen), epsChargeGen: EPS_CHARGE_GEN, impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
-    transfer: e.transfer ? { ...e.transfer, left: Math.ceil(e.transfer.left), with: e.transfer.with === 'station' ? e.docked : shipName(e.transfer.with) } : null,
-    dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName), autoRefuel: e.autoRefuel,
+    // Connections: the starbase and each ship docked with us, with each resource's Import / Export and what moved.
+    connections: [...(e.docked ? [{ key: 'station', name: e.docked, kind: 'station', port: e.dockedPort }] : []), ...shipsDocked(k).map(([p, o]) => ({ key: o, name: shipName(o), kind: 'ship', port: p }))]
+      .map((x) => ({ ...x, ...Object.fromEntries(CONN_RES.map((r) => [r, { ...connOf(e, x.key)[r], ...(e.connFlow[`${x.key}:${r}`] || {}) }])), powerIn: x.kind === 'station' ? Math.round(Object.values(f.cells.dock || {}).reduce((a, b) => a + b, 0)) : Math.round(e.fed[x.port] ? -e.fed[x.port] : Object.values(f.cells.ship || {}).reduce((a, b) => a + b, 0)) })),
+    dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName),
     // What each port holds: a starbase, a ship (with its power offers), or nothing.
     ports: Object.fromEntries(PORTS.map((p) => {
       const o = e.shipDocks[p] && portFor(e.shipDocks[p], k) ? e.shipDocks[p] : null;
@@ -2054,7 +2083,6 @@ function gridCommand(ws, msg) {
     if (e.core === 'ejected') return note('the warp core is already gone');
     Object.assign(e, { core: 'ejected', antimatter: 0, start: 0, breach: 0, contain: { field: 100, reserve: reserveCap() } });
     e.tanks.am.core = 0; e.tanks.deu.core = 0; // (the core's own tanks go with it)
-    if (e.transfer?.resource === 'antimatter') e.transfer = null;
     said.push('WARP CORE AND ANTIMATTER PODS EJECTED');
     for (const u of crewOf(key)) if (u !== ws) send(u, { type: 'notice', text: `Engineering: the warp core has been ejected (${ws.name})` });
   }
@@ -2065,7 +2093,6 @@ function gridCommand(ws, msg) {
     if (e.core === 'online' || e.core === 'starting') return note('shut the warp core down before replacing it');
     const fill = e.ties.containment.length > 0;
     Object.assign(e, { core: 'offline', start: 0, breach: 0, antimatter: fill ? FUEL.antimatter : 0, contain: { field: 100, reserve: reserveCap() } });
-    if (e.transfer?.resource === 'antimatter') e.transfer = null;
     said.push(`new warp core and ${fill ? 'full' : 'empty'} antimatter pods installed at ${e.docked} (offline: start it up${fill ? '' : '; set a containment feed and refuel first'})`);
   }
   // The reaction's settings: rate (the light bar's target), mixture, plasma conduits, trim.
@@ -2153,46 +2180,17 @@ function gridCommand(ws, msg) {
     if (e.tripped) delete e.tripped[k];
     said.push(`${NAME[k] || (k.startsWith('console:') ? `${k.slice(8)} console` : k.startsWith('sub:') ? SUBSYSTEMS[k.slice(4)].name : SYSTEM_NAMES[k.slice(7)] || k.slice(7))} ${k === 'containment' ? 'fed from' : 'tied to'} ${feeds(list)}`);
   }
-  if ('feed' in msg) {
-    // Power offered across one docking port (the first ship connection if no port is named).
-    const p = PORTS.includes(msg.port) ? msg.port : shipsDocked(key)[0]?.[0] || 'port';
-    e.feed[p] = Math.max(0, Math.min(SHIP_FEED_MAX, Math.round(Number(msg.feed) || 0)));
-    const o = e.shipDocks[p];
-    said.push(o ? `offering the ${shipName(o)} ${e.feed[p]} power (${p} dock)` : `power for a ship at the ${p} dock set to ${e.feed[p]}`);
+  // A connection's Import / Export: { conn: { with: 'station' | ship, res: 'deu' | 'am' | 'power', imp?, exp? } }.
+  if (msg.conn && CONN_RES.includes(msg.conn.res)) {
+    const other = msg.conn.with === 'station' ? 'station' : shipKey(clean(msg.conn.with));
+    const name = other === 'station' ? (e.docked || 'the starbase') : `the ${shipName(other)}`;
+    const c = connOf(e, other)[msg.conn.res], what = { deu: 'deuterium', am: 'antimatter', power: 'power' }[msg.conn.res];
+    if (typeof msg.conn.imp === 'boolean') { c.imp = msg.conn.imp; said.push(`${what} import from ${name} ${c.imp ? 'on' : 'off'}`); }
+    if (typeof msg.conn.exp === 'boolean') { c.exp = msg.conn.exp; said.push(`${what} export to ${name} ${c.exp ? 'on' : 'off'}`); }
   }
   if (msg.breaker && BUSES.includes(msg.breaker.bus)) {
     e.breakers[msg.breaker.bus] = !!msg.breaker.on;
     said.push(`Battery ${msg.breaker.bus} main breaker ${e.breakers[msg.breaker.bus] ? 'closed: in service' : 'open'}`);
-  }
-  if ('autoRefuel' in msg) {
-    // { resource, on } for one; true/false for both.
-    const a = msg.autoRefuel;
-    for (const r of RESOURCES) if (typeof a !== 'object' || a?.resource === r) e.autoRefuel[r] = typeof a === 'object' ? !!a?.on : !!a;
-    said.push(`auto refuel: ${RESOURCES.map((r) => `${r} ${e.autoRefuel[r] ? 'on' : 'off'}`).join(', ')} (topped off while docked at a starbase)`);
-  }
-  // Supplies: take on or send off antimatter or deuterium, docked at a
-  // starbase (refuel, offload) or with another ship (send ours to them).
-  if ('transfer' in msg) {
-    const t = msg.transfer;
-    if (!t) { if (e.transfer) said.push('transfer stopped'); e.transfer = null; }
-    else {
-      if (!RESOURCES.includes(t.resource)) return note('transfer antimatter or deuterium');
-      const amount = Math.max(1, Math.min(FUEL[t.resource], Math.round(Number(t.amount) || FUEL[t.resource])));
-      const inbound = t.dir === 'in';
-      // From a starbase, or to a ship docked with us (msg.ship picks which).
-      const shipTo = msg.transfer.ship ? shipKey(clean(msg.transfer.ship)) : shipsDocked(key)[0]?.[1];
-      const partner = e.docked && !msg.transfer.ship ? 'station' : shipTo && portFor(key, shipTo) && portFor(shipTo, key) ? shipTo : e.docked ? 'station' : null;
-      if (!partner) return note('dock at a starbase (or with another ship) to transfer supplies');
-      if (inbound && partner !== 'station') return note(`the ${shipName(partner)} sends its own supplies: ask their Engineering`);
-      if (inbound && t.resource === 'antimatter' && !e.ties.containment.length) return note('set a containment feed before taking on antimatter');
-      if (inbound && t.resource === 'antimatter' && !e.ties.containment.some((n) => flow(key).totals[n].available >= GRID.containment)) return note(`containment's feed (${feeds(e.ties.containment)}) has no power: energize it before taking on antimatter`);
-      if (inbound && t.resource === 'antimatter' && e.core === 'ejected') return note('no warp core to hold antimatter: install one first');
-      if (!inbound && partner !== 'station' && t.resource === 'antimatter' && !engOf(partner).ties.containment.length) return note(`the ${shipName(partner)} has no containment feed set: it can't take antimatter`);
-      const room = inbound ? FUEL[t.resource] - e[t.resource] : partner === 'station' ? e[t.resource] : Math.min(e[t.resource], FUEL[t.resource] - engOf(partner)[t.resource]);
-      if (room < 1) return note(inbound ? `the ${t.resource} tank is already full` : partner === 'station' ? `no ${t.resource} aboard to offload` : `nothing to send: our ${t.resource} is empty or the ${shipName(partner)}'s tank is full`);
-      e.transfer = { resource: t.resource, dir: inbound ? 'in' : 'out', left: amount, with: partner };
-      said.push(`${inbound ? 'taking on' : partner === 'station' ? 'offloading' : `sending the ${shipName(partner)}`} ${amount} ${t.resource}${partner === 'station' ? ` (${e.docked})` : ''}`);
-    }
   }
   if (!said.length) return;
   e.dirty = true;
@@ -2446,6 +2444,38 @@ function moveFuel(k, e, f) {
         want -= t; budget -= t; e.busFlow[bus] += t;
       }
       if (budget <= 0) break;
+    }
+  }
+}
+
+// Connections, once a second: fuel to and from the starbase and the ships
+// docked with us, by each side's Import / Export.
+function moveConnections(k, e, f) {
+  e.connFlow = {};
+  const pct = (x, res) => (100 * x[BUS_RESOURCE[res]]) / FUEL[BUS_RESOURCE[res]];
+  // Antimatter needs the pods' containment powered on the taking side, and the antimatter bus up on ours.
+  const amOk = (x, kk) => (x.ties.containment || []).some((n) => flow(kk).totals[n]?.available >= GRID.containment) && !x.amBusDown && x.core !== 'ejected';
+  const others = [...(e.docked ? [['station', null]] : []), ...shipsDocked(k).map(([, o]) => [o, engOf(o)])];
+  for (const [key, them] of others) {
+    for (const res of ['deu', 'am']) {
+      const r = BUS_RESOURCE[res], mine = wants(connOf(e, key)[res], pct(e, res));
+      let moved = 0, why = '';
+      if (mine.in) {
+        // Taking: from the starbase always; from a ship that's giving.
+        const theirs = them ? wants(connOf(them, k)[res], pct(them, res)) : { out: true };
+        const room = FUEL[r] - e[r], have = them ? them[r] : Infinity;
+        if (res === 'am' && !amOk(e, k)) why = 'antimatter containment or the antimatter bus is down';
+        else if (!theirs.out) why = 'they aren\'t giving';
+        else moved = Math.min(FUEL.transferRate, room, have);
+        if (moved > 0) { e[r] += moved; if (them) { them[r] -= moved; them.dirty = true; } }
+      } else if (mine.out && !them) {
+        // Giving to the starbase: it takes all it's given.
+        if (res === 'am' && e.amBusDown) why = 'the antimatter bus is down';
+        else { moved = -Math.min(FUEL.transferRate, e[r]); e[r] += moved; }
+      }
+      // (Giving to a ship happens when that ship takes it: its own turn.)
+      if (moved) { e.dirty = true; if (res === 'am') e.busFlow.am += Math.abs(moved); }
+      e.connFlow[`${key}:${res}`] = { flow: Math.round(moved), why };
     }
   }
 }
@@ -2818,25 +2848,8 @@ setInterval(() => {
     // Fuel: the core burns antimatter and deuterium for what it gives, the impulse reactor deuterium.
     // The core burns from its own tanks.
     if (f.coreUsed > 0) { const burn = (f.coreUsed / GRID.core) * FUEL.coreBurn; setTank(e, 'am', 'core', e.tanks.am.core - burn); setTank(e, 'deu', 'core', e.tanks.deu.core - burn); }
-    // Supplies moving: from or to a starbase, or to a ship docked with us.
-    if (e.transfer) {
-      const t = e.transfer, other = t.with === 'station' ? null : engOf(t.with);
-      const stillDocked = t.with === 'station' ? !!e.docked : !!(portFor(k, t.with) && portFor(t.with, k));
-      let n = Math.min(FUEL.transferRate, t.left);
-      if (t.dir === 'in') n = Math.min(n, FUEL[t.resource] - e[t.resource]);
-      else n = Math.min(n, e[t.resource], other ? FUEL[t.resource] - other[t.resource] : Infinity);
-      // Within a unit of full (or empty) is done: a running core keeps
-      // nibbling at a full tank, which would keep a transfer going forever.
-      if (!stillDocked) { e.transfer = null; tellStations(k, ['Engineering'], 'Engineering: transfer stopped, no longer docked'); }
-      else if (n < 1) { e.transfer = null; if (!t.auto) tellStations(k, ['Engineering'], `Engineering: ${t.resource} transfer done (${t.dir === 'in' || other ? 'tank full' : 'tank empty'})`); }
-      else {
-        e[t.resource] += t.dir === 'in' ? n : -n;
-        if (other) { other[t.resource] += n; other.dirty = true; flowCache.delete(t.with); }
-        t.left -= n;
-        e.dirty = true;
-        if (t.left <= 0) { e.transfer = null; if (!t.auto) tellStations(k, ['Engineering'], `Engineering: ${t.resource} transfer done`); }
-      }
-    }
+    // Connections: fuel to and from what we're docked with.
+    moveConnections(k, e, f);
     // Docking ends when the ship moves off.
     const nav = navState.get(k);
     // Docked with ships: a computer restarting on either side doesn't undock
@@ -2851,11 +2864,6 @@ setInterval(() => {
     // A docking request not answered in time lapses.
     const req = dockRequests.get(k);
     if (req && now > req.until) { dockRequests.delete(k); for (const u of crewOf(req.from)) if (u.station === 'Helm') send(u, { type: 'notice', text: `Helm: the ${shipName(k)} didn't answer the docking request` }); }
-    // Auto refuel: top off antimatter and deuterium while docked at a starbase.
-    if (e.docked && !e.transfer) {
-      const want = ['deuterium', 'antimatter'].find((r) => e.autoRefuel[r] && FUEL[r] - e[r] >= 1 && (r !== 'antimatter' || (e.ties.containment.length && e.core !== 'ejected')));
-      if (want) e.transfer = { resource: want, dir: 'in', left: FUEL[want] - e[want], with: 'station', auto: true };
-    }
     if (e.docked) {
       const base = STARBASES.find((b) => b.name === e.docked);
       if (!base || nav.warp > 0 || Math.hypot(nav.x - base.x, nav.y - base.y) > DOCK_RANGE) { opLog(k, `departed ${e.docked}`); e.docked = null; e.dirty = true; }

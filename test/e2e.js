@@ -1214,7 +1214,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(await geordi.evaluate(() => window.__nav.last.own.grid.tieNodes['system:tractor']), ['EPS'], 'the tractor beam ties to the EPS only');
     await geordi.click('#grid-order-operations');
     const sections = await geordi.$$eval('#grid-table tbody tr', (rs) => rs.map((r) => (r.classList.contains('grid-section') ? `[${r.textContent.trim()}]` : r.id)).slice(0, 20));
-    assert.deepEqual(sections.slice(0, 2), ['[External sources]', 'ties-dock'], sections.join(' '));
+    assert.deepEqual(sections.slice(0, 7), ['[External sources]', 'ties-solar', '[Connections]', 'conn-Starbase-12', 'conn-Starbase-12-deu', 'conn-Starbase-12-am', 'conn-Starbase-12-power'], sections.join(' '));
     assert.ok(sections.indexOf('[Bus crosslink]') < sections.indexOf('ties-crosslink'), sections.join(' '));
     // Then the fuel storage (the buses, the main tanks), then the consoles.
     assert.deepEqual(sections.slice(sections.indexOf('ties-crosslink') + 1, sections.indexOf('ties-console-Captain')), ['[Fuel storage]', 'fuel-deu', 'tank-deu-main', 'fuel-am', 'tank-am-main']);
@@ -1224,27 +1224,28 @@ const audioBytes = (page) => page.evaluate(async () => {
     for (const r of await geordi.$$eval('#ties-crosslink .xflow-bar', (bs) => bs.map((x) => ({ flow: x.dataset.flow, label: x.textContent })))) assert.match(r.label, /\d/, JSON.stringify(r));
     // The stores (each bus's battery, the EPS pressure) sit under the headings.
     assert.match(await geordi.textContent('#grid-table thead #grid-stores'), /Battery \d+%.*Battery \d+%.*Battery \d+%.*Pressure \d+%/);
-    const STEPS = ['Dock power, Solar', 'Bus batteries and EPS pressure', 'Bus crosslink', 'Engineering console', 'Computer cores', 'Antimatter containment', 'Fuel buses', 'Impulse drives', 'Aux fusion reactors', 'EPS taps', 'Warp core', 'Consoles and systems'];
+    const STEPS = ['External sources', 'Bus batteries and EPS pressure', 'Bus crosslink', 'Engineering console', 'Computer cores', 'Antimatter containment', 'Fuel buses', 'Impulse drives', 'Aux fusion reactors', 'EPS taps', 'Warp core', 'Consoles and systems'];
     await geordi.click('#grid-order-startup');
     assert.deepEqual(await geordi.$$eval('#grid-table tr[data-step]', (rs) => rs.map((r) => r.dataset.step)), STEPS);
     assert.equal(await geordi.textContent('#grid-table tr[data-step="Warp core"] .grid-chip'), 'Online');
     await geordi.click('#grid-order-shutdown');
     assert.deepEqual(await geordi.$$eval('#grid-table tr[data-step]', (rs) => rs.map((r) => r.dataset.step)), [...STEPS].reverse());
     // The core is running: the batteries can't come off yet, and a tap there is refused.
-    await geordi.waitForSelector('#grid-table tr[data-step="Dock power, Solar"] .grid-locked-why:has-text("shut down the warp core")');
-    const battTied = await geordi.isChecked('#ties-dock input[data-node="B"]');
-    await geordi.click('#ties-dock input[data-node="B"]');
+    await geordi.waitForSelector('#grid-table tr[data-step="External sources"] .grid-locked-why:has-text("shut down the warp core")');
+    const battTied = await geordi.isChecked('#conn-Starbase-12-power input[data-node="B"]');
+    await geordi.click('#conn-Starbase-12-power input[data-node="B"]');
     await geordi.waitForSelector('#grid-status:has-text("Unable to comply. Shut down the warp core")');
-    assert.equal(await geordi.isChecked('#ties-dock input[data-node="B"]'), battTied, 'the refused tap changed nothing');
+    assert.equal(await geordi.isChecked('#conn-Starbase-12-power input[data-node="B"]'), battTied, 'the refused tap changed nothing');
     assert.equal(await geordi.evaluate(() => localStorage.getItem('stchat-grid-order')), 'shutdown');
     await geordi.click('#grid-order-operations');
-    // Auto refuel: a toggle per resource that shows the saved state.
-    assert.equal(await geordi.getAttribute('#auto-refuel-deuterium', 'aria-pressed'), 'false');
-    await geordi.click('#auto-refuel-deuterium');
-    await geordi.waitForSelector('#auto-refuel-deuterium[aria-pressed="true"]:has-text("on")');
-    assert.equal(await geordi.getAttribute('#auto-refuel-antimatter', 'aria-pressed'), 'false', 'one at a time');
-    await geordi.click('#auto-refuel-deuterium');
-    await geordi.waitForSelector('#auto-refuel-deuterium[aria-pressed="false"]');
+    // Connections: the starbase we're docked at, its Deuterium / Antimatter / Power rows with Import and Export.
+    await geordi.waitForSelector('#conn-Starbase-12-deu-imp[aria-pressed="false"]');
+    await geordi.click('#conn-Starbase-12-deu-imp');
+    await geordi.waitForSelector('#conn-Starbase-12-deu-imp[aria-pressed="true"]');
+    assert.equal(await geordi.getAttribute('#conn-Starbase-12-am-imp', 'aria-pressed'), 'false', 'one at a time');
+    await geordi.click('#conn-Starbase-12-deu-imp');
+    await geordi.waitForSelector('#conn-Starbase-12-deu-imp[aria-pressed="false"]');
+    assert.equal(await geordi.locator('#conn-Starbase-12-power input[data-node="EPS"]').count(), 1, 'dock power can come in on the EPS too');
     // The master systems display: the ship profile, the power budget, a tile per system (tap one to open it).
     await screen(geordi, 'st-msd');
     await geordi.waitForSelector('.msd-tile[data-system="warp"] .msd-pill[data-state="ok"]:has-text("Running")');
@@ -1353,10 +1354,12 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => laforge.nav()?.own.grid.core === 'online', 20000);
     step('towed back to Starbase 12 and released, the Enterprise docked, had a new warp core and full antimatter pods installed, and started it');
 
-    // Supplies: the Enterprise offloads deuterium to the starbase; the Defiant
+    // Supplies: the Enterprise exports deuterium to the starbase; the Defiant
     // docks with the Enterprise and sends it some of its own.
-    laforge.send({ type: 'grid', transfer: { resource: 'deuterium', dir: 'out', amount: 300 } });
-    await waitFor(() => laforge.nav()?.own.grid.deuterium <= 1710 && !laforge.nav().own.grid.transfer, 15000);
+    const deuBefore = laforge.nav().own.grid.deuterium;
+    laforge.send({ type: 'grid', conn: { with: 'station', res: 'deu', exp: true } });
+    await waitFor(() => laforge.nav()?.own.grid.deuterium <= deuBefore - 150, 15000);
+    laforge.send({ type: 'grid', conn: { with: 'station', res: 'deu', exp: false } });
     const ent = laforge.nav().own;
     ezri.send({ type: 'helm', dest: { x: ent.x, y: ent.y - 3 }, warp: 1 });
     await waitFor(() => { const n = ezri.nav()?.own; return n && Math.hypot(n.x - ent.x, n.y - (ent.y - 3)) < 1 && n.warp === 0 && n.grid.nearShip === 'Enterprise'; }, 20000);
@@ -1383,12 +1386,15 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(laforge.nav()?.own.grid.dockedShip, 'Defiant', "restarting the Defiant's computer undocked the ships");
     const rom = await crewWs('rom', 'Defiant', 'Engineering');
     const before = laforge.nav().own.grid.deuterium;
-    rom.send({ type: 'grid', transfer: { resource: 'deuterium', dir: 'out', amount: 100 } });
+    rom.send({ type: 'grid', conn: { with: 'Enterprise', res: 'deu', exp: true } });
+    laforge.send({ type: 'grid', conn: { with: 'Defiant', res: 'deu', imp: true } });
     await waitFor(() => laforge.nav()?.own.grid.deuterium >= before + 90, 15000);
-    // Power across the dock: the Defiant offers 100 from its Bus B, the Enterprise 30; 70 flows to the Enterprise's Bus A.
-    rom.send({ type: 'grid', ties: { ship: ['B'] }, feed: 100 });
-    laforge.send({ type: 'grid', ties: { ship: ['A'] }, feed: 30 });
-    await waitFor(() => laforge.nav()?.own.grid.shipIn === 70 && Object.values(rom.nav()?.own.grid.ports || {}).find((v) => v?.ship === 'Enterprise')?.fed === 70); // (the Enterprise's A and B are crosslinked: it lands on either)
+    rom.send({ type: 'grid', conn: { with: 'Enterprise', res: 'deu', exp: false } });
+    laforge.send({ type: 'grid', conn: { with: 'Defiant', res: 'deu', imp: false } });
+    // Power across the dock: the Defiant exports from its Bus B, the Enterprise imports onto its Bus B.
+    rom.send({ type: 'grid', ties: { ship: ['B'] }, conn: { with: 'Enterprise', res: 'power', exp: true } });
+    laforge.send({ type: 'grid', ties: { ship: ['B'] }, conn: { with: 'Defiant', res: 'power', imp: true } });
+    await waitFor(() => laforge.nav()?.own.grid.shipIn > 0 && Object.values(rom.nav()?.own.grid.ports || {}).find((v) => v?.ship === 'Enterprise')?.fed > 0);
     // Across the dock: the Station screen offers the Defiant's stations, and
     // the Defiant's engineer walks over to the Enterprise's Science console.
     await screen(spock, 'reassign');
@@ -1400,14 +1406,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     ezri.send({ type: 'dock', undock: true });
     await waitFor(() => !laforge.nav()?.own.grid.dockedShip);
     rom.close();
-    // A full tank: refuelling is refused, and a transfer can always be stopped (#1).
-    laforge.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 500 } });
-    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /antimatter tank is already full/.test(m.text)) || laforge.nav()?.own.grid.transfer);
-    laforge.send({ type: 'grid', transfer: { resource: 'deuterium', dir: 'in', amount: 500 } });
-    await waitFor(() => laforge.nav()?.own.grid.transfer);
-    laforge.send({ type: 'grid', transfer: null });
-    await waitFor(() => !laforge.nav()?.own.grid.transfer && laforge.msgs.some((m) => m.type === 'notice' && /transfer stopped/.test(m.text)));
-    step('the Enterprise offloaded deuterium at Starbase 12; the Defiant docked with it, sent it 100 deuterium, and (offering 100 power to its 30) fed it the difference, 70; then undocked');
+    step('Connections: the Enterprise exported deuterium to Starbase 12; the Defiant docked with it and exported deuterium and power to it (the Enterprise importing); then undocked');
     ezri.close();
     tuvok.close();
 
@@ -1440,7 +1439,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await screen(op, 'status');
     await op.waitForSelector('#console-dark:not([hidden])', { state: 'attached' });
     // (Cold iron: nothing tied in, consoles, sensors and comms included.)
-    laforge.send({ type: 'grid', ties: { dock: ['B'], crosslink: ['A', 'B'], 'console:Operations': ['A'], 'console:Engineering': ['A'], 'system:lateral': ['A'], 'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'sub:computer1': ['A'] } });
+    laforge.send({ type: 'grid', conn: { with: 'station', res: 'power', imp: true }, ties: { dock: ['B'], crosslink: ['A', 'B'], 'console:Operations': ['A'], 'console:Engineering': ['A'], 'system:lateral': ['A'], 'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'sub:computer1': ['A'] } });
     laforge.send({ type: 'grid', computer: { n: 1, on: true } }); // (texts need a computer core: it boots while we go on)
     await op.waitForSelector('#console-dark', { state: 'hidden' });
     step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt cold iron (nothing tied in, no fuel) docked at ${reborn.base}; tied to dock power, the ops console came back`);
@@ -1629,7 +1628,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // No computer core online: no text messages.
     ro.send({ type: 'text', to: [id('barclay', 'Excelsior')], text: 'testing' });
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /computer core offline/.test(m.text)));
-    barclay.send({ type: 'grid', ties: { dock: ['B'], crosslink: ['A', 'B'] } }); // dock power (Bus B only), shared with A
+    barclay.send({ type: 'grid', conn: { with: 'station', res: 'power', imp: true }, ties: { dock: ['B'], crosslink: ['A', 'B'] } }); // dock power: imported, on Bus B, shared with A
     await waitFor(() => barclay.nav()?.own.grid.consoleOk.Tactical && barclay.nav().own.power.lifeSupport === 100);
     // The computer cores boot in stages (about 14 s); one on an unpowered bus can't.
     barclay.send({ type: 'grid', computer: { n: 3, on: true } }); // Bus C: nothing on it
@@ -1667,16 +1666,15 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => { const g = barclay.nav()?.own.grid; return g?.ties['console:Tactical'].join() === 'A' && g.ties['system:lateral'].join() === 'B' && g.cells['console:Tactical'].A === 2 && g.cells['system:lateral'].B === 10; });
     barclay.send({ type: 'grid', core: 'start' });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /needs antimatter and deuterium/.test(m.text)));
-    barclay.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 200 } });
-    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /set a containment feed/.test(m.text)));
+    // Supplies come through the starbase connection: Import. Antimatter needs its
+    // containment powered (and the antimatter bus up): none comes aboard without them.
+    barclay.send({ type: 'grid', conn: { with: 'station', res: 'am', imp: true } });
     barclay.send({ type: 'grid', ties: { containment: ['C'] } }); // nothing on Bus C
-    barclay.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 200 } });
-    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /containment's feed \(Bus C\) has no power/.test(m.text)));
+    await waitFor(() => /containment|antimatter bus/.test(barclay.nav()?.own.grid.connections?.[0]?.am.why || ''));
+    assert.equal(barclay.nav().own.grid.antimatter, 0, 'no antimatter without its containment and the antimatter bus');
     barclay.send({ type: 'grid', ties: { containment: ['A'] } });
-    barclay.send({ type: 'grid', transfer: { resource: 'antimatter', dir: 'in', amount: 200 } });
-    await waitFor(() => barclay.nav()?.own.grid.antimatter >= 200 && !barclay.nav().own.grid.transfer, 15000);
-    barclay.send({ type: 'grid', transfer: { resource: 'deuterium', dir: 'in', amount: 400 } });
-    await waitFor(() => barclay.nav()?.own.grid.fuel.deu.tanks.reduce((a, x) => a + x.level, 0) >= 395 && !barclay.nav().own.grid.transfer, 20000); // (the systems' tanks take theirs over the bus as it comes in)
+    barclay.send({ type: 'grid', conn: { with: 'station', res: 'deu', imp: true } });
+    await waitFor(() => barclay.nav()?.own.grid.fuel.deu.tanks.reduce((a, x) => a + x.level, 0) >= 395, 20000); // (the systems' tanks take theirs over the bus as it comes in)
     // (The drives' tanks fill from the deuterium tank over the bus; a chamber lights at 30%.)
     await waitFor(() => { const ts = barclay.nav()?.own.grid.fuel.deu.tanks; return ts && ['port', 'starboard', 'core'].every((n) => ts.find((x) => x.name === n).pct >= 30); }, 10000);
     // The warp core needs antimatter in its tank (the antimatter bus moves nothing
@@ -1712,7 +1710,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', core: 'start' });
     await waitFor(() => barclay.nav()?.own.grid.core === 'online', 20000);
     step('warp core: containment lost under a live reaction started a 45 s breach countdown, restoring it averted the breach; SCRAM stopped the reaction; cold ignition was refused on a lean mixture and relit at 15:1');
-    step(`a new ship, the Excelsior, started cold at ${cold.docked} (consoles dark, no fuel); on dock power Engineering moved Tactical's console to Bus A and the lateral sensors to Bus B (consoles only take A or B, engines only the EPS), set a containment feed, took on antimatter and deuterium, filled the systems' tanks over the deuterium bus, lit both impulse drives so the EPS manifold could pressurize (100+ of generation) for the structural integrity field and the antimatter bus's containment, filled the core's antimatter tank, and started the core`);
+    step(`a new ship, the Excelsior, started cold at ${cold.docked} (consoles dark, no fuel); on dock power Engineering moved Tactical's console to Bus A and the lateral sensors to Bus B (consoles only take A or B, engines only the EPS), set a containment feed, imported deuterium (and, once the antimatter bus was up, antimatter) through the starbase connection, filled the systems' tanks over the deuterium bus, lit both impulse drives so the EPS manifold could pressurize (100+ of generation) for the structural integrity field and the antimatter bus's containment, filled the core's antimatter tank, and started the core`);
 
     // Impulse drives: started on bus power (their pumps), then self-sustaining.
     // Thrusters tied in, a drive moves the ship (half impulse); off, it feeds the EPS.
@@ -1735,13 +1733,14 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', reactor: { name: 'aux1', on: true } });
     await waitFor(() => barclay.nav()?.own.grid.aux.aux1.state === 'running' && barclay.nav().own.grid.cells.aux1.EPS > 0, 15000);
     const auxFed = barclay.nav().own.grid.cells.aux1.EPS;
-    // Its own pump pulls the deuterium in: untie the pump and the chamber's pressure falls; below 30% it flames out (the feed still up).
-    // Drain its tank back into the main storage: dry, it flames out.
+    // Drain its tank back into the main storage (which exports to the starbase to make room): dry, it flames out.
+    barclay.send({ type: 'grid', conn: { with: 'station', res: 'deu', imp: false, exp: true } });
     barclay.send({ type: 'grid', tank: { bus: 'deu', name: 'main', fill: true } });
     barclay.send({ type: 'grid', tank: { bus: 'deu', name: 'aux1', drain: true } });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /aux fusion reactor 1 shut down \(flameout: its deuterium tank ran dry\)/.test(m.text)), 15000);
     barclay.send({ type: 'grid', tank: { bus: 'deu', name: 'main', drain: true } });
     barclay.send({ type: 'grid', tank: { bus: 'deu', name: 'aux1', fill: true } });
+    barclay.send({ type: 'grid', conn: { with: 'station', res: 'deu', imp: true, exp: false } });
     step(`aux fusion reactor 1 lit on bus power and fed the EPS (${auxFed}); its tank drained over the bus into the main storage, it flamed out`);
     barclay.send({ type: 'grid', ties: { thrustersPort: ['EPS'] }, impulse: { drive: 'port', on: false } });
     // #2: a battery on Bus A charges from Bus A's surplus even while Bus B and
