@@ -2817,6 +2817,54 @@ function gridCommand(ws, msg) {
     e.taps[X] = Math.max(0, Math.min(BUS_MAX[X], Math.round(Number.isFinite(msg.tap.amount) ? msg.tap.amount : msg.tap.on ? BUS_MAX[X] : 0)));
     said.push(`EPS tap to Bus ${X}: ${e.taps[X] ? `up to ${e.taps[X]}` : 'closed'}`);
   }
+  // All on / All off for a bus column (A, B, C, EPS, Deu, AM) or every one ('all'): { busAll: { bus, on } }.
+  // On ties every row that may go on it (one-bus rows only if untied); off unties them, but for what keeps
+  // antimatter contained: a tank's containment while that tank holds antimatter, the AM bus's magnetic
+  // containment while there's antimatter on the AM bus, the warp core's constriction while it runs, and
+  // the Engineering console. Breakers, the crosslink and the EPS taps aren't touched.
+  if (msg.busAll && (msg.busAll.bus === 'all' || [...NODES, 'Deu', 'AM'].includes(msg.busAll.bus))) {
+    const on = !!msg.busAll.on, cols = msg.busAll.bus === 'all' ? [...NODES, 'Deu', 'AM'] : [msg.busAll.bus];
+    // (Only what this vessel has: its stations' consoles, its class's systems.)
+    const sysGone = (x) => (BASE_ONLY.includes(x) && !isBase(key)) || PHASER_ARRAYS.indexOf(x) >= arraysOf(key) || (x === 'transporter' && !isBase(key) && !classOf(key).transporter)
+      || (WARP_DRIVE.includes(x) && (isBase(key) || !classOf(key).maxWarp)) || (x === 'spore' && (isBase(key) || !classOf(key).spore));
+    const aboard = (k2) => (k2.startsWith('console:') ? hasStation(key, k2.slice(8)) : k2.startsWith('place:') ? placesOf(key).some((pl) => `place:${pl.name}` === k2) : k2.startsWith('system:') ? !sysGone(k2.slice(7)) : true);
+    const amOnBus = Object.keys(TANKS.am).some((n) => e.tankCfg[`am:${n}`]?.tied && tankLevel(e, 'am', n) > 0);
+    const keep = (k2) => (k2 === 'console:Engineering' ? 'the Engineering console'
+      : k2 === 'containment' && tankLevel(e, 'am', 'main') > 0 ? 'antimatter containment (antimatter in the pods)'
+      : Object.entries(AM_CONTAIN).find(([n, c]) => c === k2 && tankLevel(e, 'am', n) > 0) ? `${TANKS.am[Object.entries(AM_CONTAIN).find(([, c]) => c === k2)[0]].label} containment (antimatter in it)`
+      : k2 === 'sub:constriction' && e.core !== 'offline' && e.core !== 'ejected' ? 'the warp core\'s constriction (the core is running)'
+      : k2 === 'system:amBus' && amOnBus ? 'the AM bus\'s magnetic containment (antimatter on the AM bus)' : null);
+    const kept = new Set(), changed = [];
+    // (What's kept tied keeps its way to the bus too: the conduits above it.)
+    const keptPaths = new Set(Object.keys(e.ties).filter((k2) => keep(k2)).flatMap((k2) => conduitsOf(key, k2)));
+    for (const X of cols) {
+      if (X === 'Deu' || X === 'AM') {
+        const bus = X === 'Deu' ? 'deu' : 'am';
+        for (const n of Object.keys(TANKS[bus])) { const cfg = e.tankCfg[`${bus}:${n}`]; if (cfg && cfg.tied !== on) { cfg.tied = on; changed.push(X); } }
+        if (e.docked && e.connTies[bus] !== on) { e.connTies[bus] = on; changed.push(X); }
+        continue;
+      }
+      for (const k2 of Object.keys(e.ties)) {
+        if (k2 === 'crosslink' || k2 === 'impulsePort' || k2 === 'impulseStarboard' || !aboard(k2) || !tieNodes(k2).includes(X)) continue;
+        const cur = e.ties[k2];
+        if (on) {
+          if (cur.includes(X) || (!isMulti(k2) && cur.length)) continue;
+          e.ties[k2] = NODES.filter((n) => n === X || cur.includes(n));
+        } else {
+          if (!cur.includes(X)) continue;
+          const why = keep(k2) || (keptPaths.has(k2) ? null : null);
+          if (!why && keptPaths.has(k2)) continue; // (a conduit on the way to something kept)
+          if (why) { kept.add(why); continue; }
+          e.ties[k2] = cur.filter((n) => n !== X);
+        }
+        if (e.tripped) delete e.tripped[k2];
+        changed.push(X);
+      }
+    }
+    const what = msg.busAll.bus === 'all' ? 'All buses' : `${{ Deu: 'Deu. bus', AM: 'AM bus', EPS: 'EPS' }[msg.busAll.bus] || `Bus ${msg.busAll.bus}`}`;
+    said.push(`${what}: all ${on ? 'on' : 'off'}${changed.length ? '' : ' (nothing to change)'}${kept.size ? `; kept tied: ${[...kept].join(', ')}` : ''}`);
+    linkTick();
+  }
   for (const [k, v] of Object.entries(msg.ties && typeof msg.ties === 'object' ? msg.ties : {})) {
     if (!(k in e.ties) || !Array.isArray(v) || k === 'impulsePort' || k === 'impulseStarboard') continue; // a drive feeds the EPS through its thrusters' tie
     const allowed = tieNodes(k);

@@ -1385,7 +1385,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // External sources: solar, then the connections (each with a Power row on Bus B and an EPS row).
     assert.deepEqual(sections.slice(0, 7), ['[External sources]', 'ties-solar', 'conn-Starbase-12', 'conn-Starbase-12-deu', 'conn-Starbase-12-am', 'conn-Starbase-12-power', 'conn-Starbase-12-eps'], sections.join(' '));
     // The emergency batteries: a row right under the bus batteries, one per bus.
-    assert.deepEqual(await geordi.$$eval('#grid-table thead tr', (rs) => rs.map((r) => r.id).slice(1)), ['grid-stores', 'grid-emerg']);
+    assert.deepEqual(await geordi.$$eval('#grid-table thead tr', (rs) => rs.map((r) => r.id).slice(1)), ['grid-busall', 'grid-stores', 'grid-emerg']);
     assert.match(await geordi.textContent('#grid-emerg'), /Emergency \d+%.*Emergency \d+%.*Emergency \d+%/);
     assert.ok(sections.indexOf('[Bus crosslink]') < sections.indexOf('ties-crosslink'), sections.join(' '));
     // A Controls column between System and the ODN: every row's buttons sit there.
@@ -1992,6 +1992,32 @@ const audioBytes = (page) => page.evaluate(async () => {
       laforge.send({ type: 'grid', ties: { 'sub:holoEmitters': ['B'] } });
       bones.close(); yeoman.close(); kirk.close();
       step('the holographic doctor: Medical activated it; it asked the nature of the medical emergency, showed in the rosters as a hologram, answered the readiness check, treated and discharged a patient; untied, its holo-emitters took it offline');
+    }
+
+    // All on / All off: Bus A all off unties everything on A but what keeps antimatter contained
+    // (the pods, with antimatter in them) and the Engineering console; all on ties it all back;
+    // All buses off leaves only those.
+    {
+      const bc = startComputer('bus', 'Buskirk', { position: '300,700' });
+      await waitFor(() => [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.some((x) => x.name === 'Buskirk'), 15000);
+      const eng = await crewWs('busser', 'Buskirk', 'Engineering');
+      await waitFor(() => eng.nav()?.own?.grid?.ties);
+      const tiedTo = (X) => Object.entries(eng.nav().own.grid.ties).filter(([k, v]) => v.includes(X) && !['crosslink'].includes(k)).map(([k]) => k).sort();
+      assert.ok(tiedTo('A').length > 3, 'a warm ship has plenty on Bus A');
+      eng.send({ type: 'grid', busAll: { bus: 'A', on: false } });
+      await waitFor(() => eng.msgs.some((m) => m.type === 'notice' && /Bus A: all off; kept tied: .*antimatter containment \(antimatter in the pods\)/.test(m.text)));
+      await waitFor(() => tiedTo('A').every((k) => k.startsWith('place:') || ['console:Engineering', 'containment', 'contain:amCore', 'contain:amTorpedo', 'sub:constriction'].includes(k)));
+      assert.ok(tiedTo('A').includes('containment') || !eng.nav().own.grid.ties.containment.includes('A'), 'the pods stay contained');
+      eng.send({ type: 'grid', busAll: { bus: 'A', on: true } });
+      await waitFor(() => eng.nav().own.grid.ties['system:atmosphere'].includes('A') && eng.nav().own.grid.ties['console:Helm'].includes('A'));
+      eng.send({ type: 'grid', busAll: { bus: 'all', on: false } });
+      await waitFor(() => eng.msgs.some((m) => m.type === 'notice' && /All buses: all off; kept tied/.test(m.text)));
+      await waitFor(() => { const t = eng.nav().own.grid.ties; return t.containment.length > 0 && t['console:Engineering'].length > 0 && !t['console:Helm'].length && !t['system:shields'].length && !t['system:atmosphere'].length; });
+      eng.send({ type: 'grid', busAll: { bus: 'all', on: true } });
+      await waitFor(() => { const t = eng.nav().own.grid.ties; return t['console:Helm'].length && t['system:shields'].includes('EPS'); });
+      eng.close();
+      await stopComputer(bc);
+      step('All on / All off: Bus A all off kept only the pods\' containment (antimatter in them) and the Engineering console; all on tied it all back; All buses off left only what keeps antimatter contained; All buses on tied everything again');
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;

@@ -1325,6 +1325,13 @@ function renderCombat() {
       for (const n of COLS) tr.append(el('td', { className: 'grid-na' }));
       return tr;
     };
+    // All on / All off: under each bus column's heading, and for every bus at once (containment that
+    // still holds antimatter, and the Engineering console, stay tied: the relay says what it kept).
+    const busAllRow = () => {
+      const pair = (bus) => [small('All on', `bus-all-on-${bus}`, () => send({ type: 'grid', busAll: { bus, on: true } })), small('All off', `bus-all-off-${bus}`, () => send({ type: 'grid', busAll: { bus, on: false } }), true)];
+      return el('tr', { className: 'grid-busall', id: 'grid-busall' }, el('th', { scope: 'row', textContent: 'All buses' }), el('td', { className: 'grid-controls' }, ...pair('all')),
+        ...COLS.map((n) => (n === 'ODN' ? el('td') : el('td', { className: 'grid-busall-cell' }, ...pair(n)))));
+    };
     const small = (text, id, onclick, alert) => { const b = button(text, id, onclick, alert ? 'lcars-button--alert' : ''); b.classList.add('grid-mini'); return b; };
     const subRow = (name, level, note) => ties(`sub:${name}`, grid.subsystems[name].name, `sub:${name}`, { level, note: note ?? (grid.subOk[name] === false ? 'NO POWER' : '') });
     // A tap row across the bus columns: on/off (lit when on).
@@ -1688,7 +1695,7 @@ function renderCombat() {
         });
       }
       return el('table', { className: 'grid-table', id: 'grid-table' },
-        el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), el('th', { scope: 'col', textContent: 'Controls' }), ...COLS.map((n) => el('th', { scope: 'col', textContent: NODE_NAMES[n] }))), storesRow(), emergRow()),
+        el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), el('th', { scope: 'col', textContent: 'Controls' }), ...COLS.map((n) => el('th', { scope: 'col', textContent: NODE_NAMES[n] }))), busAllRow(), storesRow(), emergRow()),
         el('tbody', {}, ...rows),
         el('tfoot', {}, el('tr', {}, el('th', { scope: 'row', textContent: 'Used / available / max' }), el('td'),
           ...COLS.map((n) => {
