@@ -200,9 +200,14 @@ button.lcars-nav-button { font: inherit; font-size: 17px; letter-spacing: inheri
 body[data-alert='red'] .lcars-elbow, body[data-alert='red'] .lcars-bar__seg, body[data-alert='red'] .lcars-sidebar__fill { background: var(--lcars-red) !important; animation: lcars-blink 1.4s steps(2) infinite; }
 body[data-alert='yellow'] .lcars-elbow, body[data-alert='yellow'] .lcars-bar__seg, body[data-alert='yellow'] .lcars-sidebar__fill { background: var(--lcars-gold) !important; }
 @media (prefers-reduced-motion: reduce) { body[data-alert='red'] .lcars-elbow { animation: none; } }
+/* Black alert (a spore drive's jump): the frame goes dark, a deep violet glow pulsing. */
+body[data-alert='black'] .lcars-elbow, body[data-alert='black'] .lcars-bar__seg, body[data-alert='black'] .lcars-sidebar__fill { background: #1a1024 !important; box-shadow: inset 0 0 0 2px #6a3fa0; animation: lcars-blink 2.4s steps(2) infinite; }
+@media (prefers-reduced-motion: reduce) { body[data-alert='black'] .lcars-elbow { animation: none; } }
+.alert-black { background: #1a1024; color: #c9a6ff; box-shadow: inset 0 0 0 2px #6a3fa0; }
 .radio-ship-ctl { display: flex; justify-content: flex-end; }
 /* Science scans: lifeforms by name and species (and location when resolved), and the target's power use. */
 .nav-scan-lifeforms, .nav-scan-power { list-style: none; margin: 0.25rem 0; padding: 0; }
 .nav-scan-lifeforms li, .nav-scan-power li { padding: 0.1rem 0; }
 .nav-scan-power li { display: flex; justify-content: space-between; gap: 1rem; }
 .nav-scan-sub { margin: 0.5rem 0 0; color: var(--lcars-orange, #f90); font-size: 0.95em; }
+.bcast--black { --accent: #6a3fa0; animation: none; }

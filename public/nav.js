@@ -151,6 +151,23 @@
     // starbase or with the ship in range; undock a port; answer a request.
     let dockPort = 'port';
     const dockBox = el('div', { className: 'nav-dock', id: 'helm-dock-box' });
+    // The spore drive (a Crossfield's): jump to the course picked, at black alert.
+    const sporeBox = el('div', { className: 'nav-spore', id: 'helm-spore-box', hidden: true });
+    function renderSpore() {
+      const sp = nav?.own?.grid?.spore;
+      sporeBox.hidden = !sp;
+      if (!sp) return;
+      const sig = JSON.stringify(sp);
+      if (sporeBox.dataset.sig === sig) return;
+      sporeBox.dataset.sig = sig;
+      sporeBox.replaceChildren(
+        el('h3', { className: 'ops-subhead', textContent: 'Spore drive' }),
+        el('p', { className: 'st-state', id: 'spore-state', textContent: sp.charging ? `Charging for ${sp.dest}: ${sp.t} of ${sp.secs} s` : sp.cooldown ? `Cooling down: ${sp.cooldown} s` : sp.why ? `Not ready: ${sp.why}` : 'Ready to jump to the course picked' }),
+        el('div', { className: 'ops-form' },
+          sp.charging ? button('Stand down', 'spore-cancel', () => send({ type: 'spore-jump', cancel: true }), true)
+            : Object.assign(button('Spore jump', 'spore-jump', () => { const dest = destValue(); if (dest) send({ type: 'spore-jump', dest }); else status('Pick a course to jump to (a waypoint, a ship or a starbase)'); }, true), { disabled: !!sp.why }),
+          el('span', { className: 'ops-hint', textContent: `Spores ${sp.spores} of ${sp.cap} (${sp.jump} a jump)` })));
+    }
     let dockSig = '';
     function renderDock() {
       const g = nav?.own?.grid;
@@ -215,6 +232,7 @@
             send({ type: 'helm', warp: Number(speedSel.value), ...(dest ? { dest } : {}) });
           }),
           button('All stop', 'helm-stop', () => send({ type: 'helm', warp: 0 }), true)),
+        sporeBox,
         el('h3', { className: 'ops-subhead', textContent: 'Docking' }),
         dockBox,
         el('h3', { className: 'ops-subhead', textContent: 'Autopilot' }),
@@ -226,6 +244,7 @@
 
     function renderControls() {
       if (!nav) return;
+      if (mode === 'helm') renderSpore();
       const own = nav.own;
       if (own) {
         const dest = own.dest ? (own.dest.name ? `the ${own.dest.name}` : `${Math.round(own.dest.x)}, ${Math.round(own.dest.y)}`) : 'none (holding heading)';

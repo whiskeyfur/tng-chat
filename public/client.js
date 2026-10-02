@@ -169,7 +169,7 @@ document.getElementById('link')?.addEventListener('click', (ev) => {
 // Create ship below (built once per opening, so typing isn't interrupted).
 let adminBases = [];
 const createDraft = { name: '', cls: null, at: null, x: null, y: null };
-const CREATE_CLASSES = [['galaxy', 'Galaxy'], ['dreadnought', 'Dreadnought'], ['intrepid', 'Intrepid'], ['runabout', 'Runabout'], ['shuttle', 'Shuttle'], ['starbase', 'Starbase']];
+const CREATE_CLASSES = [['galaxy', 'Galaxy'], ['dreadnought', 'Dreadnought'], ['intrepid', 'Intrepid'], ['crossfield', 'Crossfield'], ['runabout', 'Runabout'], ['shuttle', 'Shuttle'], ['starbase', 'Starbase']];
 function renderAdmin(st) {
   const d = adminDialog();
   if (!d.open) return;
@@ -520,7 +520,7 @@ function renderShipState() {
   // Alert status: red or yellow frame and a bar on every console aboard.
   const alert = lastNav?.own?.alert || 'green';
   document.body.dataset.alert = alert;
-  bc.setAlert('alert', alert === 'green' ? null : `${alert === 'red' ? 'Red' : 'Yellow'} alert`, { level: alert });
+  bc.setAlert('alert', alert === 'green' ? null : `${{ red: 'Red', yellow: 'Yellow', black: 'Black' }[alert] || 'Yellow'} alert`, { level: alert });
   if (!stationView) return;
   const up = !!ownShip()?.shields;
   const crew = comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station !== 'Operations');
@@ -783,7 +783,7 @@ function renderCrewPanels() {
       cmd.append(
         el('p', { className: 'st-state', id: 'alert-state' }),
         el('div', { className: 'ops-form', id: 'alert-buttons' },
-          ...[['green', 'Condition green', ''], ['yellow', 'Yellow alert', 'alert-yellow'], ['red', 'Red alert', 'lcars-button--alert']].map(([lvl, t, c]) => {
+          ...[['green', 'Condition green', ''], ['yellow', 'Yellow alert', 'alert-yellow'], ['red', 'Red alert', 'lcars-button--alert'], ['black', 'Black alert', 'alert-black']].map(([lvl, t, c]) => {
             const b = button(t, () => send({ type: 'alert', level: lvl }), c);
             b.dataset.level = lvl;
             return b;
@@ -795,6 +795,8 @@ function renderCrewPanels() {
     cmd.querySelector('#alert-state').textContent = level === 'green' ? 'Condition green' : `${level} alert`;
     cmd.querySelector('#alert-state').dataset.level = level;
     for (const b of cmd.querySelectorAll('#alert-buttons button')) b.setAttribute('aria-pressed', String(b.dataset.level === level));
+    // (Black alert: only aboard a ship with a spore drive.)
+    cmd.querySelector('#alert-buttons button[data-level="black"]').hidden = !lastNav?.own?.grid?.spore;
   }
 
   // First Officer: reassign crew.
@@ -1345,7 +1347,9 @@ function renderCombat() {
         const cell = colAt(row, col);
         cell.className = ''; cell.replaceChildren(el('label', { className: 'grid-tie' }, box));
       }
-      return [parent, deu, am, power, eps];
+      // A spore drive's reserve: from or to the starbase.
+      const spores = x.kind === 'station' && grid.spore ? [(() => { const c = x.spores; const tr = el('tr', { id: `conn-${slug}-spores` }, el('th', { scope: 'row', className: 'grid-indent grid-indent--2' }, el('span', { textContent: 'Spores' }), el('small', { className: 'grid-note', textContent: `ours ${Math.round((100 * grid.spore.spores) / grid.spore.cap)}%${c.flow ? ` · ${c.flow > 0 ? `+${c.flow}` : c.flow} a second` : ''}` })), ctlCell(io('spores', c)), ...COLS.map(() => el('td', { className: 'grid-na' }))); return tr; })()] : [];
+      return [parent, deu, am, power, eps, ...spores];
     });
     // The stores, one per column under the headings: each bus's battery and
     // the EPS manifold's pressure, how full, and charging (−) or covering a shortfall (+).

@@ -11,7 +11,7 @@
 //   node tools/shipcore.js --position 500,480 Enterprise   (where a new ship starts; else docked at a starbase)
 //   node tools/shipcore.js --warm Enterprise   (a new ship starts powered up and fuelled, not cold)
 //   node tools/shipcore.js --class runabout Rubicon (a new ship's class: galaxy (the default),
-//                                                 dreadnought, intrepid, runabout or shuttle; kept in its .nav.json)
+//                                                 dreadnought, intrepid, crossfield, runabout or shuttle; kept in its .nav.json)
 //
 // Files live in <data>/<ship>/ (default ./shipcore-data, next to where you run
 // it), with an index (.index.json) that also remembers deletions, so a file
@@ -347,7 +347,7 @@ module.exports = { createShipcore, parseArgs };
 if (require.main === module) {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help || !opts.ships.length) {
-    console.log('usage: node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] [--position x,y] [--warm] [--class galaxy|dreadnought|intrepid|runabout|shuttle] <ship> [ship...]');
+    console.log('usage: node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] [--position x,y] [--warm] [--class galaxy|dreadnought|intrepid|crossfield|runabout|shuttle] <ship> [ship...]');
     process.exit(opts.help ? 0 : 1);
   }
   const core = createShipcore(opts, { onFail: () => process.exit(1) });

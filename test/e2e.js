@@ -15,6 +15,7 @@ process.env.PORT = process.env.PORT || '8099';
 process.env.BEAM_SECS = process.env.BEAM_SECS || '2'; // the transporter energizes this long (5 s in play)
 process.env.RESERVE_SECS = process.env.RESERVE_SECS || '3';
 process.env.STARBASES_FILE = process.env.STARBASES_FILE || require('path').join(require('os').tmpdir(), `tng-chat-starbases-${process.pid}.json`); // (never the live file)
+process.env.SPORE_CHARGE_SECS = process.env.SPORE_CHARGE_SECS || '3'; // a spore jump charges this long (10 s in play)
 process.env.PREFIX_LOCK_SECS = process.env.PREFIX_LOCK_SECS || '2'; // a wrong command prefix three times locks out this long (60 s in play)
 process.env.DRYDOCK_RELEASE_SECS = process.env.DRYDOCK_RELEASE_SECS || '3'; // release from drydock (30 s in play)
 process.env.DIAG_SECS = process.env.DIAG_SECS || '2'; // the transporter's level-3 diagnostic (16 s in play) // antimatter containment's internal reserve (9 minutes in play)
@@ -1780,6 +1781,31 @@ const audioBytes = (page) => page.evaluate(async () => {
       pilot2.close();
       await stopComputer(gc2);
       step('automation: life support followed the crew (off in the empty Shuttle Bay); red alert had Tactical raise shields and arm phasers; Science locked on the nearest contact; the Transporter kept its diagnostic; hangar control opened the doors for the Columbus to land and take off, closing them in between');
+    }
+
+    // The spore drive (a Crossfield, like the USS Discovery): refused outside black alert; at black
+    // alert (nonessential systems down) Helm jumps across the system; the drive then cools down.
+    {
+      const dc = startComputer('dc', 'Discovery', { class: 'crossfield', position: '200,200' });
+      await waitFor(() => [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.some((x) => x.name === 'Discovery' && x.class === 'Crossfield'), 15000);
+      const lorca = await crewWs('lorca', 'Discovery', 'Captain');
+      const detmer = await crewWs('detmer', 'Discovery', 'Helm');
+      await waitFor(() => detmer.nav()?.own?.grid?.spore);
+      detmer.send({ type: 'spore-jump', dest: { x: 800, y: 300 } });
+      await waitFor(() => detmer.msgs.some((m) => m.type === 'notice' && /no spore jump: black alert first/.test(m.text)));
+      lorca.send({ type: 'alert', level: 'black' });
+      await waitFor(() => { const o = detmer.nav()?.own; return o?.alert === 'black' && !o.grid.spore.why && o.allocated.replicators === 0; }, 15000);
+      detmer.send({ type: 'spore-jump', dest: { x: 800, y: 300 } });
+      await waitFor(() => { const o = detmer.nav()?.own; return o && Math.hypot(o.x - 800, o.y - 300) < 1; }, 30000);
+      await waitFor(() => detmer.nav()?.own.grid.spore.cooldown > 0);
+      assert.equal(detmer.nav().own.grid.spore.spores, 80, 'a jump takes 20 spores');
+      detmer.send({ type: 'spore-jump', dest: { x: 300, y: 300 } });
+      await waitFor(() => detmer.msgs.some((m) => m.type === 'notice' && /no spore jump: the drive is cooling down/.test(m.text)));
+      lorca.send({ type: 'alert', level: 'green' });
+      await waitFor(() => detmer.nav()?.own.allocated.replicators > 0, 15000);
+      lorca.close(); detmer.close();
+      await stopComputer(dc);
+      step('the spore drive: the Discovery (Crossfield class) was refused a jump until black alert, which powered nonessential systems down; then it jumped from 200,200 to 800,300 at once, spent 20 spores and cooled down (a second jump refused); condition green put the systems back');
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;
