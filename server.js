@@ -744,7 +744,7 @@ function coreSignOff(ws) {
 
 // Ranges at full sensor power; sensor power scales all three (Engineering).
 const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
-const SYSTEMS = ['engines', 'injectors', 'deflector', 'shields', 'sensors', 'lateral', 'transporter', 'weapons', 'sif', 'idf', 'atmosphere', 'thermal', 'gravity', 'lighting', 'replicators', 'recreation'];
+const SYSTEMS = ['engines', 'injectors', 'deflector', 'bussard', 'shields', 'sensors', 'lateral', 'transporter', 'weapons', 'sif', 'idf', 'atmosphere', 'thermal', 'gravity', 'lighting', 'replicators', 'recreation'];
 // Sensors: the long-range sensors (EPS) set sensor and subspace range; the
 // lateral arrays (a low bus) see close in and give the transporter its range.
 // The navigational deflector (EPS) needs the long-range sensors; warp needs it.
@@ -757,7 +757,10 @@ const HULL = { idfNeedsSif: 50, coreSif: 50, impulse: { sif: 60, idf: 80 }, warp
 // little over to charge batteries, but not gravity as well.
 const LIFE_SUPPORT = ['atmosphere', 'thermal', 'gravity', 'lighting'];
 // What a system draws at 100% (most: 100).
-const RATING = { engines: 300, atmosphere: 10, thermal: 8, gravity: 20, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
+// The Bussard collectors (EPS, under Helm) gather interstellar deuterium at
+// warp: up to 5 a second at warp 9, less slower or with less power.
+const BUSSARD = { perSecond: 5 };
+const RATING = { bussard: 20, engines: 300, atmosphere: 10, thermal: 8, gravity: 20, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
 const ratingOf = (s) => RATING[s] ?? 100;
 // Each system's power setting is a limit, 0-150: past 100 (its rating) is
 // emergency overdrive, which slowly damages it, faster the further over it runs.
@@ -765,7 +768,7 @@ const POWER_MAX = 150;
 const OVERDRIVE_DAMAGE = 0.02; // damage per second for each point drawn over 100
 const REACTOR = 360; // power drawn for a full sensor signature (a warm ship idling draws a little less)
 const MIN_SHIELD_POWER = 20;
-const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lighting: 100, lateral: 100, deflector: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
+const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lighting: 100, lateral: 100, deflector: 100, bussard: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
 // actually gets from the power grid (see "the power grid" below): damage caps
 // a system, unarmed weapons draw nothing, and a bus short of power browns out.
@@ -1400,15 +1403,15 @@ const PORTS = ['port', 'starboard']; // docking ports (starbases take any number
 // The port a ship is docked to us at (or null), and the ships docked with us (both sides agreeing).
 const portFor = (k, other) => PORTS.find((p) => engOf(k).shipDocks[p] === other) || null;
 const shipsDocked = (k) => PORTS.map((p) => [p, engOf(k).shipDocks[p]]).filter(([, o]) => o && portFor(o, k));
-const SYSTEM_BUS = { atmosphere: 'A', thermal: 'A', gravity: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
+const SYSTEM_BUS = { atmosphere: 'A', thermal: 'A', gravity: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', bussard: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
-const STATION_SYSTEMS = { Helm: ['engines', 'deflector'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors', 'lateral'], Engineering: ['sif', 'idf', 'lifeSupport'] /* a parent row: its systems carry the ties */, Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
+const STATION_SYSTEMS = { Helm: ['engines', 'deflector', 'bussard'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors', 'lateral'], Engineering: ['sif', 'idf', 'lifeSupport'] /* a parent row: its systems carry the ties */, Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
 const LOAD_NODES = {
   atmosphere: AB, thermal: AB, gravity: AB, lighting: AB, lateral: AB, replicators: AB, recreation: AB, // low power
   transporter: AB,
-  engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], tractor: ['EPS'], sensors: ['EPS'], deflector: ['EPS'], sif: ['EPS'], idf: ['EPS'], // high power: EPS only
+  engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], tractor: ['EPS'], sensors: ['EPS'], deflector: ['EPS'], bussard: ['EPS'], sif: ['EPS'], idf: ['EPS'], // high power: EPS only
 };
-const SYSTEM_PRIORITY = ['sif', 'idf', 'atmosphere', 'thermal', 'lighting', 'gravity', 'sensors', 'lateral', 'deflector', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
+const SYSTEM_PRIORITY = ['sif', 'idf', 'atmosphere', 'thermal', 'lighting', 'gravity', 'sensors', 'lateral', 'deflector', 'bussard', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
 // Systems shown under another system in the grid table (Helm > Engines > Plasma injectors).
 const SYSTEM_CHILDREN = { engines: ['injectors'], lifeSupport: LIFE_SUPPORT };
 // Rows with no ties of their own, only their systems' (Engineering > Life support > ...).
@@ -1630,6 +1633,7 @@ function usageOf(k, s, c) {
     case 'shields': return shields.has(k) || c.shield < 100 ? POWER_MAX : 0;
     case 'engines': case 'injectors': return w >= 1 ? (w / 9) * 100 : 0;
     case 'deflector': return w >= 1 ? 100 : w > 0 ? 50 : 0;
+    case 'bussard': return w >= 1 ? 100 : 0; // collecting only at warp
     case 'sensors': case 'lateral': return POWER_MAX;
     default: return 100;
   }
@@ -2399,7 +2403,7 @@ const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 50
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
-const SYSTEM_NAMES = { engines: 'warp field coils', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
+const SYSTEM_NAMES = { engines: 'warp field coils', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', bussard: 'Bussard collectors', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
   corePump: "warp core's deuterium pump", injector: 'antimatter injector', portPump: "port impulse drive's deuterium pump", starboardPump: "starboard impulse drive's deuterium pump",
   conduits: 'power transfer conduits', rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
 // What a hit can damage: the systems, and the subsystems that fail when badly damaged.
@@ -2682,6 +2686,9 @@ setInterval(() => {
     tripBreakers(k);
     // Batteries.
     for (const [name, node] of Object.entries(STORES)) e.stores[name] = Math.max(0, Math.min(node === 'EPS' ? GRID.epsCap : GRID.batteryCap, e.stores[name] - f.storeUsed[node] + f.charging[node]));
+    // The Bussard collectors, at warp: deuterium from space.
+    { const w = navState.get(k)?.warp || 0;
+      if (w >= 1 && f.delivered.bussard > 0) e.deuterium = Math.min(FUEL.deuterium, e.deuterium + BUSSARD.perSecond * (Math.min(9, w) / 9) * Math.min(1, f.delivered.bussard / 100)); }
     // Fuel: the core burns antimatter and deuterium for what it gives, the impulse reactor deuterium.
     if (f.coreUsed > 0) { const burn = (f.coreUsed / GRID.core) * FUEL.coreBurn; e.antimatter = Math.max(0, e.antimatter - burn); e.deuterium = Math.max(0, e.deuterium - burn); }
     if ((e.core === 'online' || e.core === 'starting') && (e.antimatter <= 0 || e.deuterium <= 0)) {

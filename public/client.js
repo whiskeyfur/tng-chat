@@ -419,7 +419,7 @@ const ownShip = () => ships.find((s) => me && s.name.toLowerCase() === me.ship.t
 
 // Shields (footer, displays, Tactical's control) and the transporter controls.
 // Power as Engineering has routed it (from the ship's computer, via 'nav').
-const POWER = [['engines', 'Warp field coils'], ['injectors', 'Plasma injectors'], ['deflector', 'Navigational deflector'], ['shields', 'Shields'], ['sensors', 'Long-range sensors'], ['lateral', 'Lateral sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['sif', 'Structural integrity field'], ['idf', 'Inertial dampers'], ['atmosphere', 'Atmospheric processors'], ['thermal', 'Thermal regulation'], ['gravity', 'Gravity generators'], ['lighting', 'Emergency lighting'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
+const POWER = [['engines', 'Warp field coils'], ['injectors', 'Plasma injectors'], ['deflector', 'Navigational deflector'], ['bussard', 'Bussard collectors'], ['shields', 'Shields'], ['sensors', 'Long-range sensors'], ['lateral', 'Lateral sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['sif', 'Structural integrity field'], ['idf', 'Inertial dampers'], ['atmosphere', 'Atmospheric processors'], ['thermal', 'Thermal regulation'], ['gravity', 'Gravity generators'], ['lighting', 'Emergency lighting'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
 const ownPower = () => lastNav?.own?.power || null;
 
 // Shields (footer, displays, Tactical's control), the transporter controls and

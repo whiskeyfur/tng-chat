@@ -905,6 +905,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Helm takes the Enterprise out of subspace range: the data link drops,
     // and the Defiant is no longer in range to hail.
     helm({ dest: { x: 950, y: 950 }, warp: 7 }); // default engine power (80%) gives warp 7.2 at most
+    // At warp the Bussard collectors draw and gather deuterium (at rest they draw nothing).
+    await spock.waitForFunction(() => window.__nav.last.own.warp >= 1 && window.__nav.last.own.power.bussard > 0);
     await op.waitForFunction(() => !window.__operator.network.includes('Defiant'), null, { timeout: 20000 });
     await op.waitForFunction(() => !window.__operator.ships.includes('Defiant'));
     await op.waitForSelector('#ops-log li:has-text("out of subspace range")', { state: 'attached' });
@@ -937,7 +939,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await scotty.click('[data-system="engines"] button[data-level="10"]');
     assert.equal(await scotty.locator('[data-system="engines"] button[data-allowed]').count(), 10); // limit 100: ten of fifteen
     assert.equal(await scotty.locator('[data-system="engines"] button[data-overdrive]').count(), 5);
-    assert.match(await scotty.textContent('.pw-total'), /EPS 599 .*not routed yet/);
+    assert.match(await scotty.textContent('.pw-total'), /EPS 619 .*not routed yet/);
     await scotty.click('#power-reset');
     // Sensors at 20%: every range drops to a fifth, so the transporter (4 units) can't reach.
     await route({ sensors: 20, lateral: 20 });

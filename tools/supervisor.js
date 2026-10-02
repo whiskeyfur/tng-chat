@@ -74,14 +74,17 @@ const env = { ...process.env, PORT };
 function startRelay() {
   const startedAt = Date.now();
   relaySince = startedAt;
-  relay = spawn(process.execPath, [path.join(ROOT, 'server.js')], { cwd: ROOT, env, stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
+  relay = spawn(process.execPath, [path.join(ROOT, 'server.js')], { cwd: ROOT, env, stdio: ['inherit', 'inherit', 'pipe', 'ipc'] });
+  // Its errors still go to the terminal; a port in use is noted for the give-up message.
+  let portInUse = false;
+  relay.stderr.on('data', (b) => { process.stderr.write(b); if (/EADDRINUSE/.test(b)) portInUse = true; });
   relay.on('message', onRelayMessage);
   relay.on('exit', (code, sig) => {
     if (stopping) return;
     log(`relay exited (${sig || code})`);
     if (Date.now() - startedAt > QUICK_FAIL_MS) { fails = 0; return; }
     if (++fails >= MAX_FAILS) {
-      log(`the relay failed to start ${fails} times in a row: is port ${PORT} already in use? (PORT=${PORT}${process.env.PORT ? ', from the environment' : ', the default'}) Stopping.`);
+      log(portInUse ? `the relay failed to start ${fails} times in a row: port ${PORT} is already in use (PORT=${PORT}${process.env.PORT ? ', from the environment' : ', the default'}). Stopping.` : `the relay crashed ${fails} times in a row (see the error above). Stopping.`);
       shutdown(1);
       return;
     }
