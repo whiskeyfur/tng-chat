@@ -136,7 +136,7 @@ async function onRelayMessage(m) {
 let timer = null;
 const changed = new Set();
 function onChange(file) {
-  if (!file || IGNORE.includes(file) || /(^|[/\\])\.|~$|\.swp$/.test(path.basename(file))) return;
+  if (!file || IGNORE.includes(file) || /(^|[/\\])\.|~$|\.swp$|\.tmp$/.test(path.basename(file))) return;
   changed.add(file);
   clearTimeout(timer);
   timer = setTimeout(apply, DELAY);

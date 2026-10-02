@@ -36,8 +36,9 @@ function save(change) {
   const next = { ...read(), ...change };
   fs.mkdirSync(DIR, { recursive: true });
   const keep = Object.fromEntries(Object.keys(DEFAULTS).map((k) => [k, next[k]]));
-  fs.writeFileSync(`${FILE}.tmp`, JSON.stringify(keep, null, 2) + '\n');
-  fs.renameSync(`${FILE}.tmp`, FILE);
+  const tmp = path.join(DIR, '.settings.json.tmp'); // (a dotfile: only the rename is a change to the supervisor)
+  fs.writeFileSync(tmp, JSON.stringify(keep, null, 2) + '\n');
+  fs.renameSync(tmp, FILE);
   return keep;
 }
 // The address a local program reaches the relay on.

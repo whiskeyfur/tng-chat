@@ -15,7 +15,10 @@ const LOCKOUT = { fails: 5, ms: 60 * 1000 }; // 5 wrong passwords: 60 s before t
 const USER_RE = /^[a-z0-9._-]{3,24}$/;
 
 const read = (file, empty) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return empty; } };
-const write = (file, v) => { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(`${file}.tmp`, JSON.stringify(v, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(`${file}.tmp`, file); };
+// (Written as a dotfile, then renamed: the supervisor's watch ignores dotfiles, and these files, so
+// a login never restarts the relay.)
+const tmpOf = (file) => path.join(path.dirname(file), `.${path.basename(file)}.tmp`);
+const write = (file, v) => { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(tmpOf(file), JSON.stringify(v, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(tmpOf(file), file); };
 let users = read(USERS_FILE, {});      // username -> { salt, hash, role, status, created, lastLogin, characters }
 let sessions = read(SESSIONS_FILE, {}); // sha256(token) -> { user, created, seen }
 // (The users file changed under us, npm run make-admin from the shell: read it again.)
