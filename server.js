@@ -2672,6 +2672,8 @@ function dockCommand(ws, msg) {
   if (msg.land) {
     const m = shipKey(clean(msg.land));
     const why = landFault(key, m);
+    // (An automated hangar opens its doors for a craft asking to land: ask, then land when they're open.)
+    if (why && /doors are closed/.test(why) && autoOn(m, 'hangar')) { bayRequests.set(key, { m, kind: 'land', at: Date.now() }); return note(`asked the ${shipName(m)}'s hangar control for clearance: the doors are opening`); }
     if (why) return note(why);
     e.landed = m; e.dirty = true;
     if (isBase(m)) { e.docked = shipName(m); e.dockedPort = 'port'; untieDock(e); } // (in a starbase's bay: docked at it)
@@ -2685,6 +2687,7 @@ function dockCommand(ws, msg) {
   if (msg.takeoff) {
     if (!e.landed) return note('not landed in a shuttle bay');
     const m = e.landed;
+    if (present(m) && !engOf(m).bayOpen && autoOn(m, 'hangar')) { bayRequests.set(key, { m, kind: 'takeoff', at: Date.now() }); return note(`asked the ${shipName(m)}'s hangar control for clearance: the doors are opening`); }
     if (present(m) && !engOf(m).bayOpen) return note(`the ${shipName(m)}'s shuttle bay doors are closed: ask their hangar control to open them`);
     e.landed = null; e.dirty = true;
     if (isBase(m) && e.docked === shipName(m)) e.docked = null;
@@ -3623,7 +3626,7 @@ setInterval(() => {
 // through the same commands a crewman's taps do, so the same rules hold.
 const AUTO_PANELS = ['engineering', 'lifeSupport', 'tactical', 'science', 'transporter', 'comms', 'hangar'];
 const AUTO_STATION = { engineering: 'Engineering', lifeSupport: 'Engineering', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Shuttle Bay' };
-const AUTO_BUILT = new Set(['engineering']); // (the others' lists come next)
+const AUTO_BUILT = new Set(AUTO_PANELS);
 const AUTO_NAMES = { engineering: 'Engineering', lifeSupport: 'Life support', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Hangar control' };
 // The panel a crewman's command works (to hand it back when they tap it).
 function panelOfCommand(station, msg) {
@@ -3730,10 +3733,97 @@ function engineeringSteps(k, mode) {
   ];
   return { steps: mode === 'shutdown' ? shutdown : startup, a };
 }
+// The other panels' routines: each looks at what should be so and, a step at
+// a time, makes it so; they keep going (they don't finish). Each returns its status.
+const bayRequests = new Map(); // craft key -> { m: mothership key, kind: 'land' | 'takeoff', at }
+function panelRoutine(k, p) {
+  const e = engOf(k), c = combatOf(k);
+  if (p === 'lifeSupport') {
+    // Atmosphere, heat, gravity and lights on where there are people, off where there aren't.
+    const a = automaton(k, 'Engineering');
+    const here = new Set(crewOf(k).map((u) => (u.operator ? OPS_STATION : u.station)));
+    for (const l of LOCATIONS) for (const x of LS_SYSTEMS) {
+      const want = here.has(l);
+      if (!!e.ls[l]?.[x] !== want) { gridCommand(a, { ls: { sys: x, loc: l, on: want } }); return `${SYSTEM_NAMES[x]} ${want ? 'on' : 'off'} at ${l}`; }
+    }
+    return `holding: life support on in ${here.size} occupied place${here.size === 1 ? '' : 's'}, off elsewhere`;
+  }
+  if (p === 'tactical') {
+    // Red alert: shields up, phasers armed, the weapons on a locked target's (scanned) shield frequency. Yellow: shields up, phasers safe.
+    const level = alertOf(k), a = automaton(k, 'Tactical');
+    if (level === 'green') return 'condition green: standing by';
+    if (!shields.has(k)) { shieldsCommand(a, { up: true }); return a.last ? `raising shields (${a.last.replace(/^Tactical: /, '')})` : 'shields up'; }
+    if (level === 'red' && !c.armed) { combatCommand(a, { type: 'arm', on: true }); return 'phasers armed'; }
+    if (level === 'yellow' && c.armed) { combatCommand(a, { type: 'arm', on: false }); return 'phasers stood down'; }
+    const t = c.lock;
+    if (level === 'red' && t && shields.has(t) && locatable(k, t).resolved && c.weaponFreq !== combatOf(t).shieldFreq) { combatCommand(a, { type: 'frequency', weapons: combatOf(t).shieldFreq }); return `weapons on the ${shipName(t)}'s shield frequency (${combatOf(t).shieldFreq})`; }
+    return `${level} alert: shields up${level === 'red' ? ', phasers armed' : ''}`;
+  }
+  if (p === 'science') {
+    // A sensor lock on the nearest contact that isn't on our data network.
+    const net = network(k);
+    const near = [...cores.keys()].filter((o) => o !== k && !isBase(o) && navState.has(o) && sensorOk(k, o) && !net.has(o)).sort((x, y) => distance(k, x) - distance(k, y))[0];
+    if (!near) { if (sciLocks.has(k)) { sciLocks.delete(k); tellScience(k, { type: 'sci-lock', ship: null }); } return 'no unknown contacts on sensors'; }
+    if (sciLocks.get(k) !== near) { sciLocks.set(k, near); opLog(k, `Science (automation): sensors locked on the ${shipName(near)}`); tellScience(k, { type: 'sci-lock', ship: shipName(near) }); }
+    return `tracking the ${shipName(near)} (${Math.round(distance(k, near))} units)`;
+  }
+  if (p === 'transporter') {
+    // The level-3 diagnostic kept passed: run again whenever it's been invalidated.
+    const d = e.trDiag;
+    if (d.state === 'passed') return 'level-3 diagnostic passed: ready';
+    if (d.state === 'running') return `level-3 diagnostic running (${d.t} of ${TR.diagSecs} s)`;
+    const fault = transporterFault(k) || (flow(k).subOk.energizingCoils === false ? 'no power to its energizing coils' : null);
+    if (fault) return `waiting: ${fault}`;
+    transporterDiagnostic(automaton(k, 'Transporter'));
+    return 'running the level-3 diagnostic';
+  }
+  if (p === 'comms') {
+    // Data link requests from ships already on our network: accepted.
+    const net = network(k);
+    const req = [...linkRequests.values()].find((r) => r.toShip === k && net.has(r.fromShip));
+    if (req) {
+      linkRequests.delete(req.id);
+      if (linkReach(k, req.fromShip)) {
+        links.add(linkKey(req.fromShip, k));
+        opLog(req.fromShip, `the ${shipName(k)} accepted: data link open`);
+        opLog(k, `Communications (automation): accepted the data link from the ${shipName(req.fromShip)}`);
+        refreshNetworks([k]); broadcastAllOps();
+        return `accepted the data link from the ${shipName(req.fromShip)}`;
+      }
+    }
+    return 'accepting data links from ships already on our network';
+  }
+  if (p === 'hangar') {
+    // Doors open for a craft asking to land or take off (room, and the containment field powered); closed after.
+    const now = Date.now(), a = automaton(k, 'Shuttle Bay');
+    for (const [o, r] of [...bayRequests]) if (now - r.at > 60000 || (r.kind === 'land' ? engOf(o).landed === k : engOf(o).landed !== k)) bayRequests.delete(o);
+    const asking = [...bayRequests].filter(([, r]) => r.m === k);
+    const room = landedIn(k).length < bayCapacity(k);
+    if (asking.length && !e.bayOpen) {
+      if (asking.every(([, r]) => r.kind === 'land') && !room) return 'a landing request, but the bay is full';
+      flowCache.delete(k);
+      crewCommand(a, { type: 'bay-doors', open: true });
+      if (e.bayOpen && flow(k).subOk.bayField === false) { crewCommand(a, { type: 'bay-doors', open: false }); return 'waiting: the containment field has no power'; }
+      e.bayActive = now;
+      return `doors opening for the ${asking.map(([o]) => shipName(o)).join(', ')}`;
+    }
+    if (asking.length) { e.bayActive = now; return `doors open for the ${asking.map(([o]) => shipName(o)).join(', ')}`; }
+    if (e.bayOpen && now - (e.bayActive || 0) > 10000) { crewCommand(a, { type: 'bay-doors', open: false }); return 'doors closed'; }
+    return e.bayOpen ? 'doors open' : 'doors closed: standing by';
+  }
+  return '';
+}
 // Once a second: every automated panel takes its next step.
 function automationTick() {
   for (const [k, e] of eng) {
     if (!e.auto || !present(k) || !navState.has(k)) continue;
+    const was = JSON.stringify(e.autoStatus);
+    automateVessel(k, e);
+    if (JSON.stringify(e.autoStatus) !== was) { broadcastOps(k); scheduleNav(); } // (ops and the station see what it's doing)
+  }
+}
+function automateVessel(k, e) {
+  {
     for (const p of AUTO_PANELS) {
       if (!e.auto[p]) continue;
       const station = AUTO_STATION[p];
@@ -3745,6 +3835,7 @@ function automationTick() {
       if (p === 'engineering' && !next) { finish(); continue; }
       if (!coresOnline(k)) { e.autoStatus[p] = `waiting: no computer core online${next ? ` (next: ${next.what})` : ''}`; continue; }
       if (!odnLinked(k, station)) { e.autoStatus[p] = `waiting: the ${station} console is off the ODN`; continue; }
+      if (p !== 'engineering') { try { e.autoStatus[p] = panelRoutine(k, p); } catch (err) { e.autoStatus[p] = `stopped: ${err.message}`; console.warn(`automation ${p}: ${err.stack}`); } continue; }
       if (p === 'engineering') {
         flowCache.delete(k);
         const { steps, a } = engineeringSteps(k, e.auto.engineering);

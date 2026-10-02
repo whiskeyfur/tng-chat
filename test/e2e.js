@@ -1734,6 +1734,54 @@ const audioBytes = (page) => page.evaluate(async () => {
       await stopComputer(lc);
     }
 
+    // Automation, the other panels, on the Enterprise (set from its ops console):
+    {
+      const auto = (panel, on) => op.evaluate(([p, o]) => window.__send({ type: 'automation', panel: p, on: o }), [panel, on]);
+      const ops = (panel) => op.textContent(`#automation-list li[data-panel="${panel}"]`);
+      // Life support: on where there are people, off where there aren't (nobody's in the Shuttle Bay).
+      await auto('lifeSupport', true);
+      await waitFor(() => { const ls = laforge.nav()?.own.grid.ls; return ls && !ls['Shuttle Bay'].on.atmosphere && ls.Engineering.on.atmosphere; }, 30000);
+      await auto('lifeSupport', false);
+      for (const sys of ['atmosphere', 'thermal', 'gravity', 'lights']) laforge.send({ type: 'grid', ls: { sys, loc: 'all', on: true } });
+      // Tactical: red alert raises shields and arms phasers.
+      await auto('tactical', true);
+      await picard.evaluate(() => window.__send({ type: 'alert', level: 'red' }));
+      await waitFor(() => laforge.nav()?.own.combat.phaser.armed && [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.find((x) => x.name === 'Enterprise')?.shields, 20000);
+      await auto('tactical', false);
+      await picard.evaluate(() => window.__send({ type: 'alert', level: 'green' }));
+      await carol.evaluate(() => { window.__send({ type: 'shields', up: false }); window.__send({ type: 'arm', on: false }); });
+      // Science: a sensor lock on the nearest contact off our network.
+      await auto('science', true);
+      await waitFor(async () => /tracking the /.test(await ops('science')), 20000);
+      await auto('science', false);
+      // Transporter: its level-3 diagnostic kept passed.
+      await auto('transporter', true);
+      await waitFor(async () => /diagnostic passed|diagnostic running|running the level-3/.test(await ops('transporter')), 20000);
+      await auto('transporter', false);
+      // Hangar control: a shuttle asks to land; the doors open for it, and close again afterwards.
+      const at = laforge.nav().own;
+      const gc2 = startComputer('gl2', 'Columbus', { class: 'shuttle', position: `${Math.round(at.x) + 2},${Math.round(at.y)}` });
+      await waitFor(() => [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.some((x) => x.name === 'Columbus' && x.class === 'Shuttle'), 15000);
+      const pilot2 = await crewWs('mayweather', 'Columbus', 'Helm');
+      await waitFor(() => pilot2.nav()?.own?.grid?.bays?.some((b) => b.name === 'Enterprise'));
+      await auto('hangar', true);
+      pilot2.send({ type: 'dock', land: 'Enterprise' });
+      await waitFor(() => pilot2.msgs.some((m) => m.type === 'notice' && /asked the Enterprise's hangar control for clearance/.test(m.text)));
+      await waitFor(() => laforge.nav()?.own.grid.bay.open, 15000);
+      pilot2.send({ type: 'dock', land: 'Enterprise' });
+      await waitFor(() => pilot2.nav()?.own.grid.landed === 'Enterprise');
+      await waitFor(() => !laforge.nav()?.own.grid.bay.open, 25000); // (closed again after)
+      pilot2.send({ type: 'dock', takeoff: true });
+      await waitFor(() => laforge.nav()?.own.grid.bay.open, 15000);
+      pilot2.send({ type: 'dock', takeoff: true });
+      await waitFor(() => !pilot2.nav()?.own.grid.landed);
+      await auto('hangar', false);
+      await waitFor(async () => !/Auto: on/.test(await ops('hangar')));
+      pilot2.close();
+      await stopComputer(gc2);
+      step('automation: life support followed the crew (off in the empty Shuttle Bay); red alert had Tactical raise shields and arm phasers; Science locked on the nearest contact; the Transporter kept its diagnostic; hangar control opened the doors for the Columbus to land and take off, closing them in between');
+    }
+
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;
     // the pods stay contained (their own ties). The deuterium bus: nothing moves without its transfer power.
     laforge.send({ type: 'grid', ties: { 'system:amBus': [] } });
