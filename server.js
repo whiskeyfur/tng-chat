@@ -2067,10 +2067,11 @@ function freshEng(saved, { cold = false } = {}) {
     connTies: s.connTies && typeof s.connTies === 'object' ? { deu: !!s.connTies.deu, am: !!s.connTies.am, odn: !!s.connTies.odn } : !s.conn && cold ? { deu: false, am: false, odn: true } : { deu: true, am: true, odn: true },
     // Each battery's main breaker (closed: in service). Older saves: closed if the old battery was tied in.
     breakers: Object.fromEntries(BUSES.map((X) => [X, typeof s.breakers?.[X] === 'boolean' ? s.breakers[X] : Array.isArray(s.ties?.battery) ? s.ties.battery.length > 0 : true])),
-    // Each store's charge (older saves: one battery, shared out across A, B and C; the EPS starts unpressurized).
+    // Each store's charge (older saves: one battery, shared out across A, B and C; the EPS starts unpressurized;
+    // a new ship's bus batteries start empty, to be charged from dock power).
     stores: Object.fromEntries(Object.entries(STORES).map(([name, node]) => {
       const cap = node === 'EPS' ? GRID.epsCap : GRID.batteryCap;
-      const v = s.stores?.[name] ?? (node === 'EPS' ? (epsLive ? cap : 0) : Number.isFinite(s.battery?.charge) ? s.battery.charge / 3 : cap);
+      const v = s.stores?.[name] ?? (node === 'EPS' ? (epsLive ? cap : 0) : Number.isFinite(s.battery?.charge) ? s.battery.charge / 3 : cold ? 0 : cap);
       return [name, Math.max(0, Math.min(cap, Number(v) || 0))];
     })),
     docked: STARBASES.some((b) => b.name === s.docked) ? s.docked : null,
