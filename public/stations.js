@@ -367,11 +367,10 @@
       const core = drift(0.92, 0.85, 0.98, 0.01);
       return { code: 'ENG 06', color: 'orange', panels: [
         panel('st-ship', `Ship systems · ${ship}`, 'orange', true, shipSide(ship)),
-        panel('st-core', 'Warp core', 'sky', false,
-          trace(110, 'sky', (t) => 0.6 * Math.sin(t * 9) * Math.sin(t * 1.3) + rand(-0.05, 0.05), 160, 'Warp field harmonics'),
-          live(gauge('Core output', 'sky', (v) => `${(v * 100).toFixed(1)}%`), core),
-          live(readout('Matter/antimatter ratio', 'gold'), () => '1:1'),
-          live(readout('Containment field', 'sky', '%'), drift(100, 99, 100, 0.2), (v) => v.toFixed(1))),
+        // The warp core's reaction: client.js fills in the controls.
+        panel('st-core', 'Warp core', 'sky', true,
+          h('div', { 'data-warpcore': '' }),
+          trace(110, 'sky', (t) => 0.6 * Math.sin(t * 9) * Math.sin(t * 1.3) + rand(-0.05, 0.05), 160, 'Warp field harmonics')),
         // Real power routing (client.js fills it in): every station feels it.
         panel('st-power', 'Power distribution', 'gold', true, h('div', { class: 'pw', 'data-power': '' })),
         // Power sources, buses, the warp core and containment (client.js fills it in).

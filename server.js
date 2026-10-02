@@ -757,7 +757,7 @@ const HULL = { idfNeedsSif: 50, coreSif: 50, impulse: { sif: 60, idf: 80 }, warp
 // little over to charge batteries, but not gravity as well.
 const LIFE_SUPPORT = ['atmosphere', 'thermal', 'gravity', 'lighting'];
 // What a system draws at 100% (most: 100).
-const RATING = { atmosphere: 10, thermal: 8, gravity: 20, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
+const RATING = { engines: 300, atmosphere: 10, thermal: 8, gravity: 20, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
 const ratingOf = (s) => RATING[s] ?? 100;
 // Each system's power setting is a limit, 0-150: past 100 (its rating) is
 // emergency overdrive, which slowly damages it, faster the further over it runs.
@@ -798,12 +798,15 @@ function speedLimits(k) {
   const cap = capacityOf(k), now = navState.get(k)?.warp || 0, got = powerOf(k);
   const short = now >= 1 && ['engines', 'injectors'].some((x) => got[x] < flow(k).demand[x] - 1);
   const warpPower = Math.min(100, cap.engines, cap.injectors, ...(short ? [got.engines, got.injectors].map((x) => Math.max(x, 0)) : []));
-  const eng9 = warpPower <= 0 ? 0 : Math.round((warpPower / 100) * 9 * 10) / 10;
+  // The top warp also follows the core's output (650 or more: all of it).
+  const eCore = eng.get(k);
+  const coreF = !eCore || isBase(k) ? 1 : Math.min(1, coreOutput(eCore) / GRID.core);
+  const eng9 = warpPower <= 0 ? 0 : Math.round((Math.min(warpPower / 100, coreF) * 9) * 10) / 10;
   if (!e || isBase(k)) return { warp: eng9 >= 1 ? eng9 : 0, impulse: 0.25 };
   const p = powerOf(k);
   // Why not (for Helm): the hull fields and the deflector gate warp and impulse.
   const why = {
-    warp: e.core !== 'online' ? 'the warp core is offline' : eng9 < 1 ? 'no power to the engines'
+    warp: e.core !== 'online' ? 'the warp core is offline' : !e.wc.plasma ? 'the plasma transfer conduits to the nacelles are closed (Engineering)' : eng9 < 1 ? (coreF * 9 < 1 ? `the warp core's output is too low (${Math.round(coreOutput(e))}): raise its reaction rate` : 'no power to the engines')
       : p.sif < HULL.warp.sif || p.idf < HULL.warp.idf ? `warp needs the structural integrity field and inertial dampers at ${HULL.warp.sif}% (SIF ${p.sif}%, dampers ${p.idf}%)`
       : p.sensors <= 0 ? 'the navigational deflector needs the long-range sensors' : cap.deflector < HULL.deflector ? `warp needs the navigational deflector at ${HULL.deflector}% (its limit is ${Math.floor(cap.deflector)}%)` : '',
     impulse: !DRIVES.some((d) => e.drives[d].state === 'running') ? 'start an impulse drive (Engineering)' : !flow(k).thrusting ? 'the impulse drives\' accelerators are at 0 (Engineering)'
@@ -1358,9 +1361,26 @@ const EPS_CHARGE_GEN = 100;
 // while it has its 20, from its feeds or, when they fail, from its own
 // internal reserve (about 9 minutes; recharged from the feeds, 5 a second).
 // With neither it falls, 5% a second; below 20% the pods breach. The warp
-// core's antimatter transfer conduit only pressurizes with the field at 95%.
+// core's injectors open (it lights) only with the field at 95%.
 const CONTAIN = { reserveSecs: Number(process.env.RESERVE_SECS) || 540, recharge: 5, rise: 10, fall: 5, breach: 20, conduit: 95 };
 const reserveCap = () => GRID.containment * CONTAIN.reserveSecs;
+// The warp core's reaction (the Warp core panel). The injectors open only
+// with the containment field at 95%, the deuterium feed at 80% and the
+// antimatter transfer conduit up; cold ignition runs the reaction at 10% or
+// less on a deuterium-rich mixture (15:1 or richer) and is self-sustaining
+// after 6 s, then the rate climbs to the light bar's setting (5% a second).
+// Output: up to 1000 × rate × efficiency, the efficiency from the mixture
+// (best near 12:1), the dilithium's alignment (it drifts while running:
+// trim it, or let auto-trim keep it, which needs all three computer cores)
+// and the crystal's integrity (it wears above 80%). A hot core (over 90%)
+// wears down the containment field; a live reaction with the field under
+// 35% starts a 45 s breach countdown (cancelled above 60%, or if the reaction
+// stops). Under 50% feed pressure, or with the conduit down, it flames out.
+// SCRAM stops it at once. Warp needs the plasma transfer conduits to the
+// nacelles open, and the top warp follows the core's output.
+const CORE = { max: 1000, ignitionRate: 10, ignitionMix: 15, sustainSecs: 6, ramp: 5, feedMin: 80, flameout: 50, hot: 90, heat: 2, breachField: 35, breachSecs: 45, cancelField: 60, bestMix: 12 };
+const coreEff = (w) => Math.max(0.3, 1 - Math.abs(w.mix - CORE.bestMix) * 0.03) * Math.max(0.3, w.align / 100) * (0.5 + (0.5 * w.crystal) / 100);
+const coreOutput = (e) => (e.core === 'online' ? (CORE.max * e.wc.actual * coreEff(e.wc)) / 100 : 0);
 const COMPUTER = { draw: 2, bootSecs: 14, stages: ['POST', 'LCARS kernel', 'ODN handshake', 'isolinear verification', 'subprocessor sync'] };
 const coresOnline = (k) => (isBase(k) || !eng.has(k) ? COMPUTERS.length : engOf(k).computers.filter((c) => c.state === 'online').length);
 // The crosslink is a chain, A–B–C: it joins A+B, B+C or all three (A and C only through B).
@@ -1550,6 +1570,8 @@ function freshEng(saved, { cold = false } = {}) {
     })),
     docked: STARBASES.some((b) => b.name === s.docked) ? s.docked : null,
     breach: 0, selfDestruct: null, towing: null, dirty: false,
+    // The warp core's reaction (older saves: running at 70%, 15:1, aligned, conduits open, auto-trim on).
+    wc: { rate: Number.isFinite(s.wc?.rate) ? s.wc.rate : 70, actual: s.core === 'online' || (s.core === undefined && !cold) ? (Number.isFinite(s.wc?.actual) ? s.wc.actual : 70) : 0, mix: Number.isFinite(s.wc?.mix) ? s.wc.mix : 15, align: Number.isFinite(s.wc?.align) ? s.wc.align : 100, crystal: Number.isFinite(s.wc?.crystal) ? s.wc.crystal : 100, temp: Number.isFinite(s.wc?.temp) ? s.wc.temp : 0, plasma: s.wc?.plasma ?? !cold, autoTrim: s.wc?.autoTrim ?? !cold, breachT: null },
     // Antimatter containment: the field's strength (%) and its internal reserve.
     contain: { field: Number.isFinite(s.contain?.field) ? s.contain.field : 100, reserve: Number.isFinite(s.contain?.reserve) ? Math.min(reserveCap(), s.contain.reserve) : reserveCap() },
   };
@@ -1574,6 +1596,7 @@ const savedEng = (k) => {
     drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state === 'running' ? 'running' : 'off', epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear }]; })),
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state === 'running' ? 'running' : 'off', epsTap: e.aux[a].epsTap }])),
     dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure) }, epsLive: e.epsLive, contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
+    wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     dockedPort: e.dockedPort, autoRefuel: e.autoRefuel,
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
@@ -1628,7 +1651,7 @@ function flow(k) {
   const thrustTop = running.reduce((n, d) => n + driveTop(e.drives[d]), 0);
   const share = thrustTop > 0 ? Math.min(1, impulseNow / thrustTop) : 0;
   const driveGen = (d) => (running.includes(d) && (e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length ? GRID.impulse * (1 - share) : 0);
-  const cap = { ship: conns.reduce((n, cn) => n + (cn.net < 0 ? Math.min(-cn.net, cn.theirFed) : 0), 0), solar: GRID.solar, dock: e.docked ? GRID.dock : 0, impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), ...Object.fromEntries(AUX.map((a) => [a, e.aux[a].state === 'running' && e.deuterium > 0 ? FUSION.aux : 0])), core: e.core === 'online' && (c.damage.conduits || 0) < SUB_FAIL_DAMAGE ? GRID.core : 0, ...Object.fromEntries(Object.entries(STORES).map(([name, node]) => [name, Math.min(node === 'EPS' ? GRID.epsOut : GRID.batteryOut, e.stores[name])])) };
+  const cap = { ship: conns.reduce((n, cn) => n + (cn.net < 0 ? Math.min(-cn.net, cn.theirFed) : 0), 0), solar: GRID.solar, dock: e.docked ? GRID.dock : 0, impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), ...Object.fromEntries(AUX.map((a) => [a, e.aux[a].state === 'running' && e.deuterium > 0 ? FUSION.aux : 0])), core: (c.damage.conduits || 0) < SUB_FAIL_DAMAGE ? coreOutput(e) : 0, ...Object.fromEntries(Object.entries(STORES).map(([name, node]) => [name, Math.min(node === 'EPS' ? GRID.epsOut : GRID.batteryOut, e.stores[name])])) };
   // A source tied to several buses shares its output evenly between them.
   const srcs = SOURCES.map((name) => {
     const t = isStore(name) ? (STORES[name] === 'EPS' || e.breakers[STORES[name]] ? [STORES[name]] : []) : e.ties[name], full = t.length ? cap[name] : 0;
@@ -1807,7 +1830,6 @@ function flow(k) {
   const full = (key) => (got[key] || 0) >= amtOf[key] - 1e-9;
   const subOk = {};
   for (const name of Object.keys(SUBSYSTEMS)) subOk[name] = full(`sub:${name}`) && (c.damage[name] || 0) < SUB_FAIL_DAMAGE;
-  subOk.amConduit = subOk.amConduit && e.contain.field >= CONTAIN.conduit; // pressurized only with the containment field up
   const coreSubsOk = ['constriction', 'corePump', 'injector', 'amConduit'].every((x) => subOk[x]);
   const consoleOk = Object.fromEntries(Object.keys(CONSOLE_BUS).map((st) => [st, full(`console:${st}`)]));
   const fed = PORTS.reduce((n, p) => n + (got[`feed:${p}`] || 0), 0);
@@ -1912,7 +1934,8 @@ function gridView(k) {
     thrustersOk: thrustersOk(k),
     cells: Object.fromEntries(Object.entries(f.cells).map(([n, c]) => [n, r(c)])), totals: f.totals,
     coreUsed: Math.round(f.coreUsed), impulseUsed: Math.round(f.impulseUsed), coreSubsOk: f.coreSubsOk, subOk: f.subOk,
-    start: e.start, startSecs: GRID.coreStartSecs, coreOutput: GRID.core,
+    start: e.start, startSecs: CORE.sustainSecs, coreOutput: Math.round(coreOutput(e)), coreMax: CORE.max,
+    warpCore: { ...e.wc, actual: Math.round(e.wc.actual), align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, eff: Math.round(coreEff(e.wc) * 100), output: Math.round(coreOutput(e)), cores: coresOnline(k), need: { field: CONTAIN.conduit, feed: CORE.feedMin, mix: CORE.ignitionMix, rate: CORE.ignitionRate, hot: CORE.hot, flameout: CORE.flameout, bestMix: CORE.bestMix } },
     computers: e.computers.map((cc) => ({ state: cc.state, stage: cc.state === 'booting' ? COMPUTER.stages[Math.min(COMPUTER.stages.length - 1, Math.floor((cc.t * COMPUTER.stages.length) / COMPUTER.bootSecs))] : null, t: cc.t })), computerBootSecs: COMPUTER.bootSecs,
     crossflow: Object.fromEntries(Object.entries(f.crossflow).map(([x, v]) => [x, Math.round(v)]).filter(([, v]) => v)), taps: e.taps, ties: e.ties, tripped: Object.keys(e.tripped || {}), containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
     // Failing: seconds left before the field drops below 20% (the breach).
@@ -1956,15 +1979,32 @@ function gridCommand(ws, msg) {
     if (e.transfer?.resource === 'antimatter') e.transfer = null;
     said.push(`new warp core and ${fill ? 'full' : 'empty'} antimatter pods installed at ${e.docked} (offline: start it up${fill ? '' : '; set a containment feed and refuel first'})`);
   }
+  // The reaction's settings: rate (the light bar's target), mixture, plasma conduits, trim.
+  if (Number.isFinite(msg.coreRate)) { e.wc.rate = Math.max(0, Math.min(100, Math.round(msg.coreRate))); said.push(`warp core reaction rate set to ${e.wc.rate}%`); }
+  if (Number.isFinite(msg.coreMix)) { e.wc.mix = Math.max(5, Math.min(25, Math.round(msg.coreMix))); said.push(`warp core mixture ${e.wc.mix}:1 (deuterium to antimatter)`); }
+  if (typeof msg.plasma === 'boolean') { e.wc.plasma = msg.plasma; said.push(`plasma transfer conduits to the nacelles ${msg.plasma ? 'open' : 'closed'}`); }
+  if (msg.trim) { e.wc.align = Math.min(100, e.wc.align + 5); said.push(`dilithium articulation frame trimmed: alignment ${Math.round(e.wc.align)}%`); }
+  if (typeof msg.autoTrim === 'boolean') {
+    if (msg.autoTrim && coresOnline(key) < COMPUTERS.length) return note(`auto-trim needs all ${COMPUTERS.length} computer cores online (${coresOnline(key)} are)`);
+    e.wc.autoTrim = msg.autoTrim; said.push(`dilithium auto-trim ${msg.autoTrim ? 'on' : 'off'}`);
+  }
+  if (msg.core === 'scram' && (e.core === 'online' || e.core === 'starting')) {
+    e.core = 'offline'; e.start = 0; e.wc.actual = 0; e.wc.breachT = null;
+    said.push('WARP CORE SCRAM: reaction stopped');
+  }
   if (msg.core === 'start' && e.core === 'offline') {
     if (e.antimatter <= 0 || e.deuterium <= 0) return note(`the warp core needs antimatter and deuterium (aboard: ${Math.floor(e.antimatter)} antimatter, ${Math.floor(e.deuterium)} deuterium)`);
     if (powerOf(key).sif < HULL.coreSif) return note(`the warp core needs the structural integrity field at ${HULL.coreSif}% to start (it's at ${powerOf(key).sif}%)`);
-    e.core = 'starting'; e.start = 0; flowCache.delete(key);
+    if (e.contain.field < CONTAIN.conduit) return note(`the injectors won't open: containment field ${Math.round(e.contain.field)}% (they need ${CONTAIN.conduit}%)`);
+    if (e.dfeed.pressure < CORE.feedMin) return note(`the injectors won't open: deuterium feed pressure ${Math.round(e.dfeed.pressure)}% (they need ${CORE.feedMin}%)`);
+    if (e.wc.mix < CORE.ignitionMix) return note(`cold ignition needs a deuterium-rich mixture, ${CORE.ignitionMix}:1 or richer (it's ${e.wc.mix}:1)`);
+    if (!e.wc.rate) return note('set a reaction rate first (the warp core panel\'s light bar)');
+    e.core = 'starting'; e.start = 0; e.wc.actual = Math.min(e.wc.rate, CORE.ignitionRate); flowCache.delete(key);
     if (!flow(key).coreSubsOk) { e.core = 'offline'; flowCache.delete(key); return note(`the warp core's constriction (${GRID.constriction.start} to start), deuterium pump and antimatter injector need power: tie them to a bus that has it`); }
-    said.push('warp core startup');
+    said.push(`warp core cold ignition at ${e.wc.actual}%`);
   } else if (msg.core === 'start' && e.core === 'ejected') return note('there is no warp core: install a new one at a starbase');
   else if (msg.core === 'stop' && (e.core === 'online' || e.core === 'starting')) {
-    e.core = 'offline'; e.start = 0;
+    e.core = 'offline'; e.start = 0; e.wc.actual = 0;
     said.push('warp core shut down');
   }
   // Impulse drives: start (on bus power for their pumps) or stop; thrusters in or out.
@@ -2347,7 +2387,7 @@ const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 50
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
-const SYSTEM_NAMES = { engines: 'engines', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
+const SYSTEM_NAMES = { engines: 'warp field coils', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
   corePump: "warp core's deuterium pump", injector: 'antimatter injector', portPump: "port impulse drive's deuterium pump", starboardPump: "starboard impulse drive's deuterium pump",
   conduits: 'power transfer conduits', rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
 // What a hit can damage: the systems, and the subsystems that fail when badly damaged.
@@ -2549,21 +2589,37 @@ setInterval(() => {
       if (e.onReserve && !wasReserve) { opLog(k, 'antimatter containment on its internal reserve'); tellStations(k, ['Engineering', 'Captain'], `Engineering: antimatter containment on its internal reserve (${Math.round(ct.reserve / GRID.containment)} s): restore its feed`); }
       const held = fromFeed + fromReserve >= GRID.containment - 1e-6;
       const before = ct.field;
-      ct.field = Math.max(0, Math.min(100, ct.field + (held ? CONTAIN.rise : -CONTAIN.fall)));
+      const hot = e.core === 'online' && e.wc.temp > CORE.hot; // a hot core wears the field down
+      ct.field = Math.max(0, Math.min(100, ct.field + (hot ? -CORE.heat : held ? CONTAIN.rise : -CONTAIN.fall)));
       if (!held && before >= 100 - 1e-6) { e.breach = 1; opLog(k, 'antimatter containment failing: no power, reserve exhausted'); for (const u of crewOf(k)) send(u, { type: 'notice', text: 'Warning: antimatter containment failing (no power, reserve exhausted): restore power or eject the core' }); }
-      if (ct.field < CONTAIN.breach) { destroy(k, 'warp core breach: antimatter containment lost'); changed = true; continue; }
+      // A live reaction: under 35% a 45 s breach countdown (cancelled over 60%, or
+      // if the reaction stops); otherwise the pods go below 20%.
+      const live = e.core === 'online' || e.core === 'starting';
+      if (live && ct.field < CORE.breachField && e.wc.breachT == null) { e.wc.breachT = CORE.breachSecs; opLog(k, `WARP CORE BREACH IN ${CORE.breachSecs} s`); for (const u of crewOf(k)) send(u, { type: 'notice', text: `Warning: warp core breach in ${CORE.breachSecs} seconds: restore containment, SCRAM the core, or eject it` }); }
+      if (e.wc.breachT != null && (!live || ct.field > CORE.cancelField)) { e.wc.breachT = null; opLog(k, 'warp core breach averted'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: warp core breach averted'); }
+      if (e.wc.breachT != null && --e.wc.breachT <= 0) { destroy(k, 'warp core breach'); changed = true; continue; }
+      if (!live && ct.field < CONTAIN.breach) { destroy(k, 'warp core breach: antimatter containment lost'); changed = true; continue; }
       if (held && e.breach && ct.field >= 100) { e.breach = 0; opLog(k, 'antimatter containment restored'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: antimatter containment restored'); }
       if (!held) e.breach = 1;
-    } else { e.contain.field = 100; e.breach = 0; e.onReserve = false; }
+    } else { e.contain.field = 100; e.breach = 0; e.onReserve = false; e.wc.breachT = null; }
     // The warp core: starting up, and running, need its constriction, pump and injector.
-    const coreWhy = () => ['constriction', 'corePump', 'injector', 'amConduit'].filter((x) => !f.subOk[x]).map((x) => (x === 'amConduit' && e.contain.field < CONTAIN.conduit ? `antimatter transfer conduit (containment field ${Math.round(e.contain.field)}%, it needs ${CONTAIN.conduit}%)` : SUBSYSTEMS[x].name)).join(', ');
-    if (e.core === 'starting') {
-      if (!f.coreSubsOk) { e.core = 'offline'; e.start = 0; opLog(k, `warp core startup failed: no power to its ${coreWhy()}`); tellStations(k, ['Engineering'], `Engineering: warp core startup failed, no power to its ${coreWhy()}`); }
-      else if (++e.start >= GRID.coreStartSecs) { e.core = 'online'; e.start = 0; e.dirty = true; opLog(k, 'warp core online'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: warp core online'); }
-    } else if (e.core === 'online' && !f.coreSubsOk) {
-      e.core = 'offline'; e.dirty = true;
-      opLog(k, `warp core shut down: no power to its ${coreWhy()}`);
-      tellStations(k, ['Engineering', 'Captain'], `Engineering: warp core shut down, no power to its ${coreWhy()}`);
+    const coreWhy = () => ['constriction', 'corePump', 'injector', 'amConduit'].filter((x) => !f.subOk[x]).map((x) => SUBSYSTEMS[x].name).join(', ');
+    const coreDown = (why) => { e.core = 'offline'; e.start = 0; e.wc.actual = 0; e.dirty = true; opLog(k, `warp core shut down: ${why}`); tellStations(k, ['Engineering', 'Captain'], `Engineering: warp core shut down (${why})`); };
+    if ((e.core === 'starting' || e.core === 'online') && e.dfeed.pressure < CORE.flameout) coreDown(`flameout: deuterium feed pressure ${Math.round(e.dfeed.pressure)}%`);
+    else if (e.core === 'starting') {
+      if (!f.coreSubsOk) { e.core = 'offline'; e.start = 0; e.wc.actual = 0; opLog(k, `warp core ignition failed: no power to its ${coreWhy()}`); tellStations(k, ['Engineering'], `Engineering: warp core ignition failed, no power to its ${coreWhy()}`); }
+      else if (++e.start >= CORE.sustainSecs) { e.core = 'online'; e.start = 0; e.dirty = true; opLog(k, 'warp core online: the reaction is self-sustaining'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: warp core online, the reaction is self-sustaining'); }
+    } else if (e.core === 'online' && !f.coreSubsOk) coreDown(`no power to its ${coreWhy()}`);
+    // The reaction: rate toward its setting; heat, the dilithium's alignment and the crystal's wear.
+    { const w = e.wc;
+      if (e.core === 'online') {
+        w.actual = w.actual < w.rate ? Math.min(w.rate, w.actual + CORE.ramp) : Math.max(w.rate, w.actual - CORE.ramp);
+        if (w.actual <= 0) coreDown('reaction rate brought to 0');
+        w.align = w.autoTrim && coresOnline(k) === COMPUTERS.length ? 100 : Math.max(0, w.align - (w.actual / 100) * 0.5);
+        if (w.actual > 80) w.crystal = Math.max(0, w.crystal - ((w.actual - 80) / 20) * 0.02);
+      }
+      w.temp = Math.round((w.temp + ((e.core === 'online' ? w.actual : e.core === 'starting' ? 5 : 0) - w.temp) * 0.2) * 10) / 10;
+      if (w.autoTrim && coresOnline(k) < COMPUTERS.length) { w.autoTrim = false; tellStations(k, ['Engineering'], 'Engineering: dilithium auto-trim off: it needs all three computer cores'); }
     }
     // Overdrive: a system drawing past its rating wears itself out.
     for (const sys of SYSTEMS) if (f.delivered[sys] > 100) {

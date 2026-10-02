@@ -369,7 +369,7 @@ const ownShip = () => ships.find((s) => me && s.name.toLowerCase() === me.ship.t
 
 // Shields (footer, displays, Tactical's control) and the transporter controls.
 // Power as Engineering has routed it (from the ship's computer, via 'nav').
-const POWER = [['engines', 'Engines'], ['injectors', 'Plasma injectors'], ['deflector', 'Navigational deflector'], ['shields', 'Shields'], ['sensors', 'Long-range sensors'], ['lateral', 'Lateral sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['sif', 'Structural integrity field'], ['idf', 'Inertial dampers'], ['atmosphere', 'Atmospheric processors'], ['thermal', 'Thermal regulation'], ['gravity', 'Gravity generators'], ['lighting', 'Emergency lighting'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
+const POWER = [['engines', 'Warp field coils'], ['injectors', 'Plasma injectors'], ['deflector', 'Navigational deflector'], ['shields', 'Shields'], ['sensors', 'Long-range sensors'], ['lateral', 'Lateral sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['sif', 'Structural integrity field'], ['idf', 'Inertial dampers'], ['atmosphere', 'Atmospheric processors'], ['thermal', 'Thermal regulation'], ['gravity', 'Gravity generators'], ['lighting', 'Emergency lighting'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
 const ownPower = () => lastNav?.own?.power || null;
 
 // Shields (footer, displays, Tactical's control), the transporter controls and
@@ -753,6 +753,36 @@ function renderCombat() {
     updateWeaponTimers();
   }
 
+  // Engineering: the warp core's reaction (the Warp core panel).
+  const wcp = document.querySelector('[data-warpcore]');
+  if (wcp && grid.warpCore && changed(wcp, grid.warpCore, grid.core, grid.contain, grid.dfeed, grid.start)) {
+    const w = grid.warpCore, need = w.need;
+    const live = grid.core === 'online' || grid.core === 'starting';
+    const state = grid.core === 'ejected' ? 'Ejected' : grid.core === 'starting' ? `Cold ignition · self-sustaining in ${grid.startSecs - grid.start} s` : grid.core === 'online' ? `Running · ${w.actual}% (set ${w.rate}%)` : 'Cold';
+    const rate = lightBar('Reaction rate', 100, (v) => send({ type: 'grid', coreRate: v }));
+    rate.id = 'core-rate';
+    rate.set(w.rate, live ? Math.min(w.actual, w.rate) : 0);
+    const mixes = el('span', { className: 'grid-gears' }, ...[10, 12, 15, 20].map((m) => { const b = button(`${m}:1`, `core-mix-${m}`, () => send({ type: 'grid', coreMix: m })); b.setAttribute('aria-pressed', String(w.mix === m)); return b; }));
+    const tog = (text, id, on, onTap) => { const b = button(text, id, onTap, 'lcars-toggle'); b.setAttribute('aria-pressed', String(!!on)); return b; };
+    // Why the injectors won't open, if they won't.
+    const blocks = [grid.contain?.field < need.field && `containment field ${grid.contain.field}% (needs ${need.field}%)`, grid.dfeed.pressure < need.feed && `deuterium feed ${grid.dfeed.pressure}% (needs ${need.feed}%)`, w.mix < need.mix && `mixture ${w.mix}:1 (cold ignition needs ${need.mix}:1 or richer)`].filter(Boolean);
+    wcp.replaceChildren(
+      el('p', { className: 'st-state', id: 'wc-state', textContent: `Warp core: ${state}${w.breachT != null ? ` · BREACH IN ${w.breachT} s` : ''}` }),
+      el('div', { className: 'ops-readouts' },
+        ...[['Output', `${w.output} of ${grid.coreMax}`], ['Efficiency', `${w.eff}%`], ['Core temperature', `${Math.round(w.temp)}%${w.temp > need.hot ? ' · HOT' : ''}`], ['Containment field', `${grid.contain?.field}%`],
+          ['Dilithium alignment', `${w.align}%`], ['Crystal integrity', `${w.crystal}%`], ['Deuterium feed', `${grid.dfeed.pressure}%`], ['Mixture', `${w.mix}:1 (best ${need.bestMix}:1)`]]
+          .map(([k, v]) => el('div', { className: 'lcars-readout wc-readout' }, el('span', { textContent: k }), el('b', { textContent: v })))),
+      el('div', { className: 'ops-form' }, el('span', { textContent: 'Reaction rate' }), rate),
+      el('div', { className: 'ops-form' }, el('span', { textContent: 'Mixture (deuterium : antimatter)' }), mixes),
+      el('div', { className: 'ops-form' },
+        grid.core === 'offline' ? button('Cold ignition', 'wc-start', () => send({ type: 'grid', core: 'start' })) : grid.core === 'ejected' ? el('span') : button('SCRAM', 'wc-scram', () => send({ type: 'grid', core: 'scram' }), 'lcars-button--alert'),
+        tog(`Plasma conduits to nacelles: ${w.plasma ? 'open' : 'closed'}`, 'wc-plasma', w.plasma, () => send({ type: 'grid', plasma: !w.plasma })),
+        button('Trim dilithium', 'wc-trim', () => send({ type: 'grid', trim: true })),
+        tog(`Auto-trim: ${w.autoTrim ? 'on' : 'off'}`, 'wc-autotrim', w.autoTrim, () => send({ type: 'grid', autoTrim: !w.autoTrim }))),
+      el('p', { className: 'ops-hint', id: 'wc-hint', textContent: grid.core === 'offline' && blocks.length ? `The injectors won't open: ${blocks.join('; ')}.` : `Cold ignition runs at ${need.rate}% or less for ${grid.startSecs} s, then the rate climbs to its setting. Auto-trim needs all three computer cores (${w.cores} online). Over ${need.hot}% the core wears the containment field down; under ${need.flameout}% feed pressure it flames out.` }));
+    wcp.querySelector('#wc-state').toggleAttribute('data-up', w.breachT != null);
+  }
+
   // Engineering: the power grid.
   const gp = document.querySelector('[data-grid]');
   // Not while someone's typing an amount or picking a resource there.
@@ -884,8 +914,9 @@ function renderCombat() {
       parentRow('ties-core-parent', 'Warp core (M/ARC)', 1, grid.core === 'starting' ? `starting ${grid.start} of ${grid.startSecs} s` : grid.core,
         grid.core === 'ejected' ? [] : grid.core === 'offline' ? [small('Start', 'core-start', () => send({ type: 'grid', core: 'start' }))] : [small('Stop', 'core-stop', () => send({ type: 'grid', core: 'stop' }), true)]),
       ...(grid.core !== 'ejected' ? [
-        ...['constriction', 'corePump', 'amConduit', 'injector'].map((x) => subRow(x, 2, x === 'amConduit' && grid.contain?.field < 95 ? 'not pressurized: the containment field must be at 95%' : undefined)),
+        ...['constriction', 'corePump', 'amConduit', 'injector'].map((x) => subRow(x, 2)),
         ties('core', 'Power transfer conduits', 'core', { level: 2, note: c.damage.conduits >= 50 ? 'DAMAGED: no output' : 'carry the core\'s output into the EPS' }),
+        toggleRow('core-plasma', 'Plasma transfer conduits', 2, grid.warpCore?.plasma, () => send({ type: 'grid', plasma: !grid.warpCore?.plasma }), grid.warpCore?.plasma ? 'open to the nacelles: warp' : 'closed: no warp'),
       ] : []),
       ...feedRows(),
       ...driveRows('port'), ...driveRows('starboard'),
@@ -982,7 +1013,7 @@ function renderCombat() {
         const engNoReactors = () => consoleRows('Engineering', { reactors: false });
         const containment = engineeringRows().filter((r) => r.id === 'ties-containment');
         // In Shutdown the core's rows run the other way under it (conduits first, constriction last).
-        const coreRows = () => { const [head, ...rest] = engineeringRows().filter((r) => /^ties-(core|sub-constriction|sub-corePump|sub-amConduit|sub-injector)/.test(r.id)); return [head, ...(gridOrder === 'shutdown' ? rest.reverse() : rest)]; };
+        const coreRows = () => { const [head, ...rest] = engineeringRows().filter((r) => /^(ties-(core|sub-constriction|sub-corePump|sub-amConduit|sub-injector)|core-plasma)/.test(r.id)); return [head, ...(gridOrder === 'shutdown' ? rest.reverse() : rest)]; };
         const driveRowsAll = () => [...driveRows('port'), ...driveRows('starboard')];
         // Startup fills a tank from the dock (once, to full); Shutdown empties it to the dock.
         const fuelButton = (r) => () => {
@@ -1111,7 +1142,7 @@ function renderCombat() {
         }),
           el('span', { className: 'ops-hint', textContent: grid.autoRefuel.antimatter && !grid.ties.containment.length ? 'antimatter needs a containment feed set' : 'topped off while docked at a starbase' })));
     };
-    const coreText = grid.core === 'online' ? `Online · ${grid.coreOutput} to ${feeds(grid.ties.core)}` : grid.core === 'starting' ? `Starting · ${grid.start} of ${grid.startSecs} s on Bus A power` : grid.core === 'ejected' ? 'Ejected · solar and batteries only' : 'Offline';
+    const coreText = grid.core === 'online' ? `Online · ${grid.coreOutput} to ${feeds(grid.ties.core)}` : grid.core === 'starting' ? `Cold ignition · ${grid.start} of ${grid.startSecs} s` : grid.core === 'ejected' ? 'Ejected · solar and batteries only' : 'Offline';
     gp.replaceChildren(
       el('div', { className: 'st-control' },
         el('p', { className: 'st-state', id: 'core-state', textContent: `Warp core (M/ARC): ${coreText}` }),

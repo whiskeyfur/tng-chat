@@ -936,7 +936,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await scotty.click('[data-system="engines"] button[data-level="10"]');
     assert.equal(await scotty.locator('[data-system="engines"] button[data-allowed]').count(), 10); // limit 100: ten of fifteen
     assert.equal(await scotty.locator('[data-system="engines"] button[data-overdrive]').count(), 5);
-    assert.match(await scotty.textContent('.pw-total'), /EPS 399 .*not routed yet/);
+    assert.match(await scotty.textContent('.pw-total'), /EPS 599 .*not routed yet/);
     await scotty.click('#power-reset');
     // Sensors at 20%: every range drops to a fifth, so the transporter (4 units) can't reach.
     await route({ sensors: 20, lateral: 20 });
@@ -1242,6 +1242,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await geordi.getAttribute('#auto-refuel-antimatter', 'aria-pressed'), 'false', 'one at a time');
     await geordi.click('#auto-refuel-deuterium');
     await geordi.waitForSelector('#auto-refuel-deuterium[aria-pressed="false"]');
+    // The Warp core panel: the reaction's state, readouts and controls.
+    await screen(geordi, 'st-core');
+    await geordi.waitForSelector('#wc-state:has-text("Running")');
+    assert.match(await geordi.textContent('[data-warpcore]'), /Output\s*\d+ of 1000.*Efficiency\s*\d+%.*Dilithium alignment/s);
+    assert.equal(await geordi.locator('#core-rate button').count(), 10, 'a light bar for the reaction rate');
+    await geordi.waitForSelector('#wc-scram');
+    await screen(geordi, 'st-grid');
     // The warp core's Start / Stop is on its row in the grid, in every order.
     await geordi.waitForSelector('#ties-core-parent #core-stop');
     assert.deepEqual(await geordi.evaluate(() => ['#grid-table thead', '#grid-table tfoot'].map((q) => getComputedStyle(document.querySelector(q)).position)), ['sticky', 'sticky'], 'the headings and totals stay in view');
@@ -1616,6 +1623,24 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => barclay.nav()?.own.grid.core === 'online', 20000);
     barclay.send({ type: 'grid', reactor: { name: 'starboard', on: false } });
     await waitFor(() => barclay.nav()?.own.grid.drives.starboard.state === 'off');
+    // The warp core's reaction: containment lost under a live reaction starts a
+    // 45 s breach countdown; restoring it cancels the countdown. SCRAM stops it at once,
+    // and cold ignition needs a deuterium-rich mixture.
+    barclay.send({ type: 'grid', ties: { containment: ['C'] } }); // (nothing on Bus C: the reserve, then the field falls)
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /warp core breach in 45 seconds/.test(m.text)), 30000);
+    await waitFor(() => barclay.nav()?.own.grid.warpCore.breachT > 0 && barclay.nav().own.grid.warpCore.breachT < 45); // the countdown runs
+    barclay.send({ type: 'grid', ties: { containment: ['A'] } });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /breach averted/.test(m.text)), 20000);
+    barclay.send({ type: 'grid', core: 'scram' });
+    await waitFor(() => barclay.nav()?.own.grid.core === 'offline' && barclay.nav().own.grid.warpCore.actual === 0);
+    barclay.send({ type: 'grid', coreMix: 10 });
+    barclay.send({ type: 'grid', core: 'start' });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /(cold ignition needs a deuterium-rich mixture|injectors won't open)/.test(m.text)));
+    barclay.send({ type: 'grid', coreMix: 15 });
+    await waitFor(() => barclay.nav()?.own.grid.contain.field >= 95, 20000);
+    barclay.send({ type: 'grid', core: 'start' });
+    await waitFor(() => barclay.nav()?.own.grid.core === 'online', 20000);
+    step('warp core: containment lost under a live reaction started a 45 s breach countdown, restoring it averted the breach; SCRAM stopped the reaction; cold ignition was refused on a lean mixture and relit at 15:1');
     step(`a new ship, the Excelsior, started cold at ${cold.docked} (consoles dark, no fuel); on dock power Engineering moved Tactical's console to Bus A and the lateral sensors to Bus B (consoles only take A or B, engines only the EPS), set a containment feed, took on antimatter and deuterium, opened the deuterium feed (no lighting below 30% pressure), lit both impulse drives so the EPS manifold could pressurize (100+ of generation) for the structural integrity field, and started the core`);
 
     // Impulse drives: started on bus power (their pumps), then self-sustaining.
