@@ -300,3 +300,7 @@ body { font-family: var(--font); font-size: 18px; letter-spacing: 0.04em; min-he
   .tr-pick > .tr-label { min-width: 0; padding: 0 8px 0 14px; font-size: 12px; }
   .tr-pick::after { flex-basis: 14px; }
 }
+
+/* Number fields: typed, or stepped with the − / + taps beside them; never the browser's spinner. */
+input[type='number'] { appearance: textfield; -moz-appearance: textfield; }
+input[type='number']::-webkit-inner-spin-button, input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }

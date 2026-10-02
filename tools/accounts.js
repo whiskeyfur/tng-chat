@@ -18,7 +18,13 @@ const read = (file, empty) => { try { return JSON.parse(fs.readFileSync(file, 'u
 // (Written as a dotfile, then renamed: the supervisor's watch ignores dotfiles, and these files, so
 // a login never restarts the relay.)
 const tmpOf = (file) => path.join(path.dirname(file), `.${path.basename(file)}.tmp`);
-const write = (file, v) => { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(tmpOf(file), JSON.stringify(v, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(tmpOf(file), file); };
+// (The accounts' previous version is kept too, as .users.json.bak.)
+const write = (file, v) => {
+  fs.mkdirSync(DIR, { recursive: true });
+  fs.writeFileSync(tmpOf(file), JSON.stringify(v, null, 2) + '\n', { mode: 0o600 });
+  if (file === USERS_FILE && fs.existsSync(file)) { try { fs.copyFileSync(file, path.join(DIR, '.users.json.bak')); } catch {} }
+  fs.renameSync(tmpOf(file), file);
+};
 let users = read(USERS_FILE, {});      // username -> { salt, hash, role, status, created, lastLogin, characters }
 let sessions = read(SESSIONS_FILE, {}); // sha256(token) -> { user, created, seen }
 // (The users file changed under us, npm run make-admin from the shell: read it again.)

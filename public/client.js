@@ -379,7 +379,7 @@ function setHeader(code, sub, title) {
 function renderShips(all) {
   const ships = all.filter((s) => s.computer);
   const sel = $('ship');
-  const keep = sel.value || urlParams.get('ship') || savedReg?.ship || '';
+  const keep = sel.value || urlParams.get('ship') || signinDraft?.ship || savedReg?.ship || '';
   const placeholder = new Option(ships.length ? 'Ship' : "No ships: start a ship's computer", '');
   placeholder.disabled = true;
   sel.replaceChildren(placeholder, ...ships.map((s) => new Option(s.starbase ? `${s.name} (starbase${s.ops ? '' : ', automated'})` : s.relay ? `${s.name} (subspace relay, automated)` : s.ops ? s.name : `${s.name} (ops offline)`, s.name)));
@@ -2170,6 +2170,7 @@ async function onMessage(msg) {
       if (stationView) setHeader(stationView.code, `${me.title || me.name} · ${me.ship}`, me.station);
       break;
     case 'registered':
+      try { sessionStorage.removeItem(SIGNIN_DRAFT); } catch {}
       me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, console: msg.console || null, title: msg.title, position: msg.position || null, post: msg.post || null, equipment: msg.equipment || null };
       renderEquipment();
       applyPlaces();
@@ -2361,14 +2362,20 @@ setInterval(tick, 1000);
 const urlParams = new URLSearchParams(location.search);
 let savedReg = null;
 try { savedReg = JSON.parse(localStorage.getItem('voice-reg') || 'null'); } catch {}
-$('name').value = urlParams.get('name') || savedReg?.name || '';
+// What's picked on the sign-in screen, kept through a reload or a reconnect (this tab) until signed in.
+const SIGNIN_DRAFT = 'stchat-signin';
+let signinDraft = null;
+try { signinDraft = JSON.parse(sessionStorage.getItem(SIGNIN_DRAFT) || 'null'); } catch {}
+const saveSigninDraft = () => { if (me) return; try { sessionStorage.setItem(SIGNIN_DRAFT, JSON.stringify({ name: $('name').value, ship: $('ship').value, station: $('station').value, position: signinPosition })); } catch {} };
+$('name').value = urlParams.get('name') || signinDraft?.name || savedReg?.name || '';
+$('name').addEventListener('input', saveSigninDraft);
 // (The position picked on the org chart, if any.)
-let signinPosition = urlParams.get('position') || savedReg?.position || null;
+let signinPosition = urlParams.get('position') || signinDraft?.position || savedReg?.position || null;
 $('station').onchange = updateSignInMode;
 
 function fillStations() {
   const sel = $('station');
-  const keep = sel.value || urlParams.get('station') || savedReg?.station || '';
+  const keep = sel.value || urlParams.get('station') || signinDraft?.station || savedReg?.station || '';
   const placeholder = new Option('Station', '');
   placeholder.disabled = true;
   const all = ['Operations', ...stations];
@@ -2408,6 +2415,7 @@ function renderSignIn() {
   }, { ship: o.value })) : [Object.assign(document.createElement('span'), { className: 'ops-hint', textContent: shipSel.options[0]?.textContent || '' })]));
   const pick = ships.find((x) => x.name === shipSel.value);
   const org = pick?.org || [], filled = pick?.filled || {};
+  saveSigninDraft();
   const mine = (id) => filled[id] && $('name').value.trim().toLowerCase() === filled[id].toLowerCase();
   if (signinPosition && !org.some((d) => d.positions.some((p) => p.id === signinPosition && (!filled[p.id] || mine(p.id))))) signinPosition = null;
   const choose = (station, position) => { signinPosition = position; stSel.value = station; updateSignInMode(); renderSignIn(); };
@@ -2422,6 +2430,8 @@ function renderSignIn() {
       return b;
     }))),
     unassigned] : []));
+  // (A ship whose class was never saved: it's shown as a Galaxy until an admin sets it.)
+  if (pick?.classUnknown) $('signin-org').prepend(Object.assign(document.createElement('p'), { className: 'ops-notice', id: 'signin-class-unknown', textContent: `The ${pick.name}'s class was never saved (an older save): shown as a ${pick.class} until an admin sets it (Admin → Fleet).` }));
 }
 fillStations();
 $('ship')?.addEventListener('change', () => { applyPlaces(); fillStations(); });

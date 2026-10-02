@@ -133,6 +133,37 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
       fs.rmSync(ED, { recursive: true, force: true }); fs.rmSync(SHIPS, { recursive: true, force: true });
       step('a design edited: the shuttle kept its class across restarts (saved with it), came up warm with its design\'s ties, then took the new bus limit (90) and its lateral sensors\' new place (Sensor Pod, tied on Bus C) with its own ties kept');
     }
+    // A Galaxy made a runabout (Admin → Fleet): its engineering rebuilt from the runabout's design,
+    // nothing of the Galaxy's left (no Security console, brig, crew services) on its grid or tied.
+    {
+      const GD = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-reclass-'));
+      const P = PORT + 10, env = { PORT: P, RELAY_DATA: GD, STARBASES_FILE: path.join(GD, 'starbases.json') };
+      const rp = run(['server.js'], env);
+      await wait(1000);
+      const sc = run(['tools/shipcore.js', '--relay', `ws://localhost:${P}`, '--data', GD, '--warm', '--position', '500,500', 'Reclassed'], env);
+      const ws = new WebSocket(`ws://localhost:${P}`), m = [];
+      ws.on('message', (x) => m.push(JSON.parse(x)));
+      await new Promise((r) => ws.on('open', r));
+      await until(() => m.some((x) => x.type === 'ships' && x.ships.some((v) => v.name === 'Reclassed' && v.computer)));
+      ws.send(JSON.stringify({ type: 'register', name: 'tester', ship: 'Reclassed', station: 'Helm' }));
+      const grid = () => [...m].reverse().find((x) => x.type === 'nav' && x.own?.grid)?.own;
+      const GALAXY_ONLY = ['console:Security', 'console:Crew', 'console:Brig', 'sub:brigField', 'sub:forcefields', 'system:replicators', 'console:Medical'];
+      await until(() => grid()?.class === 'Galaxy' && GALAXY_ONLY.every((x) => grid().grid.tieNodes[x]));
+      ws.send(JSON.stringify({ type: 'admin', action: 'set-class', name: 'Reclassed', cls: 'runabout' }));
+      await until(() => m.some((x) => x.type === 'admin-created' && x.ok));
+      await until(() => grid()?.class === 'Runabout');
+      const g = grid().grid;
+      const left = GALAXY_ONLY.filter((x) => g.tieNodes[x] || (g.ties[x] || []).length);
+      assert.deepEqual(left, [], `the Galaxy's loads gone from the runabout: ${left}`);
+      assert.ok(g.tieNodes['console:Helm'] && g.tieNodes['console:Engineering'], 'the runabout\'s own consoles');
+      await wait(1500);
+      ws.close();
+      await new Promise((r) => { sc.once('exit', r); sc.kill(); });
+      assert.equal(JSON.parse(fs.readFileSync(path.join(GD, 'Reclassed', '.nav.json'), 'utf8')).class, 'runabout', 'saved with the ship');
+      await new Promise((r) => { rp.once('exit', r); rp.kill(); });
+      fs.rmSync(GD, { recursive: true, force: true });
+      step('a Galaxy made a runabout (Admin → Fleet): its engineering rebuilt from the runabout\'s design, none of the Galaxy\'s consoles or systems (Security, the brig, crew services, sickbay) left on its grid, and the class saved with it');
+    }
     // The subspace relay: its own design (config/ships, kind relay), a grid of its own (pure solar,
     // the output its design gives), a maintenance console (Bridge 1) to tend it; its links lose
     // signal while its transceiver (the subspace subsystem) has no power.

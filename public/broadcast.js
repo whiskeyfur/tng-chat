@@ -84,7 +84,7 @@
           stopSpeaking();
           speaking = {
             bid: msg.bid, label: msg.label, pcs: new Map(),
-            ready: navigator.mediaDevices.getUserMedia({ audio: true, video: false }).catch((err) => { log?.(`no microphone for the broadcast (${err.name})`); return null; }),
+            ready: getMic().catch((err) => { log?.(`no microphone for the broadcast (${err.name})`); return null; }),
           };
           log?.(`you are broadcasting: ${msg.label}`);
           render();
@@ -114,7 +114,7 @@
           if (msg.data.sdp?.type === 'offer') {
             l.pc?.close();
             const pc = l.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-            pc.ontrack = (e) => { l.audio.srcObject = e.streams[0] || new MediaStream([e.track]); l.audio.muted = l.muted; };
+            pc.ontrack = (e) => { l.audio.muted = l.muted; playRemote(l.audio, e.streams[0] || new MediaStream([e.track])); };
             pc.onicecandidate = (e) => e.candidate && sig(l.from.id, l.bid, { candidate: e.candidate });
             await pc.setRemoteDescription(msg.data.sdp);
             await pc.setLocalDescription(await pc.createAnswer());

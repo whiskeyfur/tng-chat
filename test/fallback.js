@@ -61,6 +61,17 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
     await until(() => got.some((m) => m.type === 'signal' && m.from === hoshiId && m.data?.test === 'answer'));
     step("a call's signaling both ways: mayweather's ring reached the HTTP console, and its signal reached her");
     mayweather.close();
+    // Safari-proofing (media.js): a page that can't have a microphone (an iPad on the LAN over
+    // plain http has no navigator.mediaDevices) gets a clear refusal, not a crash; remote audio
+    // plays inline.
+    const noMic = await (await browser.newContext()).newPage();
+    await noMic.addInitScript(() => { Object.defineProperty(navigator, 'mediaDevices', { value: undefined, configurable: true }); });
+    await noMic.goto(URL);
+    const refusal = await noMic.evaluate(() => getMic().then(() => 'mic', (e) => `${e.name}: ${e.message}`));
+    assert.match(refusal, /https \(or localhost\)/);
+    assert.equal(await noMic.evaluate(() => { const a = new Audio(); playRemote(a, new MediaStream()); return a.hasAttribute('playsinline') && a.autoplay; }), true);
+    await noMic.close();
+    step(`no microphone where the page can't have one: "${refusal}", and no crash; remote audio plays inline`);
     ok = true;
   } catch (err) {
     console.error('FAIL:', err.message);

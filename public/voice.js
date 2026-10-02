@@ -224,7 +224,7 @@
     // The microphone is requested once per call, only when it actually connects,
     // and the same stream is shared by every connection in the call.
     function getStream(c) {
-      c.streamReady ??= navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      c.streamReady ??= getMic()
         .catch((err) => { log(`no microphone (${err.name}); continuing with chat and files only`); return null; })
         .then((stream) => {
           if (call !== c) { stream?.getTracks().forEach((t) => t.stop()); return null; } // hung up meanwhile
@@ -263,8 +263,7 @@
       p.files.onmessage = (e) => onFileData(p, e.data);
 
       p.audio = new Audio();
-      p.audio.autoplay = true;
-      pc.ontrack = (e) => { p.audio.srcObject = e.streams[0] || new MediaStream([e.track]); };
+      pc.ontrack = (e) => playRemote(p.audio, e.streams[0] || new MediaStream([e.track])); // (media.js: Safari's autoplay rule)
       pc.onicecandidate = (e) => e.candidate && sendCall(p, { type: 'signal', data: { candidate: e.candidate } });
       pc.onconnectionstatechange = () => {
         if (call !== c) return;

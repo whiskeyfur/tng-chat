@@ -145,7 +145,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, perMessageDeflate: false }); // (no compression: Safari drops connections that use it)
 
 // The HTTP fallback, for a browser whose WebSocket can't connect (a proxy that won't pass it):
 // a connection made of plain HTTP calls. POST /api/poll/open starts one (the same session cookie
@@ -406,7 +406,7 @@ function networkGraph() {
 function shipList() {
   const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys(), ...BASE_KEYS, ...[...RELAY_KEYS].filter((k) => relayOf(k)?.system === SYSTEM_ID)]);
   return [...live].map((k) => ({
-    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, system: SYSTEM_ID, ...(isBase(k) ? { starbase: true, classId: 'starbase' } : { ...(isRelay(k) ? { relay: true } : {}), class: classOf(k).name, classId: classId(k), stations: stationsOf(k) }), org: orgOf(k), filled: filledOf(k),
+    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, system: SYSTEM_ID, ...(isBase(k) ? { starbase: true, classId: 'starbase' } : { ...(isRelay(k) ? { relay: true } : {}), ...(classGuessed.has(k) ? { classUnknown: true } : {}), class: classOf(k).name, classId: classId(k), stations: stationsOf(k) }), org: orgOf(k), filled: filledOf(k),
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
 // Starbases run themselves (no ship's computer needed), so they're always there.
@@ -1219,7 +1219,8 @@ function coreNav(c, key, nav) {
   if (isBase(key)) return; // a computer for a starbase only holds its library: the station runs itself
   const clean = { x: nav.x, y: nav.y, heading: Number(nav.heading) || 0, warp: Number(nav.warp) || 0, dest: nav.dest || null };
   const was = shipClasses.get(key);
-  if (CLASSES[nav.class]) shipClasses.set(key, nav.class); else if (!shipClasses.has(key)) shipClasses.set(key, DEFAULT_CLASS);
+  // (No class in its save: a Galaxy for now, marked unknown, and never saved as if it were known.)
+  if (CLASSES[nav.class]) { shipClasses.set(key, nav.class); classGuessed.delete(key); } else if (!shipClasses.has(key)) { shipClasses.set(key, DEFAULT_CLASS); classGuessed.add(key); }
   if (was !== shipClasses.get(key)) broadcastShips(); // (the sign-in list shows each ship's class and stations)
   if (ALERTS.includes(nav.alert)) clean.alert = nav.alert;
   if (nav.lockout) clean.lockout = true;
@@ -1235,6 +1236,7 @@ function coreNav(c, key, nav) {
     for (const c of CONDUITS) engOf(key).ties[c] ||= [];
     if (!engOf(key).conduits) deriveConduits(key); // (a cold ship's are untied: its loads are)
     reconcileConduits(key);
+    pruneLoads(key);
     restoreLinks(key, nav.eng?.links);
     if (!classOf(key).warpCore) Object.assign(engOf(key), { core: 'ejected', antimatter: 0 }); // (a shuttle has no warp core: impulse and batteries)
     // A small craft brought up ready to go: wiring that fits its buses, and EPS taps no wider than they are.
@@ -2064,6 +2066,36 @@ function classSystems(k) {
     out[st] = list.flatMap((x) => (x === 'phaser1' ? PHASER_ARRAYS.slice(0, arraysOf(k)) : [x])).filter((x) => (x !== 'transporter' || c.transporter) && (!WARP_DRIVE.includes(x) || c.maxWarp) && ((x !== 'spore' && x !== 'sporeGrow') || c.spore));
   }
   return out;
+}
+// A grid row aboard this vessel (by its design): a console of one of its stations, one of its
+// places, a system its design has (one a station of its lists, or no station's), a subsystem
+// under something aboard. (Sources, conduits and the rest: always.)
+const sysGone = (k, x) => (BASE_ONLY.includes(x) && !isBase(k)) || PHASER_ARRAYS.indexOf(x) >= arraysOf(k) || (x === 'transporter' && !isBase(k) && !classOf(k).transporter)
+  || (WARP_DRIVE.includes(x) && (isBase(k) || !classOf(k).maxWarp)) || (x === 'spore' && (isBase(k) || !classOf(k).spore));
+function aboardKey(k, key) {
+  if (key.startsWith('console:')) return hasStation(k, key.slice(8));
+  if (key.startsWith('place:')) return placesOf(k).some((pl) => `place:${pl.name}` === key);
+  // (a row the design names itself: in one of its places, or its ties with nodes)
+  const d = designOf(k);
+  if (/^(system|sub):/.test(key) && ((d.places || []).some((pl) => (pl.rows || []).includes(key)) || (d.ties?.[key] || []).length)) return true;
+  if (key.startsWith('system:')) {
+    const x = key.slice(7);
+    if (CONDUITS.includes(key) || sysGone(k, x)) return CONDUITS.includes(key);
+    const owners = Object.entries(STATION_SYSTEMS).filter(([, list]) => list.includes(x) || (x.startsWith('phaser') && list.includes('phaser1'))).map(([st]) => st);
+    return !owners.length || owners.some((st) => st === 'Engineering' || hasStation(k, st));
+  }
+  if (key.startsWith('sub:')) {
+    const p = SUBSYSTEMS[key.slice(4)]?.parent;
+    return !p || (STATIONS.includes(p) ? hasStation(k, p) : !SYSTEMS.includes(p) || aboardKey(k, `system:${p}`));
+  }
+  return true;
+}
+// Loads a vessel's design doesn't have (a save from when it was another class, say): untied.
+function pruneLoads(k) {
+  const e = eng.get(k);
+  if (!e) return;
+  for (const x of Object.keys(e.ties)) if (/^(console|system|sub):/.test(x) && !CONDUITS.includes(x) && e.ties[x].length && !aboardKey(k, x)) e.ties[x] = [];
+  flowCache.delete(k);
 }
 // What each console's grid rows list: a starbase has no warp drive, and has its drydock connections and industrial replicators.
 const stationSystemsOf = (k) => (!isBase(k) ? classSystems(k) : isBase(k) ? { ...STATION_SYSTEMS, Helm: STATION_SYSTEMS.Helm.filter((x) => !WARP_DRIVE.includes(x)), Tactical: ['shields', ...PHASER_ARRAYS, 'weapons', 'tractor'], Engineering: [...STATION_SYSTEMS.Engineering, ...BASE_ONLY.filter((x) => !PHASER_ARRAYS.includes(x))], 'Spore Lab': [] } : STATION_SYSTEMS);
@@ -2920,7 +2952,7 @@ function gridView(k) {
     // Ties that carry nothing: a conduit on their way untied from that bus (key -> the buses cut off).
     cutOff: Object.fromEntries(Object.keys(e.ties).map((x) => [x, (e.ties[x] || []).filter((X) => !effTies(k, e, x).includes(X))]).filter(([, v]) => v.length)),
     conduits: CONDUITS.filter((c) => c === 'system:lifeSupport' || placesOf(k).some((pl) => `place:${pl.name}` === c)), systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, brigField: !!e.brigField, brigSealed: brigSealed(k), stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
-    tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: busMaxOf(k), solarOut: designOf(k).solar?.output ?? 0,
+    tieNodes: Object.fromEntries(Object.keys(e.ties).filter((key) => aboardKey(k, key)).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter((key) => isMulti(key) && aboardKey(k, key)), busMax: busMaxOf(k), solarOut: designOf(k).solar?.output ?? 0,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
   };
 }
@@ -3032,9 +3064,7 @@ function gridCommand(ws, msg) {
   if (msg.busAll && (msg.busAll.bus === 'all' || [...NODES, 'Deu', 'AM', 'ODN'].includes(msg.busAll.bus))) {
     const on = !!msg.busAll.on, cols = msg.busAll.bus === 'all' ? ['ODN', ...NODES, 'Deu', 'AM'] : [msg.busAll.bus];
     // (Only what this vessel has: its stations' consoles, its class's systems.)
-    const sysGone = (x) => (BASE_ONLY.includes(x) && !isBase(key)) || PHASER_ARRAYS.indexOf(x) >= arraysOf(key) || (x === 'transporter' && !isBase(key) && !classOf(key).transporter)
-      || (WARP_DRIVE.includes(x) && (isBase(key) || !classOf(key).maxWarp)) || (x === 'spore' && (isBase(key) || !classOf(key).spore));
-    const aboard = (k2) => (k2.startsWith('console:') ? hasStation(key, k2.slice(8)) : k2.startsWith('place:') ? placesOf(key).some((pl) => `place:${pl.name}` === k2) : k2.startsWith('system:') ? !sysGone(k2.slice(7)) : true);
+    const aboard = (k2) => aboardKey(key, k2);
     const amOnBus = Object.keys(TANKS.am).some((n) => e.tankCfg[`am:${n}`]?.tied && tankLevel(e, 'am', n) > 0);
     const keep = (k2) => (k2 === 'console:Engineering' ? 'the Engineering console' : k2 === `console:${placeOf(ws)}` ? 'your own console'
       : k2 === 'containment' && tankLevel(e, 'am', 'main') > 0 ? 'antimatter containment (antimatter in the pods)'
@@ -3726,7 +3756,8 @@ const savedCombat = (k) => {
   return { hull: round1(c.hull), shield: round1(c.shield), damage: Object.fromEntries(DAMAGEABLE.map((s) => [s, round1(c.damage[s])])), torpedoes: c.torpedoes, repair: c.repair, yield: c.yield, shieldFreq: c.shieldFreq, weaponFreq: c.weaponFreq };
 };
 // What a ship's computer keeps: its position and settings, plus combat and grid state.
-const coreCopy = (k) => (navState.has(k) ? { ...navState.get(k), ...(isBase(k) ? {} : { class: classId(k) }), combat: savedCombat(k), eng: savedEng(k) } : undefined);
+const classGuessed = new Set(); // ships whose class their save never had (shown as the default)
+const coreCopy = (k) => (navState.has(k) ? { ...navState.get(k), ...(isBase(k) || classGuessed.has(k) ? {} : { class: classId(k) }), combat: savedCombat(k), eng: savedEng(k) } : undefined);
 
 // The ship's own combat state, for its consoles.
 const lockInfo = (k, t) => ({ name: shipName(t), distance: Math.round(distance(k, t)), shields: shields.has(t), shield: Math.round(combatOf(t).shield), hull: Math.round(combatOf(t).hull), aim: combatOf(k).aim[t] || null, aimName: combatOf(k).aim[t] ? damageName(combatOf(k).aim[t]) : null });
@@ -5374,7 +5405,7 @@ let adminSeq = 0;
 // The vessels as the admin page shows them: class, crew, ops, where.
 // (The classes this relay has loaded, for the admin page: did a reload apply a design?)
 const adminClasses = () => Object.fromEntries(Object.entries(CLASSES).map(([id, c]) => [id, { name: c.name, bus: c.bus, eps: c.eps }]));
-const adminFleet = () => networkGraph().ships.map((v) => ({ name: v.name, class: v.class, classId: navState.has(shipKey(v.name)) && !v.starbase ? classId(shipKey(v.name)) : null, starbase: !!v.starbase, crew: v.crew, ops: v.ops, computer: v.computer, x: v.x, y: v.y }));
+const adminFleet = () => networkGraph().ships.map((v) => ({ name: v.name, class: v.class, classId: navState.has(shipKey(v.name)) && !v.starbase ? classId(shipKey(v.name)) : null, classUnknown: classGuessed.has(shipKey(v.name)), starbase: !!v.starbase, crew: v.crew, ops: v.ops, computer: v.computer, x: v.x, y: v.y }));
 // The account API: GET me; POST register, login, logout (JSON). A login sets the session
 // cookie (HttpOnly, SameSite=Lax); a page from another origin gets the token to send by message.
 function accountRequest(req, res, what) {
@@ -5472,9 +5503,25 @@ function adminSetClass(ws, msg) {
   const note = (ok, text) => send(ws, { type: 'admin-created', ok, text });
   if (!navState.has(k) || isBase(k) || isRelay(k)) return note(false, 'no such ship');
   if (!CLASSES[cls]) return note(false, `no class ${cls}`);
-  const paths = eng.has(k) ? savedEng(k).paths : null;
   shipClasses.set(k, cls);
-  if (eng.has(k)) { engOf(k).restore = { paths, newConduits: [] }; reconcileConduits(k); }
+  classGuessed.delete(k);
+  // A new class: its engineering rebuilt from the design, as a ship of that class comes up ready
+  // (its systems, ties, limiters, batteries, conduits, automation; damage repaired), keeping where
+  // it is and what it's docked with, and its fuel (no more than the tanks hold).
+  if (eng.has(k)) {
+    const old = eng.get(k), fresh = freshEng(undefined, { k });
+    delete fresh.restore;
+    Object.assign(fresh.ties, classOf(k).ties || {});
+    for (const f of ['docked', 'dockedPort', 'shipDocks', 'landed', 'drydock', 'berth', 'conn', 'connTies', 'bayOpen', 'remoteBlock', 'prefix', 'orderLog', 'towing']) if (old[f] !== undefined) fresh[f] = old[f];
+    fresh.antimatter = Math.min(old.antimatter, FUEL.antimatter); fresh.deuterium = Math.min(old.deuterium, FUEL.deuterium);
+    eng.set(k, fresh);
+    deriveConduits(k);
+    designReactors(k, true);
+    pruneLoads(k);
+    const c = combatOf(k);
+    for (const x of Object.keys(c.damage || {})) c.damage[x] = 0;
+    fresh.dirty = true;
+  }
   flowCache.delete(k);
   const core = primaryCore.get(k);
   if (core) send(core, { type: 'core-primary', ship: shipName(k), primary: true, nav: coreCopy(k) });

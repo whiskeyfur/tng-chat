@@ -71,7 +71,7 @@
       ins.delete(id);
     }
     function play(x, stream) {
-      x.el.srcObject = stream;
+      playRemote(x.el, stream);
       const c = audioCtx();
       if (!c) { x.el.muted = false; return; }
       // (Chrome plays a remote stream through Web Audio only while an element holds it too, muted.)
@@ -141,7 +141,7 @@
     function setMic(on) {
       if (!!mic === !!on) return;
       if (on) {
-        mic = { stream: navigator.mediaDevices.getUserMedia({ audio: true, video: false }).catch((err) => { log?.(`no microphone for the room (${err.name})`); return null; }) };
+        mic = { stream: getMic().catch((err) => { log?.(`no microphone for the room (${err.name})`); return null; }) };
         audioCtx();
       } else {
         const m = mic;

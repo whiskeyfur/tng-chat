@@ -63,13 +63,22 @@ const waitFor = async (fn, ms = 10000) => { const t = Date.now(); while (Date.no
     await page.waitForURL(`${URL}/`);
     await page.waitForSelector('#account-menu:not([hidden]):has-text("jlpicard")');
     await page.waitForSelector('#signin-account:has-text("Logged in as jlpicard (admin)")');
-    // The character is still a name of its own: riker, at a starbase.
+    // The character is still a name of its own: riker, at a starbase. What's picked on the sign-in
+    // screen stays put while the ship list ticks over (20 s), and through a reload.
     await page.fill('#name', 'riker');
     await page.click('#signin-ships button[data-ship="Starbase 47"]');
     await page.click('#signin-unassigned button[data-station="Crew"]');
+    const picks = () => page.evaluate(() => [document.getElementById('name').value, document.getElementById('ship').value, document.querySelector('#signin-unassigned [aria-pressed="true"]')?.dataset.station || null]);
+    let navigations = 0;
+    page.on('framenavigated', (f) => { if (f === page.mainFrame()) navigations++; });
+    for (let i = 0; i < 8; i++) { await wait(2500); assert.deepEqual(await picks(), ['riker', 'Starbase 47', 'Crew'], `the picks held (${i * 2.5} s)`); }
+    assert.equal(navigations, 0, 'no reloads');
+    await page.reload();
+    await page.waitForSelector('#signin-unassigned button[data-station="Crew"][aria-pressed="true"]');
+    assert.deepEqual(await picks(), ['riker', 'Starbase 47', 'Crew'], 'kept through a reload');
     await page.click('#register-go');
     await page.waitForFunction(() => window.__voice?.me?.name === 'riker');
-    step('the first account (JLPicard → jlpicard), registered on the log-in page: the admin, logged in; its character is riker, a name of its own');
+    step('the first account (JLPicard → jlpicard), registered on the log-in page: the admin, logged in; its character is riker, a name of its own; the sign-in picks held for 20 s with no reload, and through a reload');
 
     // Now logins are needed: the consoles' page, and a console connection without a session.
     const anon = await fetch(`${URL}/`, { redirect: 'manual' });
