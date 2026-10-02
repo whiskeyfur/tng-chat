@@ -35,9 +35,25 @@ let relay = null;
 let computers = [];
 const env = { ...process.env, PORT };
 
+// A relay that dies right after starting (its port taken, say) is started
+// again a couple of times, then the supervisor gives up, rather than looping.
+const QUICK_FAIL_MS = 10000, MAX_FAILS = 3;
+let fails = 0;
 function start() {
+  const startedAt = Date.now();
   relay = spawn(process.execPath, [path.join(ROOT, 'server.js')], { cwd: ROOT, env, stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
-  relay.on('exit', (code, sig) => { if (!stopping) log(`relay exited (${sig || code})`); });
+  relay.on('exit', (code, sig) => {
+    if (stopping) return;
+    log(`relay exited (${sig || code})`);
+    if (Date.now() - startedAt > QUICK_FAIL_MS) { fails = 0; return; }
+    if (++fails >= MAX_FAILS) {
+      log(`the relay failed to start ${fails} times in a row: is port ${PORT} already in use? (PORT=${PORT}${process.env.PORT ? ', from the environment' : ', the default'}) Stopping.`);
+      stop().then(() => process.exit(1));
+      return;
+    }
+    log(`starting it again (${fails} of ${MAX_FAILS} tries)`);
+    setTimeout(() => { stop().then(start); }, 2000);
+  });
   // The computers connect once the relay listens (they retry by themselves anyway).
   setTimeout(() => {
     computers = ships().map((ship) => spawn(process.execPath, [path.join(ROOT, 'tools', 'shipcore.js'), '--relay', `ws://localhost:${PORT}`, '--data', DATA, ship], { cwd: ROOT, env, stdio: 'inherit' }));
