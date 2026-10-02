@@ -179,12 +179,12 @@
       g.requests.forEach((l) => edge(l, true));
       for (const n of nodes.values()) {
         const sh = n.ship, k = n.id, label = sh.name.toUpperCase(), w = n.w;
-        const fill = k === me ? 'gold' : !sh.ops ? 'tan' : onNet.has(k) ? 'sky' : 'lilac';
+        const fill = sh.relay ? 'violet' : k === me ? 'gold' : !sh.ops ? 'tan' : onNet.has(k) ? 'sky' : 'lilac';
         const grp = node('g', { class: 'net-node', 'data-ship': sh.name, transform: `translate(${n.x - w / 2} ${n.y - H / 2})`, tabindex: 0, role: 'button', 'aria-label': `The ${sh.name}` });
         grp.append(
           node('rect', { width: w, height: H, rx: H / 2, fill: color(fill), opacity: sh.ops || sh.starbase ? 1 : 0.6 }),
           node('text', { x: w / 2, y: 22, 'text-anchor': 'middle', 'font-size': 18, fill: '#000' }, label),
-          node('text', { x: w / 2, y: 40, 'text-anchor': 'middle', 'font-size': 12, fill: '#000' }, `${sh.crew} aboard${sh.shields ? ' · shields up' : ''}${sh.ops ? '' : ' · no ops'}`));
+          node('text', { x: w / 2, y: 40, 'text-anchor': 'middle', 'font-size': 12, fill: '#000' }, sh.relay ? `SUBSPACE RELAY${sh.off ? ' · OFF' : ''}` : `${sh.crew} aboard${sh.shields ? ' · shields up' : ''}${sh.ops ? '' : ' · no ops'}`));
         if (sh.shields) grp.append(node('rect', { x: -5, y: -5, width: w + 10, height: H + 10, rx: H / 2 + 5, fill: 'none', stroke: color('red'), 'stroke-width': 2 }));
         if (selected?.node === k || (hiNet && hiNet.members.map(keyOf).includes(k))) grp.append(node('rect', { x: -7, y: -7, width: w + 14, height: H + 14, rx: H / 2 + 7, fill: 'none', stroke: color('gold'), 'stroke-width': 4, class: 'net-selected' }));
         grp.addEventListener('click', (ev) => { ev.stopPropagation(); select({ node: k }); });
@@ -212,6 +212,13 @@
         const n = nodes.get(selected.node);
         if (!n) return select(null);
         const sh = n.ship, mine = keyOf(sh.name) === keyOf(me), ours = nodes.get(keyOf(me))?.ship;
+        if (sh.relay) {
+          // A subspace relay: what it links (the stations of its system, the other systems' relays).
+          const linked = g.links.filter(([a, b]) => keyOf(a) === keyOf(sh.name) || keyOf(b) === keyOf(sh.name)).map(([a, b]) => (keyOf(a) === keyOf(sh.name) ? b : a)).sort();
+          return details.replaceChildren(el('h3', { className: 'ops-subhead', id: 'net-details-title', textContent: sh.name }),
+            el('p', { className: 'ops-hint', textContent: `Subspace relay${sh.off ? ' (disabled from the admin page)' : ''}: joins every station in its system into one data network, and the systems to each other. Unmanned; its links stay (only the admin page disables it).` }),
+            el('ul', { className: 'st-list', id: 'net-relay-links' }, ...(linked.length ? linked.map((m) => { const li = el('li', {}, tap(m, () => select({ node: keyOf(m) }))); li.dataset.member = m; return li; }) : [el('li', { className: 'empty', textContent: 'nothing linked' })])));
+        }
         const dist = ours && sh.x != null && ours.x != null ? Math.round(Math.hypot(sh.x - ours.x, sh.y - ours.y)) : null;
         const linked = (data.links || []).includes(sh.name), hardLink = (data.hardLinks || []).includes(sh.name);
         const inc = (data.linkIncoming || []).find((r) => r.fromShip === sh.name), out = (data.linkOutgoing || []).find((r) => r.toShip === sh.name);

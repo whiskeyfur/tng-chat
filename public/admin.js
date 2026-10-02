@@ -42,6 +42,13 @@
     const fleet = status.fleet || [], computers = new Map((status.ships || []).map((x) => [x.ship, x]));
     $('admin-fleet').replaceChildren(
       el('tr', {}, ...['Vessel', 'Class', 'Crew', 'Ops', 'Position', "Ship's computer", ''].map((h) => el('th', { textContent: h }))),
+      ...(status.relays || []).map((r) => {
+        const tr = el('tr', {}, el('td', { textContent: r.name }), el('td', { textContent: 'Subspace relay' }), el('td', { textContent: '—' }), el('td', { textContent: '—' }),
+          el('td', { textContent: `${r.x}, ${r.y}` }), el('td', { textContent: r.on ? 'on: linking its system' : 'DISABLED' }),
+          el('td', {}, btn(r.on ? 'Disable' : 'Enable', `admin-relay-${r.name}`, () => send({ type: 'admin', action: 'relay', name: r.name, on: !r.on }), r.on)));
+        tr.dataset.vessel = r.name;
+        return tr;
+      }),
       ...fleet.map((v) => {
         const c = computers.get(v.name);
         const tr = el('tr', {}, el('td', { textContent: v.name }), el('td', { textContent: v.starbase ? 'Starbase' : v.class || '' }), el('td', { textContent: String(v.crew ?? '') }),
@@ -103,7 +110,7 @@
   function renderChart() {
     const box = $('admin-chart');
     if (box.closest('[data-screen]').hidden) return;
-    box.replaceChildren(el('p', { className: 'ops-hint', textContent: system ? `${system.name}: ${system.size} × ${system.size}` : '' }), chartSvg({ size: system?.size || 1000, bases: status.bases || [], fleet: status.fleet || [] }));
+    box.replaceChildren(el('p', { className: 'ops-hint', textContent: system ? `${system.name}: ${system.size} × ${system.size}` : '' }), chartSvg({ size: system?.size || 1000, bases: [...(status.bases || []), ...(status.relays || []).map((r) => ({ ...r, relay: true }))], fleet: status.fleet || [] }));
   }
 
   // The relay and the supervisor: what runs, restart them, the log (a failed reload in red), who's connected.

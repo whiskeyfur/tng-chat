@@ -1,0 +1,16 @@
+{
+  "about": "A subspace relay: an unmanned, self-powered relay platform, one a star system (placed by its starsystem file), linking every station in the system into one data network, and the systems to each other. No crew, stations, weapons, warp, impulse or transporter; never docked with, boarded or towed.",
+  "kind": "relay",
+  "name": "Subspace Relay",
+  "bus": 0,
+  "eps": 0,
+  "core": 0,
+  "maxWarp": 0,
+  "shields": 0,
+  "arrays": 0,
+  "warpCore": false,
+  "transporter": false,
+  "ports": 0,
+  "bay": 0,
+  "stations": []
+}

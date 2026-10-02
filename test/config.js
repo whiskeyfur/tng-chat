@@ -28,7 +28,8 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
     const systems = CONFIG.loadSystems((l) => said.push(l));
     assert.deepEqual(said, [], 'every config file loads');
     const files = fs.readdirSync(path.join(CONFIG.DIR, 'ships')).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5));
-    assert.deepEqual([...Object.keys(classes), 'starbase'].sort(), files.sort(), 'a class for each file in config/ships (and the starbases\' design)');
+    const relayFiles = files.filter((f) => JSON.parse(fs.readFileSync(path.join(CONFIG.DIR, 'ships', `${f}.json`), 'utf8')).kind === 'relay');
+    assert.deepEqual([...Object.keys(classes), 'starbase', ...relayFiles].sort(), files.sort(), 'a class for each file in config/ships (and the starbases\' and the relays\' designs)');
     assert.ok(starbase && systems.sol, 'the starbases\' design and the Sol chart');
     step(`config: ${files.length} designs (${files.join(', ')}) and ${Object.keys(systems).length} star chart (${Object.keys(systems).join(', ')}) loaded`);
 
@@ -69,6 +70,23 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
       ws.close();
     }
     step(`config: a ship of each class (${ids.join(', ')}) came up built from its file (its class, its buses' limits, its places), with the chart's starbases`);
+    // A second star system (a test file): its relay and Sol's link to each other.
+    {
+      const TWO = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-twosystems-'));
+      fs.cpSync(CONFIG.DIR, TWO, { recursive: true });
+      fs.writeFileSync(path.join(TWO, 'starsystem', 'alpha.json'), JSON.stringify({ name: 'Alpha Centauri', size: 1000, starbases: [{ name: 'Starbase 1', x: 300, y: 300 }], relay: { name: 'Alpha Subspace Relay', x: 500, y: 500 } }));
+      const rp = run(['server.js'], { PORT: PORT + 10, CONFIG_DIR: TWO });
+      await wait(1200);
+      const ws2 = new WebSocket(`ws://localhost:${PORT + 10}`), m2 = [];
+      ws2.on('message', (m) => m2.push(JSON.parse(m)));
+      await new Promise((r) => ws2.on('open', r));
+      ws2.send(JSON.stringify({ type: 'operator', name: 'two', ship: 'Starbase 47' }));
+      await until(() => [...m2].reverse().find((x) => x.type === 'roster')?.graph?.links.some((l) => l.includes('Sol Subspace Relay') && l.includes('Alpha Subspace Relay')));
+      ws2.close();
+      await new Promise((r) => { rp.once('exit', r); rp.kill(); });
+      fs.rmSync(TWO, { recursive: true, force: true });
+      step('a second star system file: its subspace relay and Sol\'s linked to each other');
+    }
     ok = true;
   } catch (err) {
     console.error('FAIL:', err.message);

@@ -1,6 +1,7 @@
 // The data network map (d3-force), with John's topology: Utopia Planitia–Vengence–
 // Discovery, Deep Space 4–Cole, Enterprise and Farragut both with Starbase 47;
-// Starbase 12 and 74 on no link. Seen from the Discovery's ops: linked vessels
+// Starbase 12 and 74 on no ship's link, but every starbase joined through the Sol
+// Subspace Relay (so it's all one data network). Seen from the Discovery's ops: linked vessels
 // close together, no pills overlapping, the unlinked starbases further out;
 // tapping a link lists its data network. Communications has the map too, and
 // can request a link the other ship's ops sees.
@@ -68,7 +69,7 @@ async function sock(hello) {
     await page.selectOption('#station', 'Operations');
     await page.click('#register-form button');
     await page.evaluate(() => document.querySelector('[data-screen-tab="link"]')?.click());
-    await page.waitForFunction(() => document.querySelectorAll('#net-map .net-node').length === 10, null, { timeout: 15000 });
+    await page.waitForFunction(() => document.querySelectorAll('#net-map .net-node').length === 11, null, { timeout: 15000 });
     await wait(500);
     // The pills, in the map's own coordinates.
     const pills = await page.$$eval('#net-map .net-node', (gs) => gs.map((g) => { const m = /translate\(([-\d.e]+) ([-\d.e]+)\)/.exec(g.getAttribute('transform')); const r = g.querySelector('rect'); const w = +r.getAttribute('width'), h = +r.getAttribute('height'); return { name: g.dataset.ship, x: +m[1] + w / 2, y: +m[2] + h / 2, w, h }; }));
@@ -82,21 +83,33 @@ async function sock(hello) {
       assert.ok(Math.abs(p.x - q.x) >= (p.w + q.w) / 2 - 1 || Math.abs(p.y - q.y) >= (p.h + q.h) / 2 - 1, `${p.name} and ${q.name} overlap`);
     }
     assert.ok(Math.abs(at.Discovery.x) < 1 && Math.abs(at.Discovery.y) < 1, 'our ship at the centre');
-    const linkedNames = ['Vengence', 'Utopia Planitia', 'Cole', 'Deep Space 4', 'Enterprise', 'Starbase 47', 'Farragut'];
-    const meanLinked = linkedNames.reduce((n, x) => n + dist('Discovery', x), 0) / linkedNames.length;
-    for (const iso of ['Starbase 12', 'Starbase 74']) assert.ok(dist('Discovery', iso) > meanLinked, `${iso} further out (${Math.round(dist('Discovery', iso))} vs ${Math.round(meanLinked)})`);
-    step('the map: linked vessels close together, no pills overlapping, the Discovery at the centre, Starbase 12 and 74 (on no link) further out');
+    for (const b of ['Starbase 12', 'Starbase 74', 'Starbase 47', 'Deep Space 4', 'Utopia Planitia']) assert.ok(dist('Sol Subspace Relay', b) < 1.4 * (at[b].w + at['Sol Subspace Relay'].w) / 2 + 80, `${b} near the relay (${Math.round(dist('Sol Subspace Relay', b))})`);
+    step('the map: linked vessels close together (every starbase around the subspace relay), no pills overlapping, the Discovery at the centre');
+    // The relay: at its place on the chart, linked with every starbase; a starbase can't close that link;
+    // through it, the Enterprise (linked with Starbase 47) is on Starbase 12's network.
+    const g = ops.Discovery.last('roster').graph;
+    const relay = g.ships.find((x) => x.relay);
+    assert.deepEqual([relay?.name, relay?.x, relay?.y], ['Sol Subspace Relay', 530, 520]);
+    for (const b of ['Starbase 12', 'Starbase 74', 'Starbase 47', 'Deep Space 4', 'Utopia Planitia']) assert.ok(g.links.some((l) => l.includes('Sol Subspace Relay') && l.includes(b)), `the relay links ${b}`);
+    const sb47 = await sock({ type: 'operator', name: 'ops-sb47', ship: 'Starbase 47' });
+    await until(() => sb47.last('roster'));
+    sb47.send({ type: 'link-close', ship: 'Sol Subspace Relay' });
+    await until(() => sb47.msgs.some((m) => /subspace relay's link: it stays/.test(m.text || m.reason || '')));
+    assert.ok(ops.Enterprise.last('roster').network.includes('Starbase 12'), 'the Enterprise reaches Starbase 12 through the relay');
+    sb47.close();
+    step('the Sol Subspace Relay at 530, 520 links every starbase; Starbase 47 could not close its link; the Enterprise (linked with Starbase 47) is on Starbase 12\'s network through it');
     // Tap a link: its two ends and its data network.
     await page.click('#net-map .net-link[data-link="enterprise|starbase 47"] .net-hit', { force: true });
     await page.waitForSelector('#net-details-members');
-    assert.deepEqual(await page.$$eval('#net-details-members li', (ls) => ls.map((l) => l.dataset.member)), ['Enterprise', 'Farragut', 'Starbase 47']);
-    assert.match(await page.textContent('#net-details'), /3 members/);
+    const members = await page.$$eval('#net-details-members li', (ls) => ls.map((l) => l.dataset.member));
+    for (const m of ['Enterprise', 'Farragut', 'Starbase 47', 'Starbase 12', 'Sol Subspace Relay']) assert.ok(members.includes(m), `${m} on the network (${members})`);
+    assert.match(await page.textContent('#net-details'), new RegExp(`${members.length} members`));
     // Tap a vessel: its details.
     await page.click('#net-map .net-node[data-ship="Cole"]');
     await page.waitForSelector('#net-details-title:has-text("The Cole")');
     assert.match(await page.textContent('#net-details-facts'), /Galaxy class/);
-    assert.match(await page.textContent('#net-details-facts'), /Data network.*network \(2\)/);
-    step('tapping the Enterprise–Starbase 47 link listed its data network (Enterprise, Farragut, Starbase 47); tapping the Cole showed its class and network');
+    assert.match(await page.textContent('#net-details-facts'), /Data network.*network \(\d+\)/);
+    step('tapping the Enterprise–Starbase 47 link listed its data network (through the relay: every starbase and the ships linked with them); tapping the Cole showed its class and network');
     // A link whose path is down stays, dashed (signal lost), and either end still closes it; the
     // other ships' links say who can close them; our own Open Links match the map's edges.
     await page.click('#net-map .net-link[data-link="enterprise|starbase 47"] .net-hit', { force: true });
@@ -123,7 +136,7 @@ async function sock(hello) {
     await comms.selectOption('#station', 'Communications');
     await comms.click('#register-form button');
     await comms.evaluate(() => document.querySelector('[data-screen-tab="st-links"]')?.click());
-    await comms.waitForFunction(() => document.querySelectorAll('#comm-net-map .net-node').length === 10, null, { timeout: 15000 });
+    await comms.waitForFunction(() => document.querySelectorAll('#comm-net-map .net-node').length === 11, null, { timeout: 15000 });
     await comms.click('#comm-net-map .net-node[data-ship="Cole"]');
     await comms.click('[data-netmap-details] button:has-text("Request link")');
     await until(() => ops.Cole.last('roster')?.linkIncoming?.some((r) => r.fromShip === 'Farragut'));

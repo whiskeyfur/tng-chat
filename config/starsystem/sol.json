@@ -1,5 +1,5 @@
 {
-  "about": "The Sol system: the sector the ships fly in (0..size each way). Starbases and the shipyard are fixed here; bodies and waypoints are drawn on the sector map.",
+  "about": "The Sol system: the sector the ships fly in (0..size each way). Starbases, the shipyard and the subspace relay (joining every station into one data network) are fixed here; bodies and waypoints are drawn on the sector map.",
   "name": "Sol",
   "size": 1000,
   "bodies": [
@@ -68,5 +68,10 @@
       "berths": 3
     }
   ],
-  "waypoints": []
+  "waypoints": [],
+  "relay": {
+    "name": "Sol Subspace Relay",
+    "x": 530,
+    "y": 520
+  }
 }

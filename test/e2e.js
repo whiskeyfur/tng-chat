@@ -524,7 +524,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.click(`#link-taps button[data-ship="K'Vatch"]`);
     // The data network map: a pending request is a dashed line, then solid.
     await kops.waitForSelector('#net-map line[stroke-dasharray="10 8"]', { state: 'attached' });
-    assert.equal(await kops.locator('#net-map .net-node').count(), 8);
+    assert.equal(await kops.locator('#net-map .net-node').count(), 9); // (the ships, the starbases and the Sol Subspace Relay)
     // A force-directed map: our own ship at the centre, and no two labels overlap.
     const boxes = await kops.$$eval('#net-map .net-node', (gs) => gs.map((g) => { const r = g.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, name: g.getAttribute('aria-label') }; }));
     for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {

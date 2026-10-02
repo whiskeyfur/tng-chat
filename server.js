@@ -269,7 +269,7 @@ function broadcastOps(key) {
 function networkGraph() {
   return {
     // (Each with what the map's details show: where it is, remote control, crewless.)
-    ships: shipList().filter((sh) => sh.active).map((sh) => { const k = shipKey(sh.name), n = navState.get(k); return { ...sh, crew: crewOf(k).length, ...(n ? { x: Math.round(n.x), y: Math.round(n.y) } : {}), remoteBlock: !!engOf(k).remoteBlock, automated: isBase(k) || !crewOf(k).length }; }),
+    ships: [...RELAYS.map((r) => ({ name: r.name, relay: true, active: true, computer: true, ops: false, crew: 0, x: r.x, y: r.y, off: relayOff.has(shipKey(r.name)), system: r.system, remoteBlock: true, automated: true })), ...shipList().filter((sh) => sh.active).map((sh) => { const k = shipKey(sh.name), n = navState.get(k); return { ...sh, crew: crewOf(k).length, ...(n ? { x: Math.round(n.x), y: Math.round(n.y) } : {}), remoteBlock: !!engOf(k).remoteBlock, automated: isBase(k) || !crewOf(k).length }; })],
     since: Object.fromEntries([...links].map((l) => [l.split('|').map((k) => shipName(k).toLowerCase()).sort().join('|'), linkSince.get(l) || null])),
     // (Links whose path is down: they stay, carrying nothing, until it's back; either end can still close them.)
     lost: [...links].filter(linkLost).map((l) => l.split('|').map(shipName)),
@@ -556,6 +556,7 @@ function operatorMessage(op, msg) {
     }
     case 'link-close': {
       const other = shipKey(clean(msg.ship));
+      if (isRelay(other) || isRelay(op.shipKey)) return fail(`a subspace relay's link: it stays (only the admin page disables a relay)`);
       if (hardLinks.has(linkKey(op.shipKey, other))) return fail(`hard link: docking port. The ${shipName(other)} link ends only when its ODN tie is cut on the Engineering grid, or on undocking`);
       if (!links.delete(linkKey(op.shipKey, other))) return fail(`no data link with the ${clean(msg.ship)}`);
       opLog(other, `the ${shipName(op.shipKey)} closed the data link`);
@@ -974,7 +975,7 @@ const HOME_SYSTEM = 'home';
 const systemOf = (k) => navState.get(k)?.system || HOME_SYSTEM;
 const subspaceOk = (a, b) => a === b || (present(a) && present(b) && navState.has(a) && navState.has(b) && systemOf(a) === systemOf(b));
 // Can these two hold a data link right now: a hard line, or subspace with both relays up?
-const linkReach = (a, b) => hardLine(a, b) || (subspaceOk(a, b) && commsUp(a, 'subspace') && commsUp(b, 'subspace'));
+const linkReach = (a, b) => (isRelay(a) || isRelay(b) ? relayReach(a, b) : false) || hardLine(a, b) || (subspaceOk(a, b) && commsUp(a, 'subspace') && commsUp(b, 'subspace'));
 const sensorOk = (a, b) => a === b || distance(a, b) <= rangesOf(a).sensors * signatureOf(b);
 const transporterOk = (a, b) => a === b || distance(a, b) <= rangesOf(a).transporter;
 const navState = new Map();   // ship key -> { x, y, heading, warp, dest }
@@ -1007,6 +1008,7 @@ function navMessage(key) {
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
     bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
+    relays: RELAYS.filter((r) => r.system === SYSTEM_ID).map((r) => ({ name: r.name, x: r.x, y: r.y, off: relayOff.has(shipKey(r.name)) })),
     ships: seen.map((k) => ({ name: shipName(k), ...navState.get(k), class: classOf(k).name, ops: opsOf(k).length > 0, shields: shields.has(k), distance: k === key ? 0 : distance(key, k) })),
     ranges: rangesOf(key),
     maxWarp: maxWarp(key),
@@ -2009,6 +2011,28 @@ const SYSTEM_ID = SYSTEMS_CONFIG.sol ? 'sol' : Object.keys(SYSTEMS_CONFIG)[0];
 if (!SYSTEM_ID) { console.error(`config: no star chart in ${CONFIG.DIR}/starsystem: the relay can't start`); process.exit(1); }
 const STAR_SYSTEM = SYSTEMS_CONFIG[SYSTEM_ID];
 const STARBASES = STAR_SYSTEM.starbases.map((b) => ({ name: b.name, x: b.x, y: b.y, system: SYSTEM_ID, ...(b.shipyard ? { shipyard: true, berths: b.berths || 3 } : {}) }));
+// --- subspace relays -------------------------------------------------------------------------
+const RELAYS = Object.entries(SYSTEMS_CONFIG).filter(([, sys]) => sys.relay).map(([id, sys]) => ({ name: sys.relay.name, x: sys.relay.x, y: sys.relay.y, system: id }));
+const relayOff = new Set();
+const relayOf = (k) => RELAYS.find((r) => shipKey(r.name) === k);
+// A relay links its own system's stations, and the other systems' relays (while it's on).
+function relayReach(a, b) {
+  const r = isRelay(a) ? a : b, o = r === a ? b : a;
+  if (relayOff.has(r)) return false;
+  if (isRelay(o)) return !relayOff.has(o);
+  const sys = relayOf(r)?.system;
+  return isBase(o) && (sys === SYSTEM_ID ? HOME_SYSTEM : sys) === systemOf(o) && commsUp(o, 'subspace'); // (the main chart's vessels are in its home system)
+}
+// Its links, kept: made with every station of its system and every other relay; gone while it's off.
+function relayTick() {
+  let changed = false;
+  for (const r of RELAY_KEYS) {
+    const want = relayOff.has(r) ? [] : [...BASE_KEYS, ...RELAY_KEYS].filter((o) => o !== r && relayReach(r, o));
+    for (const o of linkedTo(r)) if (!want.includes(o)) { links.delete(linkKey(r, o)); changed = true; }
+    for (const o of want) if (!links.has(linkKey(r, o))) { addLink(linkKey(r, o)); changed = true; }
+  }
+  if (changed) { refreshNetworks([...RELAY_KEYS, ...BASE_KEYS]); broadcastAllOps(); schedulePresence(); }
+}
 // The shipyard: an automated station like the others (dock for supplies and
 // power), which can also drydock a ship. A drydocked ship can't move or
 // undock until it's released; warp core and pod replacement and fast repairs
@@ -2027,9 +2051,16 @@ const DOCK_RANGE = 10;
 // is aboard; an operator aboard can answer first.
 const BASE_DELAY = { link: 5000, linkCrewed: 2000, hail: 2000 };
 const BASE_KEYS = new Set();
+// Subspace relays: one a star system (its file's "relay"), there to join every station in
+// the system into one data network, and the systems to each other. Unmanned and
+// self-powered: never signed into, docked with, boarded or towed, and not a sensor
+// contact. Its links can't be closed by the stations; only the admin page disables it.
+const RELAY_KEYS = new Set();
+const isRelay = (k) => RELAY_KEYS.has(k);
 const isBase = (k) => BASE_KEYS.has(k);
-const present = (k) => cores.has(k) || BASE_KEYS.has(k);
+const present = (k) => cores.has(k) || BASE_KEYS.has(k) || RELAY_KEYS.has(k);
 for (const b of STARBASES) { const k = registerShip(b.name); BASE_KEYS.add(k); navState.set(k, { x: b.x, y: b.y, heading: 0, warp: 0, dest: null }); }
+for (const r of RELAYS) RELAY_KEYS.add(registerShip(r.name));
 
 function autoAcceptLink(id) {
   const req = linkRequests.get(id);
@@ -2212,6 +2243,8 @@ const engOf = (k) => {
 const BASE_SETTINGS_FILE = process.env.STARBASES_FILE || path.join(__dirname, 'data', 'starbases.json');
 let baseSettings = {};
 try { baseSettings = JSON.parse(fs.readFileSync(BASE_SETTINGS_FILE, 'utf8')); } catch {}
+// (A relay the admin page disabled stays disabled.)
+for (const r of RELAYS) if (baseSettings[r.name]?.relayOff) relayOff.add(shipKey(r.name));
 // Starbases created from the admin panel come back.
 for (const [name, sv] of Object.entries(baseSettings)) if (sv?.created && Number.isFinite(sv.nav?.x) && !STARBASES.some((b) => b.name === name)) {
   STARBASES.push({ name, x: sv.nav.x, y: sv.nav.y, created: true });
@@ -3024,11 +3057,11 @@ function restoreLinks(k, names) {
   for (const n of names) if (typeof n === 'string' && n) { const l = linkKey(k, shipKey(n)); if (!links.has(l)) pendingLinks.set(l, Date.now()); }
 }
 // (Links losing or getting back their path are noticed within a second.)
-setInterval(() => lostTick(), 1000);
+setInterval(() => { relayTick(); lostTick(); }, 1000);
 // A link's path down: signal lost (it stays, and either end can close it); back: it carries again.
 function lostTick(only) {
   for (const l of only ? [only] : [...links]) {
-    if (hardLinks.has(l)) continue;
+    if (hardLinks.has(l) || l.split('|').some(isRelay)) continue; // (a relay's links: relayTick keeps them)
     const [a, b] = l.split('|');
     const relayDown = !commsUp(a, 'subspace') || !commsUp(b, 'subspace');
     const lost = !hardLine(a, b) && (!subspaceOk(a, b) || relayDown) && present(a) && present(b);
@@ -5017,7 +5050,17 @@ function adminRequest(ws, msg) {
   if (!ws.local) return send(ws, { type: 'admin-status', error: 'refused: the admin page is for this machine only (localhost)' });
   if (msg.action === 'create') return adminCreate(ws, msg);
   if (msg.action === 'designs' || msg.action === 'design-save') return adminDesigns(ws, msg);
-  if (!process.send) return send(ws, { type: 'admin-status', error: 'no supervisor: the relay was started on its own (npm start runs the supervisor)', relayName: RELAY_NAME, fleet: adminFleet(), classes: adminClasses(), consoles: [...users.values()].map((u) => ({ name: u.name, ship: shipName(u.shipKey), station: u.station })), bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
+  if (msg.action === 'relay') {
+    const k = shipKey(clean(msg.name || ''));
+    if (!isRelay(k)) return send(ws, { type: 'admin-created', ok: false, text: 'no such relay' });
+    if (msg.on) relayOff.delete(k); else relayOff.add(k);
+    baseSettings[shipName(k)] = { ...baseSettings[shipName(k)], relayOff: !msg.on };
+    saveBaseSettings();
+    relayTick();
+    console.log(`admin: ${shipName(k)} ${msg.on ? 'enabled' : 'disabled'}`);
+    return send(ws, { type: 'admin-created', ok: true, text: `${shipName(k)} ${msg.on ? 'enabled: its links are back' : 'disabled: its links are down'}` });
+  }
+  if (!process.send) return send(ws, { type: 'admin-status', error: 'no supervisor: the relay was started on its own (npm start runs the supervisor)', relayName: RELAY_NAME, fleet: adminFleet(), classes: adminClasses(), consoles: [...users.values()].map((u) => ({ name: u.name, ship: shipName(u.shipKey), station: u.station })), bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })), relays: RELAYS.map((r) => ({ name: r.name, x: r.x, y: r.y, system: r.system, on: !relayOff.has(shipKey(r.name)) })) });
   const reqId = ++adminSeq;
   adminWaiting.set(reqId, ws);
   setTimeout(() => adminWaiting.delete(reqId), 10000);
@@ -5097,7 +5140,7 @@ process.on('message', (m) => {
   adminWaiting.delete(m.reqId);
   if (!ws) return;
   const consoles = [...users.values()].map((u) => ({ name: u.name, ship: shipName(u.shipKey), station: u.station }));
-  send(ws, { type: 'admin-status', ...m.status, note: m.note, consoles, relayName: RELAY_NAME, fleet: adminFleet(), classes: adminClasses(), bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
+  send(ws, { type: 'admin-status', ...m.status, note: m.note, consoles, relayName: RELAY_NAME, fleet: adminFleet(), classes: adminClasses(), bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })), relays: RELAYS.map((r) => ({ name: r.name, x: r.x, y: r.y, system: r.system, on: !relayOff.has(shipKey(r.name)) })) });
 });
 process.on('message', (m) => {
   if (m?.type !== 'reload') return;

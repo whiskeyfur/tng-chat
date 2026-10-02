@@ -73,6 +73,13 @@
         g.save(); g.strokeStyle = css('gold'); g.setLineDash([6, 6]); g.beginPath(); g.moveTo(ox, oy); g.lineTo(dx, dy); g.stroke(); g.restore();
         g.strokeStyle = css('gold'); g.beginPath(); g.moveTo(dx - 6, dy); g.lineTo(dx + 6, dy); g.moveTo(dx, dy - 6); g.lineTo(dx, dy + 6); g.stroke();
       }
+      // Subspace relays: a small violet diamond, labelled.
+      for (const r of nav.relays || []) {
+        const [x, y] = toScreen(r.x, r.y);
+        g.save(); g.fillStyle = css('violet'); g.globalAlpha = r.off ? 0.35 : 0.9;
+        g.beginPath(); g.moveTo(x, y - 6); g.lineTo(x + 6, y); g.lineTo(x, y + 6); g.lineTo(x - 6, y); g.closePath(); g.fill();
+        g.font = '10px sans-serif'; g.fillText('SUBSPACE RELAY', x + 9, y + 4); g.restore();
+      }
       // Starbases: dock to restock torpedoes and take dock power.
       for (const b of nav.bases || []) {
         const [x, y] = toScreen(b.x, b.y);

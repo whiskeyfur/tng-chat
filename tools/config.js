@@ -27,7 +27,7 @@ const SHIP_FIELDS = {
   transporter: [isBool, 'true or false', true],
   ports: [(v) => v === null || isNum(v), 'a number of docking ports, or null for as many as needed', true],
   bay: [isNum, 'a number (shuttle bay slots)', true],
-  kind: [(v) => v === 'ship' || v === 'starbase', '"ship" or "starbase"', false],
+  kind: [(v) => v === 'ship' || v === 'starbase' || v === 'relay', '"ship", "starbase" or "relay"', false],
   refit: [isBool, 'true or false', false],
   spore: [isBool, 'true or false', false],
   torpedoes: [isNum, 'a number (torpedoes carried)', false],
@@ -43,6 +43,7 @@ const SYSTEM_FIELDS = {
   starbases: [(v) => Array.isArray(v) && v.length > 0 && v.every((b) => isStr(b?.name) && isPoint(b)), 'a list of { name, x, y } (at least one)', true],
   bodies: [(v) => Array.isArray(v) && v.every((b) => isStr(b?.name) && isPoint(b)), 'a list of { name, x, y }', false],
   waypoints: [(v) => Array.isArray(v) && v.every((b) => isStr(b?.name) && isPoint(b)), 'a list of { name, x, y }', false],
+  relay: [(v) => isStr(v?.name) && isPoint(v), 'its subspace relay: { name, x, y }', false],
 };
 
 // A design checked (the same check the loader makes): null, or { field, message }.
@@ -72,7 +73,7 @@ function loadFolder(sub, fields, log) {
 function loadShips(log = console.warn) {
   const all = loadFolder('ships', SHIP_FIELDS, log);
   const classes = {}, starbase = all.starbase || null;
-  for (const [id, c] of Object.entries(all)) if (id !== 'starbase' && c.kind !== 'starbase') classes[id] = { kind: 'ship', refit: true, spore: false, torpedoes: 10, stations: null, ties: {}, places: [], seats: {}, ...c };
+  for (const [id, c] of Object.entries(all)) if (id !== 'starbase' && c.kind !== 'starbase' && c.kind !== 'relay') classes[id] = { kind: 'ship', refit: true, spore: false, torpedoes: 10, stations: null, ties: {}, places: [], seats: {}, ...c };
   return { classes, starbase: starbase && { refit: false, spore: false, torpedoes: 10, stations: null, ties: {}, places: [], seats: {}, ...starbase } };
 }
 
