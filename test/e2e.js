@@ -1270,6 +1270,20 @@ const audioBytes = (page) => page.evaluate(async () => {
     await geordi.click(`#ls-table .ls-tap[data-loc="${bobAt}"][data-sys="atmosphere"]`);
     await bob.waitForFunction(() => !document.querySelector('.bcast--alert')?.textContent.includes('NO ATMOSPHERE'));
     step(`the Life support panel: gravity switched off in Crew quarters took its share off the draw; atmosphere off at ${bobAt}, where bob is, warned "NO ATMOSPHERE: ${bobAt}"`);
+    // The optical data network: Engineering cuts Science's console off it; Science sees only
+    // "Disconnected", an empty menu (but Comms, log, library, Station), and its commands are refused.
+    await screen(geordi, 'st-grid');
+    assert.equal(await geordi.isDisabled('#ties-console-Engineering input[aria-label$="optical data network"]'), true, "Engineering's link can't be cut");
+    await geordi.click('#ties-console-Science input[aria-label$="optical data network"]');
+    await spock.waitForFunction(() => document.body.hasAttribute('data-odn-off'));
+    await spock.waitForSelector('[data-screen="odn-off"]:not([hidden]):has-text("Disconnected from the optical data network")');
+    assert.equal(await spock.locator('#sections > *:visible').count(), 0, 'an empty menu');
+    assert.equal(await spock.isVisible('#reassign-tab'), true, 'Station still there');
+    await spock.evaluate(() => window.__send({ type: 'scan', ship: 'Defiant' }));
+    await spock.waitForFunction(() => /Disconnected from the optical data network/.test(document.getElementById('log').textContent));
+    await geordi.click('#ties-console-Science input[aria-label$="optical data network"]');
+    await spock.waitForFunction(() => !document.body.hasAttribute('data-odn-off'));
+    step("the optical data network: Science's console, cut off by Engineering, showed only \"Disconnected\" with an empty menu and its scan was refused; relinked, it came back");
     // The Warp core panel: the reaction's state, readouts and controls.
     await screen(geordi, 'st-core');
     await geordi.waitForSelector('#wc-state:has-text("Running")');

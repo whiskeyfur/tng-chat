@@ -239,6 +239,9 @@
     /* Comms and the library offline: no console power or local RF. */
     #library-tab[data-offline] { filter: brightness(0.3) saturate(0.2); cursor: not-allowed; }
     #comms[data-offline] .lcars-modal__frame > :not(.lcars-modal__bar):not(#comms-offline) { opacity: 0.25; pointer-events: none; }
+    /* Off the ODN: an empty menu (but Comms, Console log, Library, Station). */
+    body[data-odn-off] #sections > *, body[data-odn-off] .ops-tab { display: none !important; }
+    .odn-off-text { font-size: 28px; color: var(--lcars-red); text-transform: uppercase; }
     button.lcars-back { border: 0; font: inherit; color: #000; cursor: pointer; display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 14px 6px 0; letter-spacing: 0.1em; }
     /* Dim: only the label, so the corner stays the colour of the bar it joins. */
     button.lcars-back:disabled { cursor: default; }
@@ -363,6 +366,8 @@
       <div id="home" hidden style="display: contents">
         <div id="station-view" style="display: contents"></div>
         <div id="vessel-bar" class="vessel-bar" role="group" aria-label="vessel this console runs" hidden></div>
+        <!-- Off the optical data network: nothing but this (and Comms, the log, the library, Station). -->
+        <div class="screen" data-screen="odn-off" hidden><section class="lcars-panel lcars-panel--auto" style="--accent: var(--lcars-red)"><h2 class="lcars-panel__title"><span>Optical data network</span></h2><div class="lcars-panel__body"><p class="st-state odn-off-text">Disconnected from the optical data network</p></div></section></div>
         <div id="console-dark" hidden><p>Console offline</p><small>No power on this console's bus: ask Engineering. Comms still work.</small></div>
         <div id="ops-view" style="display: contents" hidden>
         <div class="screen" data-screen="status" hidden>

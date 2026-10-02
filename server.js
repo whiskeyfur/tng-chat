@@ -1362,6 +1362,12 @@ const ceilUp = (v) => (v < 0 ? -Math.ceil(-v - 1e-9) : Math.ceil(v - 1e-9));
 // 14 s) and crashing if their power fails (boot them again). The EPS flow
 // regulators (the taps) need at least one online; text messages need one at
 // each end; the warp core's dilithium auto-trim needs all three.
+// The optical data network: each console's link to the ship's computers. A
+// console off the ODN can't run its station (comms, the console log, the
+// library and the Station screen still work); Engineering's link can't be
+// cut. The links need no power of their own. odnLinked() is the one check
+// (automation and remote control will use it too).
+const odnLinked = (k, station) => station === 'Engineering' || !eng.has(k) || engOf(k).odn?.[station] !== false;
 const COMPUTERS = ['computer1', 'computer2', 'computer3'];
 // Fusion reactors: the two impulse drives and two auxiliary fusion reactors.
 // Each burns deuterium from its own tank (on the deuterium bus). Its fusion
@@ -1647,6 +1653,8 @@ function freshEng(saved, { cold = false } = {}) {
     breach: 0, selfDestruct: null, towing: null, dirty: false,
     // The warp core's reaction (older saves: running at 70%, 15:1, aligned, conduits open, auto-trim on).
     wc: { rate: Number.isFinite(s.wc?.rate) ? s.wc.rate : 70, actual: s.core === 'online' || (s.core === undefined && !cold) ? (Number.isFinite(s.wc?.actual) ? s.wc.actual : 70) : 0, mix: Number.isFinite(s.wc?.mix) ? s.wc.mix : 15, align: Number.isFinite(s.wc?.align) ? s.wc.align : 100, crystal: Number.isFinite(s.wc?.crystal) ? s.wc.crystal : 100, temp: Number.isFinite(s.wc?.temp) ? s.wc.temp : 0, plasma: s.wc?.plasma ?? !cold, autoTrim: s.wc?.autoTrim ?? !cold, breachT: null },
+    // Each console's ODN link (all linked to start).
+    odn: Object.fromEntries([...STATIONS, OPS_STATION].map((st) => [st, st === 'Engineering' || s.odn?.[st] !== false])),
     // Life support, place by place (all on to start).
     ls: Object.fromEntries(LOCATIONS.map((l) => [l, Object.fromEntries(LS_SYSTEMS.map((x) => [x, s.ls?.[l]?.[x] !== false]))])),
     // The transporter's level-3 diagnostic (older saves: passed).
@@ -1674,7 +1682,7 @@ const savedEng = (k) => {
     core: e.core === 'starting' ? 'offline' : e.core,
     drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state === 'running' ? 'running' : 'off', epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear }]; })),
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state === 'running' ? 'running' : 'off', epsTap: e.aux[a].epsTap }])),
-    tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
+    tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     dockedPort: e.dockedPort, conn: e.conn,
@@ -2053,6 +2061,7 @@ function gridView(k) {
     coreUsed: Math.round(f.coreUsed), impulseUsed: Math.round(f.impulseUsed), coreSubsOk: f.coreSubsOk, subOk: f.subOk,
     start: e.start, startSecs: CORE.sustainSecs, coreOutput: Math.round(coreOutput(e)), coreMax: CORE.max,
     warpCore: { ...e.wc, actual: Math.round(e.wc.actual), align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, eff: Math.round(coreEff(e.wc) * 100), output: Math.round(coreOutput(e)), cores: coresOnline(k), need: { field: CONTAIN.conduit, light: FUELBUS.light, mix: CORE.ignitionMix, rate: CORE.ignitionRate, hot: CORE.hot, flameout: CORE.flameout, bestMix: CORE.bestMix } },
+    odn: e.odn,
     computers: e.computers.map((cc) => ({ state: cc.state, stage: cc.state === 'booting' ? COMPUTER.stages[Math.min(COMPUTER.stages.length - 1, Math.floor((cc.t * COMPUTER.stages.length) / COMPUTER.bootSecs))] : null, t: cc.t })), computerBootSecs: COMPUTER.bootSecs,
     crossflow: Object.fromEntries(Object.entries(f.crossflow).map(([x, v]) => [x, Math.round(v)]).filter(([, v]) => v)), taps: e.taps, ties: e.ties, tripped: Object.keys(e.tripped || {}), containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
     // Failing: seconds left before the field drops below 20% (the breach).
@@ -2155,6 +2164,12 @@ function gridCommand(ws, msg) {
     if (typeof t.tied === 'boolean') { cfg.tied = t.tied; said.push(`${label} ${t.tied ? 'tied to' : 'untied from'} the ${t.bus === 'am' ? 'antimatter' : 'deuterium'} bus`); }
     if (typeof t.fill === 'boolean') { cfg.fill = t.fill; if (t.fill) cfg.drain = false; said.push(`${label}: fill ${t.fill ? 'on' : 'off'}`); }
     if (typeof t.drain === 'boolean') { cfg.drain = t.drain; if (t.drain) cfg.fill = false; said.push(`${label}: drain ${t.drain ? 'on' : 'off'}`); }
+  }
+  // A console's ODN link: { odn: { station, on } } (Engineering's stays on).
+  if (msg.odn && (STATIONS.includes(msg.odn.station) || msg.odn.station === OPS_STATION)) {
+    if (msg.odn.station === 'Engineering') return note("Engineering's ODN link can't be cut");
+    e.odn[msg.odn.station] = !!msg.odn.on;
+    said.push(`${msg.odn.station} console ${msg.odn.on ? 'linked to' : 'cut off from'} the optical data network`);
   }
   // Life support in a place (or 'all'): { ls: { loc, sys, on } }.
   if (msg.ls && LS_SYSTEMS.includes(msg.ls.sys) && (msg.ls.loc === 'all' || LOCATIONS.includes(msg.ls.loc))) {
@@ -2900,6 +2915,12 @@ setInterval(() => {
 // Station commands, from a console (or a console remote-controlling another vessel).
 function stationCommand(ws, msg) {
   const t = msg.type;
+  // Off the ODN, the station's controls do nothing (answering an order needs no console).
+  const odnOff = !odnLinked(ws.shipKey, ws.operator ? OPS_STATION : ws.station) && !['order-ack', 'order-decline'].includes(t);
+  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'scan', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'lock', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
+    send(ws, { type: 'notice', text: 'Disconnected from the optical data network' });
+    return true;
+  }
   const gate = (fn) => { if (consoleDark(ws)) darkNote(ws); else fn(ws, msg); return true; };
   if (t === 'shields') return shieldsCommand(ws, msg), true;
   if (t === 'beam') return beamCommand(ws, msg), true;

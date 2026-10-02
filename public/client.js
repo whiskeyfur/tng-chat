@@ -855,6 +855,14 @@ function renderCombat() {
   const emergency = dark && me.station === 'Engineering';
   bc.setAlert('emergency', emergency ? `Console on emergency power (no power on ${bus}): Power grid controls only` : null, { level: 'yellow' });
   consoleDark = dark && !emergency;
+  // Off the optical data network: no station controls; Comms, the log, the library and Station still work.
+  const odnOff = me && grid.odn && grid.odn[me.station === 'Operations' ? 'Operations' : me.station] === false && me.station !== 'Engineering';
+  if (odnOff !== document.body.hasAttribute('data-odn-off')) {
+    document.body.toggleAttribute('data-odn-off', odnOff);
+    const shown = [...document.querySelectorAll('[data-screen]')].find((x) => !x.hidden);
+    if (odnOff && shown?.closest('#station-view, #ops-view')) showScreen('odn-off');
+    if (!odnOff && shown?.dataset.screen === 'odn-off') showScreen(stationView ? stationView.sections[0].id : 'status');
+  }
   // Comms and the library: this console powered, or the ship's local RF up.
   const commsOn = !dark || grid.subOk?.rf !== false;
   comms.setOffline(commsOn ? '' : 'Comms offline: no console power or local RF. Proximity only.');
@@ -957,9 +965,9 @@ function renderCombat() {
     // The grid as a table: a row per source (and containment, and power fed
     // to a docked ship), a column per bus and the EPS, each cell a tie
     // checkbox with the power flowing through it; the footer is used/available.
-    const NODE_NAMES = { A: 'Bus A', B: 'Bus B', C: 'Bus C', EPS: 'EPS', Deu: 'Deu. bus', AM: 'AM bus' };
-    // The power buses, then the fuel buses (deuterium, antimatter).
-    const COLS = ['A', 'B', 'C', 'EPS', 'Deu', 'AM'];
+    const NODE_NAMES = { ODN: 'ODN', A: 'Bus A', B: 'Bus B', C: 'Bus C', EPS: 'EPS', Deu: 'Deu. bus', AM: 'AM bus' };
+    // The optical data network (each console's link), the power buses, then the fuel buses.
+    const COLS = ['ODN', 'A', 'B', 'C', 'EPS', 'Deu', 'AM'];
     const FUEL_COL = { deu: 'Deu', am: 'AM' };
     // A row: label (with a note and maybe controls), then a cell per node:
     // the tie checkbox (only where this row may tie) and the power through it,
@@ -1168,7 +1176,14 @@ function renderCombat() {
       // A console's rows: the console, its systems, and its subsystems (Engineering: the reactors too).
       const consoleRows = (st, { reactors = true } = {}) => {
         const n = crewAt(st), rows = [];
-        rows.push(ties(`console:${st}`, `${st} console`, `console:${st}`, { note: n ? (grid.consoleOk[st] ? `${n} aboard` : `${n} aboard · DARK`) : 'unmanned' }));
+        const linked = grid.odn?.[st] !== false;
+        const con = ties(`console:${st}`, `${st} console`, `console:${st}`, { note: `${n ? (grid.consoleOk[st] ? `${n} aboard` : `${n} aboard · DARK`) : 'unmanned'}${linked ? '' : ' · OFF THE ODN'}` });
+        // Its ODN link (Engineering's can't be cut).
+        const box = el('input', { type: 'checkbox', checked: linked, disabled: st === 'Engineering', ariaLabel: `${st} console: optical data network` });
+        box.onchange = () => send({ type: 'grid', odn: { station: st, on: box.checked } });
+        const odnCell = con.children[1 + COLS.indexOf('ODN')];
+        odnCell.className = ''; odnCell.replaceChildren(el('label', { className: 'grid-tie' }, box));
+        rows.push(con);
         const sysRow = (sys, level) => {
           // A parent (Life support): no ties of its own, its systems under it.
           if (grid.systemParents?.[sys]) {
@@ -1281,6 +1296,7 @@ function renderCombat() {
             // A fuel bus: what its tanks hold, of what they could.
             const fb = grid.fuel?.[Object.keys(FUEL_COL).find((b) => FUEL_COL[b] === n)];
             if (fb) return el('td', { id: `grid-total-${n}` }, `${fb.tanks.reduce((a, x) => a + x.level, 0)} / ${fb.tanks.reduce((a, x) => a + x.cap, 0)}`);
+            if (n === 'ODN') { const o = Object.values(grid.odn || {}); return el('td', { id: 'grid-total-ODN' }, `${o.filter(Boolean).length} / ${o.length} linked`); }
             if (!grid.totals[n]) return el('td');
             const t = grid.totals[n];
             const td = el('td', { id: `grid-total-${n}` }, `${t.used} / ${t.available} / ${t.max}`, ...(t.condition < 100 ? [el('small', { className: 'grid-note', textContent: `damaged: ${t.condition}% condition` })] : []));
@@ -1801,6 +1817,7 @@ connect();
 
 // Exposed for the headless test.
 window.__comms = comms;
+window.__send = (m) => send(m); // (for tests: a command as the console would send it)
 window.__broadcast = bc;
 window.__nav = { get last() { return lastNav; } };
 window.__operator = new Proxy({}, { get: (_, k) => ops?.[k] });
