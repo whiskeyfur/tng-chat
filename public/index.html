@@ -177,6 +177,11 @@
     .dist-map { display: block; width: 100%; min-width: 900px; height: auto; }
     .dist-map text { font-family: var(--font); letter-spacing: 0.05em; }
     .dist-node { cursor: pointer; }
+    /* (The way power and fuel move: dashes running along a lit line; reversed, the other way.) */
+    .dist-flow { stroke-dasharray: 10 6; animation: dist-flow 1s linear infinite; }
+    .dist-flow--rev { animation-direction: reverse; }
+    @keyframes dist-flow { to { stroke-dashoffset: -16; } }
+    @media (prefers-reduced-motion: reduce) { .dist-flow { animation: none; } }
     .dist-node:hover rect { filter: brightness(1.2); }
     /* A capsule: a closed, critical monitor (inward-facing caps on both sides). */
     .capsule { display: flex; align-items: stretch; gap: 6px; margin-bottom: 10px; }

@@ -84,9 +84,20 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     const store = await page.evaluate(() => window.__nav.last.own.grid.stores.A);
     if (store.level > 0 && !store.supplying) assert.match(battery, /standby/, battery);
     const standbySeen = `${was ? await helmWord() : ''} / ${battery}`;
+    // Which way things flow: a battery supplying runs out to the bus; charging, in from it.
+    const batteryFlow = (store) => page.evaluate((st) => {
+      const g = structuredClone(window.__nav.last.own.grid);
+      g.stores.A = { ...g.stores.A, ...st };
+      renderDistribution(g);
+      const line = [...document.querySelectorAll('[data-distribution] path.dist-flow')].find((p) => /Battery A/.test(p.dataset.flow));
+      return line ? [line.dataset.flow, line.getAttribute(line.classList.contains('dist-flow--rev') ? 'marker-start' : 'marker-end')] : null;
+    }, store);
+    assert.deepEqual(await batteryFlow({ level: 60, supplying: 40, charging: 0, breaker: true }), ['Battery A → Bus A', 'url(#dist-arrow)'], 'discharging: battery → bus');
+    assert.deepEqual(await batteryFlow({ level: 60, supplying: 0, charging: 12, breaker: true }), ['Bus A → Battery A', 'url(#dist-arrow)'], 'charging: bus → battery');
+    assert.equal(await batteryFlow({ level: 60, supplying: 0, charging: 0, breaker: true }), null, 'idle: no flow drawn');
     await page.click('[data-distribution] .dist-node[data-key="console:Helm"]');
     await page.waitForFunction((w) => window.__nav.last.own.grid.ties['console:Helm'].includes('A') === w, was);
-    step(`Distribution: the EPS schematic (Main Engineering on it); Bus A, where a tap on the Helm console untied it (standby) and another tied it back; a charged battery not feeding reads standby (${standbySeen})`);
+    step(`Distribution: the EPS schematic (Main Engineering on it); Bus A, where a tap on the Helm console untied it (standby) and another tied it back; a charged battery not feeding reads standby (${standbySeen}); a battery's line runs battery → bus discharging, bus → battery charging`);
     // The sidebar: two columns (ship-wide on the left, this station's screens on the right), each
     // scrolling by itself when it's taller than the screen.
     for (const col of ['.lcars-sidebar__col--right', '.lcars-sidebar__col--left']) {

@@ -774,9 +774,11 @@ function renderDistribution(grid) {
   const left = [], right = [];
   let mid;
   if (!fuel) {
-    for (const [key, label] of Object.entries(SRC)) if (grid.tieNodes[key]?.includes(X)) { const v = Math.max(0, grid.cells[key]?.[X] || 0); { const st = state(key, v); left.push({ key, label, value: `${Math.round(v)} MW`, st, ...(st === 'dead' || st === 'open' ? { word: 'standby' } : {}) }); } }
+    for (const [key, label] of Object.entries(SRC)) if (grid.tieNodes[key]?.includes(X)) { const v = Math.max(0, grid.cells[key]?.[X] || 0); { const st = state(key, v); left.push({ key, label, value: `${Math.round(v)} MW`, st, amount: v, ...(st === 'dead' || st === 'open' ? { word: 'standby' } : {}) }); } }
     const store = grid.stores?.[X];
-    if (store) left.push({ label: X === 'EPS' ? 'EPS pressure' : `Battery ${X}`, value: `${store.level}%${store.supplying ? ` · ${store.supplying} out` : store.charging ? ` · charging ${store.charging}` : ''}`, st: store.supplying > 0 ? 'live' : store.breaker === false ? 'open' : 'dead', ...(store.supplying > 0 ? {} : { word: store.level > 0 ? 'standby' : 'dead' }) });
+    if (store) left.push({ label: X === 'EPS' ? 'EPS pressure' : `Battery ${X}`, value: `${store.level}%${store.supplying ? ` · ${store.supplying} out` : store.charging ? ` · charging ${store.charging}` : ''}`, st: store.supplying > 0 ? 'live' : store.breaker === false ? 'open' : 'dead', ...(store.supplying > 0 ? {} : { word: store.level > 0 ? 'standby' : 'dead' }),
+      // (Out to the bus while it supplies; in from it while it charges.)
+      flow: store.supplying > 0 ? 1 : store.charging > 0 ? -1 : 0, amount: store.supplying || store.charging || 0 });
     const t = grid.totals?.[X] || {};
     mid = { label: busName, value: `${Math.round(t.used || 0)} of ${Math.round(t.available || 0)} MW`, st: (t.available || 0) > 0 ? 'live' : 'dead',
       notes: X === 'EPS' ? [] : [`crosslink: TIE ${grid.ties.crosslink.includes(X) ? 'CLOSED' : 'OPEN'}`, `EPS tap: ${grid.taps?.[X] ? `up to ${grid.taps[X]}` : 'closed'}`] };
@@ -790,8 +792,8 @@ function renderDistribution(grid) {
       const pk = `place:${p.name}`, mine = loads.filter((k) => placeOf(k) === p);
       if (!grid.tieNodes[pk] || (!mine.length && !grid.ties[pk]?.includes(X))) continue;
       const draws = mine.reduce((n, k) => n + Math.max(0, -(grid.cells[k]?.[X] || 0)), 0);
-      right.push({ key: pk, label: `Deck ${p.deck} · ${p.name}`, value: `${Math.round(draws)} MW`, st: state(pk, draws), kind: 'place' });
-      for (const k of mine) { const v = Math.max(0, -(grid.cells[k]?.[X] || 0)); right.push({ key: k, label: cap(nameOf(k)), value: k === 'system:lifeSupport' ? 'conduit' : `${Math.round(v)} MW`, st: state(k, k === 'system:lifeSupport' ? draws : v), kind: k.startsWith('sub:') || parentOf[k.slice(7)] ? 'sub' : 'load' }); }
+      right.push({ key: pk, label: `Deck ${p.deck} · ${p.name}`, value: `${Math.round(draws)} MW`, st: state(pk, draws), kind: 'place', amount: draws });
+      for (const k of mine) { const v = Math.max(0, -(grid.cells[k]?.[X] || 0)); right.push({ key: k, label: cap(nameOf(k)), value: k === 'system:lifeSupport' ? 'conduit' : `${Math.round(v)} MW`, st: state(k, k === 'system:lifeSupport' ? draws : v), amount: v, kind: k.startsWith('sub:') || parentOf[k.slice(7)] ? 'sub' : 'load' }); }
     }
   } else {
     const fb = grid.fuel?.[X === 'Deu' ? 'deu' : 'am'];
@@ -799,7 +801,9 @@ function renderDistribution(grid) {
     const main = tanks.find((t) => t.name === 'main');
     if (main) left.push({ label: main.label || 'Main storage', value: `${main.level} of ${main.cap}`, st: main.tied ? (fb.flow ? 'live' : 'dead') : 'open', ...(main.tied && fb.flow ? {} : { word: main.level > 0 ? 'standby' : 'dead' }), tank: 'main' });
     mid = { label: busName, value: fb?.down ? fb.why : fb?.flow ? `moving ${fb.flow}/s` : 'idle', st: fb?.down ? 'dead' : fb?.flow ? 'live' : 'dead', notes: [] };
-    for (const t of tanks.filter((x) => x.name !== 'main')) right.push({ label: `${cap(t.name)} tank`, value: `${t.level} of ${t.cap}`, st: t.tied ? (fb.flow ? 'live' : 'dead') : 'open', tank: t.name, kind: 'load' });
+    for (const t of tanks.filter((x) => x.name !== 'main')) right.push({ label: `${cap(t.name)} tank`, value: `${t.level} of ${t.cap}`, st: t.tied ? (fb.flow ? 'live' : 'dead') : 'open', tank: t.name, kind: 'load',
+      // (Filling: from the bus into the tank; draining: back out to the bus.)
+      flow: t.tied && fb.flow ? (t.drain && !t.fill ? -1 : 1) : 0, amount: fb.flow || 0 });
   }
   // The layout: three columns; pills 200 × 40.
   const W = 1040, PH = 40, GAP = 10, cx = { left: 20, mid: 330, right: 640 };
@@ -816,17 +820,27 @@ function renderDistribution(grid) {
     svg.append(g);
     return { x, y, w };
   };
-  const line = (x1, y1, x2, y2, lit) => svg.append(svgEl('path', { d: `M${x1},${y1} H${(x1 + x2) / 2} V${y2} H${x2}`, fill: 'none', stroke: lit ? 'var(--lcars-sky)' : '#444', 'stroke-width': lit ? 3 : 1.5 }));
+  // A line: lit while something moves along it, dashes running the way it goes (faster and
+  // wider for more) and an arrowhead where it arrives; reversed for a battery charging or a
+  // tank draining. Nothing moving: static and dim. (data-flow: "from → to".)
+  const defs = svgEl('defs', {}), arrow = svgEl('marker', { id: 'dist-arrow', viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 5, markerHeight: 5, orient: 'auto-start-reverse' });
+  arrow.append(svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'var(--lcars-sky)' }));
+  defs.append(arrow);
+  svg.append(defs);
+  const line = (x1, y1, x2, y2, dir, amount = 0, from = '', to = '', d = null) => svg.append(svgEl('path', {
+    d: d || `M${x1},${y1} H${(x1 + x2) / 2} V${y2} H${x2}`, fill: 'none', stroke: dir ? 'var(--lcars-sky)' : '#444', 'stroke-width': dir ? Math.min(6, 2.5 + amount / 120).toFixed(1) : 1.5,
+    ...(dir ? { class: `dist-flow${dir < 0 ? ' dist-flow--rev' : ''}`, [dir < 0 ? 'marker-start' : 'marker-end']: 'url(#dist-arrow)', style: `animation-duration: ${Math.max(0.35, 1.6 - amount / 250).toFixed(2)}s`, 'data-flow': dir < 0 ? `${to} → ${from}` : `${from} → ${to}` } : { 'data-flow': '' }) }));
+  const dirOf = (n) => n.flow ?? (n.st === 'live' ? 1 : 0);
   const midY = H / 2 - PH / 2;
   const L = left.map((n, i) => ({ n, ...pill(cx.left, 20 + rowsH(i), n) }));
   const M = pill(cx.mid, midY, mid);
   mid.notes.forEach((t, i) => svg.append(svgEl('text', { x: cx.mid + 8, y: midY + PH + 18 + i * 16, 'font-size': 12, fill: 'var(--lcars-gold)' }, t)));
   let placeAt = null;
   const R = right.map((n, i) => ({ n, ...pill(cx.right + (n.kind === 'sub' ? 60 : n.kind === 'load' ? 30 : 0), 20 + rowsH(i), n, n.kind === 'place' ? 300 : 260) }));
-  for (const s of L) line(s.x + s.w, s.y + PH / 2, M.x, midY + PH / 2, s.n.st === 'live');
+  for (const s of L) line(s.x + s.w, s.y + PH / 2, M.x, midY + PH / 2, dirOf(s.n), s.n.amount, s.n.label, mid.label);
   for (const r of R) {
-    if (r.n.kind === 'place' || fuel) { line(M.x + M.w, midY + PH / 2, r.x, r.y + PH / 2, r.n.st === 'live'); placeAt = r; }
-    else if (placeAt) svg.append(svgEl('path', { d: `M${placeAt.x + 12},${placeAt.y + PH} V${r.y + PH / 2} H${r.x}`, fill: 'none', stroke: r.n.st === 'live' ? 'var(--lcars-sky)' : '#444', 'stroke-width': r.n.st === 'live' ? 3 : 1.5 }));
+    if (r.n.kind === 'place' || fuel) { line(M.x + M.w, midY + PH / 2, r.x, r.y + PH / 2, dirOf(r.n), r.n.amount, mid.label, r.n.label); placeAt = r; }
+    else if (placeAt) line(0, 0, 0, 0, dirOf(r.n), r.n.amount, placeAt.n.label, r.n.label, `M${placeAt.x + 12},${placeAt.y + PH} V${r.y + PH / 2} H${r.x}`);
   }
   // The buses, as a right-capped cluster (situational: this panel's own choice).
   const tap = (b) => { const t = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: { Deu: 'Deu.', AM: 'AM' }[b] || (b === 'EPS' ? 'EPS' : `Bus ${b}`) }); t.dataset.bus = b; t.setAttribute('aria-pressed', String(b === X)); t.onclick = () => { distBus = b; box.dataset.sig = ''; renderDistribution(lastNav?.own?.grid); }; return t; };
