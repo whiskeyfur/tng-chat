@@ -21,7 +21,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const step = (s) => console.log(`ok - ${s}`);
 const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await wait(100); } throw new Error(`timed out: ${fn.toString().slice(0, 120)}`); };
 const procs = new Set();
-const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env: { ...process.env, PORT, STARBASES_FILE: path.join(DATA, 'starbases.json') }, stdio: 'ignore' }); procs.add(p); p.on('exit', () => procs.delete(p)); return p; };
+const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env: { ...process.env, PORT, STARBASES_FILE: path.join(DATA, 'starbases.json'), RELAY_DATA: DATA }, stdio: 'ignore' }); procs.add(p); p.on('exit', () => procs.delete(p)); return p; };
 async function sock(hello) {
   const w = new WebSocket(`ws://localhost:${PORT}`), msgs = [];
   w.on('message', (m) => msgs.push(JSON.parse(m)));
@@ -137,7 +137,7 @@ async function sock(hello) {
     await comms.click('#register-go');
     await comms.evaluate(() => document.querySelector('[data-screen-tab="st-links"]')?.click());
     await comms.waitForFunction(() => document.querySelectorAll('#comm-net-map .net-node').length === 11, null, { timeout: 15000 });
-    await comms.click('#comm-net-map .net-node[data-ship="Cole"]');
+    await comms.locator('#comm-net-map .net-node[data-ship="Cole"]').dispatchEvent('click'); // (a tap; the layout may still be settling at the pane's edge)
     await comms.click('[data-netmap-details] button:has-text("Request link")');
     await until(() => ops.Cole.last('roster')?.linkIncoming?.some((r) => r.fromShip === 'Farragut'));
     step("the Farragut's Communications has the map: tapping the Cole and Request link sent a request the Cole's ops sees");

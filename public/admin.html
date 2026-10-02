@@ -27,6 +27,15 @@
     .place-bar .place-label { display: flex; align-items: center; padding: 0 12px; min-height: 32px; background: var(--lcars-orange); color: #000; text-transform: uppercase; font-size: 13px; border-radius: 16px 0 0 16px; }
     .place-bar .place-cap--r { width: 22px; background: var(--lcars-orange); border-radius: 0 16px 16px 0; }
     .place-bar .tr-tap { border-radius: 0; }
+    .user-table { width: 100%; border-collapse: collapse; text-transform: uppercase; font-size: 13px; }
+    .user-table th, .user-table td { text-align: left; padding: 4px 6px; border-bottom: 1px dotted #444; vertical-align: middle; }
+    .user-table th { color: var(--lcars-gold); font-weight: normal; }
+    .user-table td.user-name { text-transform: none; color: var(--lcars-gold); font-size: 15px; }
+    .user-table tr[data-status="pending"] td.user-name::after { content: ' · awaiting approval'; color: var(--lcars-sky); font-size: 12px; }
+    .user-table tr[data-status="disabled"] td { opacity: 0.6; }
+    .user-temp { padding: 8px 14px; border-radius: 16px; background: var(--lcars-gold); color: #000; text-transform: none; }
+    .settings-form .ops-input { max-width: 260px; }
+    .settings-url { color: var(--lcars-sky); text-transform: none; }
   </style>
 </head>
 <body>
@@ -51,13 +60,15 @@
         <button type="button" class="lcars-nav-button" data-screen-tab="chart" style="--accent: var(--lcars-sky)"><span>Star chart</span></button>
         <button type="button" class="lcars-nav-button" data-screen-tab="supervisor" style="--accent: var(--lcars-lilac)"><span>Relay &amp; supervisor</span></button>
         <button type="button" class="lcars-nav-button" data-screen-tab="designs" style="--accent: var(--lcars-orange)"><span>Ship designs</span></button>
+        <button type="button" class="lcars-nav-button" data-screen-tab="users" style="--accent: var(--lcars-peach)"><span>Users</span></button>
+        <button type="button" class="lcars-nav-button" data-screen-tab="settings" style="--accent: var(--lcars-tan)"><span>Settings</span></button>
         <div class="lcars-sidebar__fill"></div>
       </div>
     </nav>
     <aside class="lcars-pane" id="left-pane"></aside>
 
     <main class="lcars-content" tabindex="-1">
-      <p class="admin-banner" id="admin-banner">Admin: localhost only. Add access control before going live.</p>
+      <p class="admin-banner" id="admin-banner">Admin: localhost only. No accounts yet: register the first (admin) account to require logins.</p>
       <div class="screen" data-screen="fleet">
         <section class="lcars-panel" style="--accent: var(--lcars-gold)">
           <h2 class="lcars-panel__title"><span>Fleet</span></h2>
@@ -78,6 +89,18 @@
         <section class="lcars-panel" style="--accent: var(--lcars-lilac)">
           <h2 class="lcars-panel__title"><span>Relay &amp; supervisor</span></h2>
           <div class="lcars-panel__body" id="admin-supervisor"></div>
+        </section>
+      </div>
+      <div class="screen" data-screen="users" hidden>
+        <section class="lcars-panel" style="--accent: var(--lcars-peach)">
+          <h2 class="lcars-panel__title"><span>Users</span></h2>
+          <div class="lcars-panel__body" id="admin-users"><p class="ops-hint">Loading the accounts…</p></div>
+        </section>
+      </div>
+      <div class="screen" data-screen="settings" hidden>
+        <section class="lcars-panel" style="--accent: var(--lcars-tan)">
+          <h2 class="lcars-panel__title"><span>Settings</span></h2>
+          <div class="lcars-panel__body" id="admin-settings"><p class="ops-hint">Loading the settings…</p></div>
         </section>
       </div>
       <div class="screen" data-screen="designs" hidden>

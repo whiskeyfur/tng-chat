@@ -99,11 +99,17 @@ function connect() {
     setLink('error', 'Comm relay address invalid');
     return;
   }
-  ws.onopen = () => setLink('online', `${relayName} online`);
+  ws.onopen = () => {
+    setLink('online', `${relayName} online`);
+    // (Pages from another origin can't use the relay's session cookie: they send the token.)
+    const t = sessionFromStorage();
+    if (t && !sameOrigin()) ws.send(JSON.stringify({ type: 'session', token: t }));
+  };
   // Handle messages one at a time so ICE candidates never race ahead of the SDP.
   let queue = Promise.resolve();
   ws.onmessage = (ev) => { queue = queue.then(() => onMessage(JSON.parse(ev.data))).catch((err) => log(`error: ${err}`, 'error')); };
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
+    if (ev.code === 4401 || loggedOut) return toLogin(); // (no session, or it ended)
     if (reloading) return waitForRelay(); // the relay is restarting: reload once it's back
     log('signaling disconnected', 'error');
     signedOut('Lost the link to the comm relay. Reconnecting...');
@@ -112,6 +118,35 @@ function connect() {
     setTimeout(connect, 3000);
   };
 }
+
+// Accounts (a username, not your character): once the relay has any, it needs a login.
+// The account shows in the header (tap: log out) and on the sign-in and Station screens.
+let account = null, accountsOn = false, loggedOut = false;
+const sameOrigin = () => { try { return new URL(relay.http()).origin === location.origin; } catch { return true; } };
+const sessionFromStorage = () => { try { return localStorage.getItem('stchat-session'); } catch { return null; } };
+function toLogin() {
+  loggedOut = true;
+  try { sessionStorage.removeItem(REJOIN); } catch {}
+  location.href = 'login.html';
+}
+async function logOut() {
+  loggedOut = true;
+  try { await fetch(`${relay.http()}/api/account/logout`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: sessionFromStorage() }) }); } catch {}
+  try { localStorage.removeItem('stchat-session'); } catch {}
+  toLogin();
+}
+function renderAccount() {
+  const menu = $('account-menu');
+  menu.hidden = !account;
+  if (account) { menu.replaceChildren(account.username, Object.assign(document.createElement('small'), { textContent: '· log out' })); menu.title = `Logged in as ${account.username} (${account.role}): tap to log out`; }
+  const tap = () => Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button tr-tap', id: 'signin-logout', textContent: 'Log out', onclick: logOut });
+  const text = (t) => Object.assign(document.createElement('span'), { className: 'equip-charge', textContent: t });
+  $('signin-account').replaceChildren(...(account ? [pillBar('Account', [text(`Logged in as ${account.username}${account.role === 'admin' ? ' (admin)' : ''}`), tap()])]
+    : !accountsOn ? [pillBar('Account', [text('No accounts on this relay yet'), Object.assign(document.createElement('a'), { className: 'lcars-button tr-tap', href: 'login.html#register', id: 'signin-register', textContent: 'Register the first (admin)' })])] : []));
+  $('station-account').hidden = !account;
+  if (account) $('station-account').replaceChildren(Object.assign(document.createElement('span'), { textContent: `Account: ${account.username}` }), Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill', id: 'station-logout', textContent: 'Log out', onclick: logOut }));
+}
+$('account-menu').onclick = logOut;
 
 // The relay restarting (or the pages changing): remember who and where we
 // are, reload once the relay is back, and rejoin. Calls aren't resumed.
@@ -2229,7 +2264,14 @@ async function onMessage(msg) {
       bc.setAlert(`intruder-${msg.at}`, `Security: ${msg.text}`, { dismiss: true });
       renderCrewPanels();
       break;
+    case 'auth-required':
+    case 'logged-out':
+      loggedOut = true;
+      log(msg.reason || 'logged out', 'warn');
+      break;
     case 'hello': {
+      account = msg.account || null; accountsOn = !!msg.accounts;
+      renderAccount();
       opsKeyRequired = msg.opsKey !== false; // older relays don't say: show it
       // The star chart, and the designs (each class's places and bridge seats).
       window.STAR_SYSTEM = msg.system || null;

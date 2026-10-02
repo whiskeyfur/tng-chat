@@ -13,7 +13,7 @@ const URL = `http://localhost:${PORT}/`;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const step = (s) => console.log(`ok - ${s}`);
 const procs = new Set();
-const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env: { ...process.env, PORT, STARBASES_FILE: path.join(DATA, 'starbases.json') }, stdio: 'ignore' }); procs.add(p); p.on('exit', () => procs.delete(p)); return p; };
+const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env: { ...process.env, PORT, STARBASES_FILE: path.join(DATA, 'starbases.json'), RELAY_DATA: DATA }, stdio: 'ignore' }); procs.add(p); p.on('exit', () => procs.delete(p)); return p; };
 
 (async () => {
   let ok = false, browser;

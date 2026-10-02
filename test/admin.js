@@ -24,7 +24,7 @@ const step = (s) => console.log(`ok - ${s}`);
   let ok = false, browser, sup;
   try {
     sup = spawn(process.execPath, ['tools/supervisor.js'], { cwd: ROOT, stdio: 'ignore',
-      env: { ...process.env, PORT, CONFIG_DIR: CONFIG, SHIPCORE_DATA: DATA, STARBASES_FILE: path.join(TMP, 'starbases.json'), SUPERVISE_DELAY: '600', SUPERVISE_WATCH: CONFIG } });
+      env: { ...process.env, PORT, CONFIG_DIR: CONFIG, SHIPCORE_DATA: DATA, STARBASES_FILE: path.join(TMP, 'starbases.json'), RELAY_DATA: DATA, SUPERVISE_DELAY: '600', SUPERVISE_WATCH: CONFIG } });
     await wait(2500);
     browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
     const page = await (await browser.newContext({ viewport: { width: 1300, height: 900 } })).newPage();

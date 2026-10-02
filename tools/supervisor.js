@@ -17,21 +17,25 @@
 //   node tools/supervisor.js                 (npm start: a computer per folder in shipcore-data/)
 //   node tools/supervisor.js Enterprise Cole (just these ships)
 //
-// Environment: PORT (8085), SHIPCORE_DATA (./shipcore-data), OPERATOR_KEY (passed on),
+// The relay's address: data/settings.json (the admin page's Settings; 8085 by default), or
+// PORT and HOST in the environment. Saving new Settings restarts the relay on them, and the
+// ship's computers follow it.
+// Environment: PORT, HOST, SHIPCORE_DATA (./shipcore-data), OPERATOR_KEY (passed on),
 // SUPERVISE_DELAY (ms, 5000), SUPERVISE_WATCH (paths to watch instead of the defaults).
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
-const PORT = process.env.PORT || '8085';
+const SETTINGS = require('./settings');
+const relayAt = () => SETTINGS.effective();
+let RELAY_URL = SETTINGS.localUrl();
 const DATA = path.resolve(process.env.SHIPCORE_DATA || 'shipcore-data');
 const DELAY = Number(process.env.SUPERVISE_DELAY) || 5000;
 const WATCH = process.env.SUPERVISE_WATCH ? process.env.SUPERVISE_WATCH.split(path.delimiter) : ['server.js', 'tools', 'data', 'public', 'config'].map((p) => path.join(ROOT, p));
 // Files the relay writes itself: changing them mustn't restart it.
-const IGNORE = [path.join(ROOT, 'data', 'starbases.json')];
+const IGNORE = ['starbases.json', 'users.json', 'sessions.json'].map((f) => path.join(ROOT, 'data', f));
 const SHIPCORE = path.join(__dirname, 'shipcore.js');
-const RELAY_URL = `ws://localhost:${PORT}`;
 
 // A recent log, for the admin panel.
 const recent = [];
@@ -70,7 +74,7 @@ function reloadComputers() { stopComputers(); shipcoreModule = loadShipcore(); s
 // again a couple of times, then the supervisor gives up, rather than looping.
 const QUICK_FAIL_MS = 10000, MAX_FAILS = 3;
 let relay = null, relaySince = 0, fails = 0, stopping = false;
-const env = { ...process.env, PORT };
+const env = { ...process.env };
 function startRelay() {
   const startedAt = Date.now();
   relaySince = startedAt;
@@ -84,14 +88,15 @@ function startRelay() {
     log(`relay exited (${sig || code})`);
     if (Date.now() - startedAt > QUICK_FAIL_MS) { fails = 0; return; }
     if (++fails >= MAX_FAILS) {
-      log(portInUse ? `the relay failed to start ${fails} times in a row: port ${PORT} is already in use (PORT=${PORT}${process.env.PORT ? ', from the environment' : ', the default'}). Stopping.` : `the relay crashed ${fails} times in a row (see the error above). Stopping.`);
+      log(portInUse ? `the relay failed to start ${fails} times in a row: port ${relayAt().port} is already in use (${process.env.PORT ? 'PORT, from the environment' : 'data/settings.json, or the default'}). Stopping.` : `the relay crashed ${fails} times in a row (see the error above). Stopping.`);
       shutdown(1);
       return;
     }
     log(`starting it again (${fails} of ${MAX_FAILS} tries)`);
     setTimeout(() => { stopRelay().then(startRelay); }, 2000);
   });
-  log(`relay on port ${PORT}`);
+  const at = relayAt();
+  log(`relay on ${at.host || 'every interface'}, port ${at.port}`);
 }
 function stopRelay() {
   const r = relay;
@@ -109,7 +114,7 @@ async function restartRelay() {
 
 // --- the admin panel's requests, through the relay ---------------------------------------
 const status = () => ({
-  relay: { up: !!relay && relay.exitCode === null && relay.signalCode === null, port: PORT, since: relaySince, pid: relay?.pid },
+  relay: { up: !!relay && relay.exitCode === null && relay.signalCode === null, port: relayAt().port, host: relayAt().host, since: relaySince, pid: relay?.pid },
   ships: [...computers].map(([ship, c]) => ({ ship, since: c.since, ...c.core.status() })),
   log: recent.slice(-60),
 });
@@ -148,7 +153,12 @@ async function applyChanges() {
   log(`${files.length} file(s) changed: ${[...kinds].join(', ')}`);
   if (kinds.has('self')) log('the supervisor itself changed: run npm start again to use the new one');
   if (kinds.has('computers') || kinds.has('config')) { log("reloading the ship's computers"); reloadComputers(); }
-  if (kinds.has('relay') || kinds.has('config')) { log('restarting the relay'); await restartRelay(); }
+  if (kinds.has('relay') || kinds.has('config')) {
+    log('restarting the relay');
+    await restartRelay();
+    // (Settings moved it: the ship's computers follow.)
+    if (SETTINGS.localUrl() !== RELAY_URL) { RELAY_URL = SETTINGS.localUrl(); log(`the relay moved to ${RELAY_URL}: reconnecting the ship's computers`); reloadComputers(); }
+  }
   else if (kinds.has('pages') && relay?.connected) relay.send({ type: 'reload', restart: false });
 }
 

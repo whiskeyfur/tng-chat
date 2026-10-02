@@ -24,7 +24,17 @@ Everyone uses the same page, http://localhost:8085:
 
 `operator.html` still works as a link to the Operations sign-in.
 
-The relay stores nothing on disk; ships and their libraries live on ship's computers (see below). Ships without ops on duty show "(ops offline)" in the list. If a ship's computer goes offline, the people already aboard stay on and keep their calls, but nobody new can sign in to (or be beamed to) that ship until a computer runs it again. `MAX_UPLOAD_MB` changes the upload limit (default 200).
+The relay stores nothing on disk but its accounts and Settings (`data/`); ships and their libraries live on ship's computers (see below). Ships without ops on duty show "(ops offline)" in the list. If a ship's computer goes offline, the people already aboard stay on and keep their calls, but nobody new can sign in to (or be beamed to) that ship until a computer runs it again. `MAX_UPLOAD_MB` changes the upload limit (default 200).
+
+### Accounts, the admin page and Settings (first run)
+
+An **account** is a username and password (3-24 letters, digits, `.` `_` `-`; 6 characters or more), not your character: after logging in you still pick a character name and a position. Until the first account exists the relay is open, as it always was; from then on the consoles, the console connection and the admin page need a login.
+
+1. **Register the admin:** open `http://localhost:8085/login.html` (or tap **Register the first (admin)** on the sign-in screen) and register. The first account is the admin.
+2. **Admin → Settings:** the **registration** mode (Open: new accounts log in at once; **Admin approval**, the default: they wait in Users for Approve; Closed: only an admin adds them), where the **admin page** answers from (this machine only, the default, or the LAN, for admins), and the relay's **IP address and port** (empty for every interface; 8085). A new address is tried first (port 8080 is kept for coturn); saved, the supervisor restarts the relay on it, moves the ship's computers to it, and the admin page follows. `PORT` / `HOST` in the environment win over these.
+3. **Admin → Users:** every account (role, status, created, last login, the characters it has used, who's aboard now): Approve / Reject, Make admin / Make player, Disable / Enable, New password (shown once), Log out (everywhere), Delete; Add a user. The last admin can't be demoted, disabled or deleted. `npm run make-admin <username>` makes one from the shell.
+
+Players: the header shows your account (tap to log out); Log out is on the Station screen too. Sessions are a cookie (HttpOnly, SameSite=Lax; Secure over https) that lasts 30 days unused; five wrong passwords lock that username out for a minute. Accounts, sessions and Settings are kept in `data/` (`users.json`, `sessions.json`, `settings.json`: not in git); passwords as scrypt hashes, sessions as hashes of their tokens.
 
 ### Hosting the pages elsewhere (GitHub Pages)
 

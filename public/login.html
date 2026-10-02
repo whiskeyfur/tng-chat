@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LCARS: Log in</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&display=swap">
+  <link rel="stylesheet" href="lcars.css">
+  <link rel="stylesheet" href="console.css">
+  <style>
+    .login-form { display: flex; flex-direction: column; gap: 12px; max-width: 460px; }
+    .login-form .ops-input { width: 100%; }
+    .login-note { margin: 0; text-transform: uppercase; color: var(--lcars-sky); }
+    .login-note[data-kind="error"] { color: var(--lcars-red); }
+    .login-first { margin: 0 0 8px; padding: 6px 16px; border-radius: 18px; background: var(--lcars-gold); color: #000; text-transform: uppercase; }
+  </style>
+</head>
+<body>
+  <div class="lcars-app">
+    <header class="lcars-header">
+      <div class="lcars-elbow lcars-elbow--top"><span>SEC 00</span></div>
+      <div class="lcars-bar">
+        <span class="lcars-bar__seg lcars-bar__seg--a"></span>
+        <span class="lcars-header__console" id="login-relay">Personnel access</span>
+        <span class="lcars-bar__seg lcars-bar__seg--b"></span>
+        <h1 class="lcars-header__title">Log in</h1>
+      </div>
+    </header>
+    <nav class="lcars-sidebar" aria-label="Account">
+      <div class="lcars-sidebar__col lcars-sidebar__col--left"><div class="lcars-sidebar__fill"></div></div>
+      <div class="lcars-sidebar__col lcars-sidebar__col--right"><div class="lcars-sidebar__fill"></div></div>
+    </nav>
+    <aside class="lcars-pane" id="left-pane"></aside>
+    <main class="lcars-content" tabindex="-1">
+      <section class="lcars-panel lcars-panel--auto" style="--accent: var(--lcars-orange)">
+        <h2 class="lcars-panel__title"><span>Personnel authentication</span></h2>
+        <div class="lcars-panel__body">
+          <p class="login-first" id="login-first" hidden>No accounts yet: the first one registered is the admin</p>
+          <div id="login-mode"></div>
+          <form class="login-form" id="login-form">
+            <input class="ops-input" id="login-username" placeholder="Username (not your character's name)" autocomplete="username" aria-label="username" required>
+            <input class="ops-input" id="login-password" type="password" placeholder="Password" autocomplete="current-password" aria-label="password" required>
+            <input class="ops-input" id="login-confirm" type="password" placeholder="Password again" autocomplete="new-password" aria-label="password again" hidden>
+            <div class="ops-form"><button class="lcars-button lcars-button--pill" id="login-go">Log in</button></div>
+          </form>
+          <p class="login-note" id="login-note"></p>
+        </div>
+      </section>
+    </main>
+    <footer class="lcars-footer">
+      <div class="lcars-elbow lcars-elbow--bottom"><span>ACCESS</span></div>
+      <div class="lcars-bar"><span class="lcars-status" id="login-link" data-status="online">Comm relay</span><span class="lcars-bar__seg lcars-bar__seg--c"></span></div>
+    </footer>
+  </div>
+  <script src="config.js"></script>
+  <script src="relay.js"></script>
+  <script src="screens.js"></script>
+  <script src="login.js"></script>
+</body>
+</html>

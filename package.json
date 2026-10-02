@@ -6,10 +6,11 @@
   "main": "server.js",
   "scripts": {
     "start": "node tools/supervisor.js",
-    "test": "node test/e2e.js && node test/restart.js && node test/touch.js && node test/netmap.js && node test/config.js && node test/admin.js",
+    "test": "node test/e2e.js && node test/restart.js && node test/touch.js && node test/netmap.js && node test/config.js && node test/admin.js && node test/accounts.js",
     "export-pages": "node tools/export-pages.js",
     "shipcore": "node tools/shipcore.js",
-    "relay": "node server.js"
+    "relay": "node server.js",
+    "make-admin": "node tools/make-admin.js"
   },
   "dependencies": {
     "d3-dispatch": "^3.0.1",

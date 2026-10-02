@@ -15,6 +15,7 @@ process.env.PORT = process.env.PORT || '8099';
 process.env.BEAM_SECS = process.env.BEAM_SECS || '2'; // the transporter energizes this long (5 s in play)
 process.env.RESERVE_SECS = process.env.RESERVE_SECS || '3';
 process.env.STARBASES_FILE = process.env.STARBASES_FILE || require('path').join(require('os').tmpdir(), `tng-chat-starbases-${process.pid}.json`); // (never the live file)
+process.env.RELAY_DATA = process.env.RELAY_DATA || require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'tng-chat-relay-')); // (accounts and settings: none)
 process.env.EMH_TREAT_SECS = process.env.EMH_TREAT_SECS || '4'; // the holographic doctor treats a patient this long (60 s in play)
 process.env.SPORE_GROW_SECS = process.env.SPORE_GROW_SECS || '1'; // a spore grows this often (30 s in play)
 process.env.SPORE_CHARGE_SECS = process.env.SPORE_CHARGE_SECS || '3'; // a spore jump charges this long (10 s in play)

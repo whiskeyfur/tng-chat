@@ -16,7 +16,7 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-config-'));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const step = (s) => console.log(`ok - ${s}`);
 const procs = new Set();
-const run = (args, env = {}) => { const p = spawn(process.execPath, args, { cwd: ROOT, env: { ...process.env, PORT, STARBASES_FILE: path.join(DATA, 'starbases.json'), ...env }, stdio: process.env.DEBUG ? 'inherit' : 'ignore' }); procs.add(p); p.on('exit', () => procs.delete(p)); return p; };
+const run = (args, env = {}) => { const p = spawn(process.execPath, args, { cwd: ROOT, env: { ...process.env, PORT, STARBASES_FILE: path.join(DATA, 'starbases.json'), RELAY_DATA: DATA, ...env }, stdio: process.env.DEBUG ? 'inherit' : 'ignore' }); procs.add(p); p.on('exit', () => procs.delete(p)); return p; };
 const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await wait(100); } throw new Error('timed out'); };
 
 (async () => {

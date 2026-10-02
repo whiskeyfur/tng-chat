@@ -17,13 +17,16 @@
 
   function connect() {
     ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
-    ws.onopen = () => { $('admin-link').dataset.status = 'online'; $('admin-link').textContent = 'Relay online'; send({ type: 'admin', action: 'status' }); };
+    ws.onopen = () => { $('admin-link').dataset.status = 'online'; $('admin-link').textContent = 'Relay online'; send({ type: 'admin', action: 'status' }); send({ type: 'admin', action: 'settings' }); send({ type: 'admin', action: 'users' }); };
     ws.onclose = () => { $('admin-link').dataset.status = 'offline'; $('admin-link').textContent = 'Relay offline: reconnecting'; setTimeout(connect, 2000); };
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.type === 'hello') { designs = m.designs || {}; system = m.system || null; $('admin-relay-name').textContent = `Relay admin · ${m.relay || ''}`; renderCreate(true); }
       if (m.type === 'admin-status') { status = m; render(); }
       if (m.type === 'admin-designs') designsMessage(m);
+      if (m.type === 'admin-settings') settingsMessage(m);
+      if (m.type === 'admin-users') usersMessage(m);
+      if (m.type === 'logged-out' || m.type === 'auth-required') location.href = 'login.html?next=/admin';
       if (m.type === 'admin-created') { $('create-status').textContent = m.text; $('create-status').className = m.ok ? 'ops-hint ok-note' : 'ops-hint err-note'; send({ type: 'admin', action: 'status' }); }
       // (The pages changed: reload. A relay restart: it reconnects by itself, keeping what's being edited.)
       if (m.type === 'reload' && !m.restart) setTimeout(() => location.reload(), 300);
@@ -231,5 +234,81 @@
   window.__editor = { get state() { return ed; } };
 
   connect();
-  window.addEventListener('screenchange', (ev) => { renderChart(); if (ev.detail === 'designs') send({ type: 'admin', action: 'designs' }); });
+  window.addEventListener('screenchange', (ev) => { renderChart(); if (ev.detail === 'designs') send({ type: 'admin', action: 'designs' }); if (ev.detail === 'users') send({ type: 'admin', action: 'users' }); if (ev.detail === 'settings') send({ type: 'admin', action: 'settings' }); });
+
+  // --- Settings (data/settings.json): where the relay listens, registration, admin access ---
+  // Typed: the address and port; taps: the rest. Saved, the supervisor restarts the relay on
+  // it; a new address is shown, and this page goes there once the relay is up on it.
+  let st = { draft: null, last: null, error: null, note: '', moving: null };
+  function settingsMessage(m) {
+    st.last = m;
+    if (!st.draft || m.saved) st.draft = { ...m.settings };
+    st.error = m.error || null;
+    if (m.saved) {
+      st.note = m.moving ? '' : 'Saved: the relay restarts to apply it';
+      if (m.moving) { const e = m.settings, host = !e.host || e.host === '0.0.0.0' || e.host === '::' ? location.hostname : e.host; st.moving = `${location.protocol}//${host.includes(':') ? `[${host}]` : host}:${e.port}/admin`; setTimeout(() => { location.href = st.moving; }, 8000); }
+    } else if ('saved' in m) st.note = 'Not saved';
+    banner(m);
+    renderSettings();
+  }
+  function banner(m) {
+    const b = $('admin-banner');
+    b.hidden = !!m.accounts;
+    if (!m.accounts) b.textContent = `Admin: ${m.settings.adminAccess === 'lan' ? 'this network (LAN)' : 'localhost only'}. No accounts yet: register the first (admin) account to require logins.`;
+  }
+  function renderSettings() {
+    const box = $('admin-settings'), m = st.last, d = st.draft;
+    if (!m || !d) return;
+    const field = (k) => (st.error?.field === k ? [el('span', { className: 'err-note design-error', textContent: st.error.message })] : []);
+    const input = (k, id, ph) => { const i = el('input', { className: 'ops-input', id, value: String(d[k] ?? ''), placeholder: ph, autocomplete: 'off' }); i.onchange = () => { d[k] = k === 'port' ? Number(i.value) : i.value.trim(); }; return i; };
+    const pick = (k, label, opts) => pillBar(label, opts.map(([v, t]) => { const b = tap(t, v, d[k] === v, () => { d[k] = v; renderSettings(); }); b.id = `settings-${k}-${v}`; return b; }), { groupId: `settings-${k}` });
+    const e = m.effective;
+    box.replaceChildren(
+      el('p', { className: 'st-state', id: 'settings-now', textContent: `Listening on ${m.listening.host || 'every interface'}, port ${m.listening.port}` }),
+      ...(e.overridden.port || e.overridden.host ? [el('p', { className: 'ops-notice', textContent: `${[e.overridden.host && 'HOST', e.overridden.port && 'PORT'].filter(Boolean).join(' and ')} set in the environment: that wins over these settings.` })] : []),
+      el('h3', { className: 'ops-subhead', textContent: 'Address' }),
+      el('div', { className: 'design-field settings-form', id: 'settings-field-host' }, pillBar('IP address', [input('host', 'settings-host', 'every interface (empty), or an IP')]), ...field('host')),
+      el('div', { className: 'design-field settings-form', id: 'settings-field-port' }, pillBar('Port', [input('port', 'settings-port', '8085')]), ...field('port')),
+      el('p', { className: 'ops-hint', textContent: 'Port 8080 is kept for coturn. A new address is tried first (free, and one this machine has); the relay then restarts on it.' }),
+      el('h3', { className: 'ops-subhead', textContent: 'Accounts' }),
+      pick('registration', 'Registration', [['open', 'Open'], ['approval', 'Admin approval'], ['closed', 'Closed']]),
+      el('p', { className: 'ops-hint', textContent: 'Open: a new account can log in at once. Admin approval: it waits in Users for Approve. Closed: only an admin adds accounts. (The first account is always the admin.)' }),
+      pick('adminAccess', 'Admin page from', [['localhost', 'This machine only'], ['lan', 'LAN (admins only)']]),
+      el('div', { className: 'ops-form' }, btn('Save settings', 'settings-save', () => send({ type: 'admin', action: 'settings-save', settings: { ...d } })),
+        ...(m.supervised ? [btn('Restart the relay now', 'settings-restart', () => send({ type: 'admin', action: 'restart-relay' }))] : [])),
+      el('p', { className: `ops-hint ${st.error ? 'err-note' : 'ok-note'}`, id: 'settings-status', textContent: st.error ? `Not saved: ${st.error.message}` : st.note }),
+      ...(st.moving ? [el('p', { className: 'st-state', id: 'settings-moving' }, 'The relay is moving to ', el('a', { className: 'settings-url', href: st.moving, textContent: st.moving }), m.supervised ? ': this page follows it in a few seconds.' : ': restart it (npm start runs the supervisor, which does that itself).')] : []));
+  }
+
+  // --- Users: the accounts (a username, not a character), their roles and status ----------
+  let us = { last: null, newRole: 'player' };
+  function usersMessage(m) { us.last = m; renderUsers(); }
+  function renderUsers() {
+    const box = $('admin-users'), m = us.last;
+    if (!m) return;
+    const day = (t) => (t ? new Date(t).toISOString().slice(0, 16).replace('T', ' ') : '—');
+    const act = (u, change, text, alert, ask) => btn(text, `user-${change}-${u.username}`, () => { if (!ask || confirm(ask)) send({ type: 'admin', action: 'user', username: u.username, change }); }, alert);
+    const actions = (u) => (u.status === 'pending' ? [act(u, 'approve', 'Approve'), act(u, 'reject', 'Reject', true, `Reject ${u.username}'s account?`)]
+      : [u.status === 'active' ? act(u, 'disable', 'Disable', true) : act(u, 'enable', 'Enable'), u.role === 'admin' ? act(u, 'demote', 'Make player') : act(u, 'promote', 'Make admin'),
+        act(u, 'reset-password', 'New password', false, `Give ${u.username} a new password? It's shown here once.`), act(u, 'logout', 'Log out'), act(u, 'delete', 'Delete', true, `Delete the account ${u.username}? Its characters are not touched.`)]);
+    const name = el('input', { className: 'ops-input', id: 'user-new-name', placeholder: 'Username', autocomplete: 'off' });
+    const pass = el('input', { className: 'ops-input', id: 'user-new-password', placeholder: 'Password (6 or more)', type: 'password', autocomplete: 'new-password' });
+    const roles = pillBar('Role', [['player', 'Player'], ['admin', 'Admin']].map(([v, t]) => tap(t, v, us.newRole === v, () => { us.newRole = v; renderUsers(); })), { groupId: 'user-new-role' });
+    box.replaceChildren(
+      ...(m.temp ? [el('p', { className: 'user-temp', id: 'user-temp', textContent: `New password for ${m.temp.username}: ${m.temp.password} (shown once: pass it on)` })] : []),
+      ...(m.error || m.note ? [el('p', { className: `ops-hint ${m.error ? 'err-note' : 'ok-note'}`, id: 'users-status', textContent: m.error || m.note })] : []),
+      el('h3', { className: 'ops-subhead', textContent: `Accounts · registration ${{ open: 'open', approval: 'by admin approval', closed: 'closed' }[m.registration]}` }),
+      m.users.length ? el('table', { className: 'user-table', id: 'user-table' },
+        el('tr', {}, ...['Username', 'Role', 'Status', 'Created', 'Last login', 'Characters', 'Aboard now', ''].map((h) => el('th', { textContent: h }))),
+        ...m.users.map((u) => {
+          const tr = el('tr', {}, el('td', { className: 'user-name', textContent: `${u.username}${u.username === m.me ? ' (you)' : ''}` }), el('td', { textContent: u.role }), el('td', { textContent: u.status }),
+            el('td', { textContent: day(u.created) }), el('td', { textContent: day(u.lastLogin) }), el('td', { textContent: u.characters.join(', ') || '—' }), el('td', { textContent: u.online.join(', ') || '—' }),
+            el('td', {}, pillCluster(...actions(u))));
+          tr.dataset.user = u.username; tr.dataset.status = u.status;
+          return tr;
+        })) : el('p', { className: 'ops-hint', textContent: 'No accounts yet: the first one registered (on the log-in page) is the admin.' }),
+      el('h3', { className: 'ops-subhead', textContent: 'Add a user' }),
+      el('div', { className: 'ops-form' }, name, pass), roles,
+      el('div', { className: 'ops-form' }, btn('Add', 'user-add', () => send({ type: 'admin', action: 'user-create', username: name.value.trim(), password: pass.value, role: us.newRole }))));
+  }
 })();

@@ -40,7 +40,19 @@ const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
-const PORT = process.env.PORT || 8085;
+// Where it listens: data/settings.json (the admin page's Settings), under PORT and HOST in the environment.
+const SETTINGS = require('./tools/settings');
+const { port: PORT, host: HOST } = SETTINGS.effective();
+// Accounts (a username, not a character's name): once the first is registered, every
+// page, API and console connection needs a logged-in session (tools/accounts.js).
+const ACCOUNTS = require('./tools/accounts');
+const SESSION_COOKIE = 'stchat_session';
+const cookies = (req) => Object.fromEntries((req.headers.cookie || '').split(';').map((c) => c.trim().split('=')).filter(([k, v]) => k && v).map(([k, v]) => [k, decodeURIComponent(v)]));
+const sessionToken = (req) => cookies(req)[SESSION_COOKIE] || null;
+const secure = (req) => !!req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https';
+const sessionCookie = (req, token) => `${SESSION_COOKIE}=${token ? encodeURIComponent(token) : ''}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${token ? 30 * 24 * 3600 : 0}${secure(req) ? '; Secure' : ''}`;
+// (Needed: an account exists. Allowed: logged in with one that's active.)
+const needLogin = () => ACCOUNTS.any();
 const OPERATOR_KEY = process.env.OPERATOR_KEY || '';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const RELAY_NAME = process.env.RELAY_NAME || 'Subspace Relay Station 47';
@@ -75,14 +87,25 @@ const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-
 const RELAYED = new Set(['call', 'accept', 'decline', 'hangup', 'signal']);
 const STATES = new Set(['idle', 'calling', 'ringing', 'in-call']);
 
-// The admin page and its requests: from this machine only (no access control yet).
+// The admin page and its requests: from this machine (or the LAN, if Settings say so), and
+// once there are accounts, only for an admin's session.
 const isLocal = (addr) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(addr);
+const isLan = (addr) => isLocal(addr) || /^(::ffff:)?(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(addr || '') || /^f[cd]|^fe80:/i.test(addr || '');
+const adminReach = (addr) => (SETTINGS.read().adminAccess === 'lan' ? isLan(addr) : isLocal(addr));
 const server = http.createServer((req, res) => {
   let urlPath = new URL(req.url, 'http://x').pathname;
+  if (urlPath.startsWith('/api/account/')) return accountRequest(req, res, urlPath.slice(13));
+  const account = needLogin() ? ACCOUNTS.session(sessionToken(req)) : null;
   if (/^\/admin(\.html|\.js|\/)?$/.test(urlPath)) {
-    if (!isLocal(req.socket.remoteAddress)) { res.writeHead(403, { 'Content-Type': 'text/plain' }).end('Admin: localhost only (add access control before going live)'); return; }
+    if (!adminReach(req.socket.remoteAddress)) { res.writeHead(403, { 'Content-Type': 'text/plain' }).end(`Admin: ${SETTINGS.read().adminAccess === 'lan' ? 'this network' : 'this machine'} only (Settings, Admin reachable from)`); return; }
+    if (needLogin() && account?.role !== 'admin') {
+      if (urlPath.endsWith('.js')) { res.writeHead(403).end(); return; }
+      res.writeHead(302, { Location: `/login.html?next=${encodeURIComponent('/admin')}${account ? '&admin=1' : ''}` }).end(); return;
+    }
     if (urlPath === '/admin' || urlPath === '/admin/') urlPath = '/admin.html';
   }
+  // The consoles: logged in first, once there are accounts.
+  if ((urlPath === '/' || urlPath === '/index.html') && needLogin() && !account) { res.writeHead(302, { Location: '/login.html' }).end(); return; }
   if (urlPath.startsWith('/api/library')) {
     // Pages hosted on another origin use this server as their relay. Auth is
     // the X-Token header (no cookies), so any origin may call.
@@ -327,7 +350,7 @@ const hasComputer = (name) => present(shipKey(name));
 // and shield status.
 function broadcastShips() {
   const list = shipList();
-  for (const ws of sockets) send(ws, { type: 'ships', ships: list });
+  for (const ws of sockets) if (ws.greeted) send(ws, { type: 'ships', ships: list });
   broadcastAllOps(); // the data link map shows every ship
 }
 
@@ -4851,7 +4874,10 @@ function sendShipRadio(u) {
 
 wss.on('connection', (ws, req) => {
   sockets.add(ws);
-  ws.local = isLocal(req?.socket?.remoteAddress); // (admin requests: from this machine only)
+  ws.local = isLocal(req?.socket?.remoteAddress); // (admin requests: from this machine, or the LAN by Settings)
+  ws.addr = req?.socket?.remoteAddress;
+  ws.session = req ? sessionToken(req) : null;
+  ws.account = needLogin() ? ACCOUNTS.session(ws.session) : null;
   ws.id = null;
   ws.state = 'idle';
   ws.peers = [];
@@ -4869,6 +4895,14 @@ wss.on('connection', (ws, req) => {
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'shipcore' && !ws.id && !ws.operator) return coreSignIn(ws, msg);
+    // A page from another origin (no cookie): its session token, once, by message.
+    if (msg.type === 'session' && !ws.account) {
+      ws.session = typeof msg.token === 'string' ? msg.token : null;
+      ws.account = ACCOUNTS.session(ws.session);
+      if (!ws.account) { send(ws, { type: 'auth-required', reason: 'log in first' }); return ws.close(4401, 'log in first'); }
+      return greet(ws);
+    }
+    if (needLogin() && !ws.account) { send(ws, { type: 'auth-required', reason: 'log in first' }); return ws.close(4401, 'log in first'); }
     if (msg.type === 'admin') return adminRequest(ws, msg);
 
     if (msg.type === 'operator' && !ws.id && !ws.operator) {
@@ -4886,6 +4920,7 @@ wss.on('connection', (ws, req) => {
       ws.name = name;
       Object.assign(ws, profileFrom(msg));
       if (post) Object.assign(ws, { position: post.id, post: post.title, rank: post.rank, postShip: shipKey(ship) });
+      if (ws.account) ACCOUNTS.usedCharacter(ws.account.username, name); // ("last used by")
       ws.shipKey = registerShip(ship);
       ws.ship = shipName(ws.shipKey);
       users.set(id, ws);
@@ -4931,6 +4966,7 @@ wss.on('connection', (ws, req) => {
       ws.name = name;
       Object.assign(ws, profileFrom(msg));
       if (post) Object.assign(ws, { position: post.id, post: post.title, rank: post.rank, postShip: shipKey(ship) });
+      if (ws.account) ACCOUNTS.usedCharacter(ws.account.username, name); // ("last used by")
       ws.shipKey = registerShip(ship);
       ws.ship = shipName(ws.shipKey);
       seat(ws, msg.station);
@@ -5170,16 +5206,21 @@ wss.on('connection', (ws, req) => {
     if (ws.id) signOut(ws);
   });
 
-  // The relay's own station list, so pages only offer stations it accepts
-  // (and can tell when the relay is older than the pages).
-  send(ws, { type: 'hello', relay: RELAY_NAME, stations: STATIONS, opsKey: !!OPERATOR_KEY, version: require('./package.json').version,
+  if (!needLogin() || ws.account) greet(ws);
+});
+// The relay's own station list, so pages only offer stations it accepts
+// (and can tell when the relay is older than the pages); and the ships.
+// (Not before a session, once there are accounts.)
+function greet(ws) {
+  ws.greeted = true;
+  send(ws, { type: 'hello', accounts: needLogin(), ...(ws.account ? { account: { username: ws.account.username, role: ws.account.role } } : {}), relay: RELAY_NAME, stations: STATIONS, opsKey: !!OPERATOR_KEY, version: require('./package.json').version,
     // The star chart, and each design's places and bridge seats (for listing consoles by where they are, and the room mic).
     system: { id: SYSTEM_ID, name: STAR_SYSTEM.name, size: STAR_SYSTEM.size, bodies: STAR_SYSTEM.bodies, waypoints: STAR_SYSTEM.waypoints },
     designs: Object.fromEntries([...Object.entries(CLASSES), ['starbase', BASE_DESIGN]].map(([id, c]) => [id, { name: c.name, kind: id === 'starbase' ? 'starbase' : 'ship', places: c.places, seats: c.seats }])) });
   send(ws, { type: 'ships', ships: shipList() });
-});
+}
 
-server.listen(PORT, () => console.log(`${RELAY_NAME} on http://localhost:${PORT}`));
+server.listen(PORT, HOST || undefined, () => console.log(`${RELAY_NAME} on http://${HOST && HOST !== '0.0.0.0' && HOST !== '::' ? (HOST.includes(':') ? `[${HOST}]` : HOST) : 'localhost'}:${PORT}${HOST ? ` (listening on ${HOST})` : ''}`));
 
 // Run by tools/supervisor.js: before a restart (or after the pages change)
 // every console is told to reload; they rejoin as who and where they were.
@@ -5192,8 +5233,58 @@ let adminSeq = 0;
 // (The classes this relay has loaded, for the admin page: did a reload apply a design?)
 const adminClasses = () => Object.fromEntries(Object.entries(CLASSES).map(([id, c]) => [id, { name: c.name, bus: c.bus, eps: c.eps }]));
 const adminFleet = () => networkGraph().ships.map((v) => ({ name: v.name, class: v.class, starbase: !!v.starbase, crew: v.crew, ops: v.ops, computer: v.computer, x: v.x, y: v.y }));
+// The account API: GET me; POST register, login, logout (JSON). A login sets the session
+// cookie (HttpOnly, SameSite=Lax); a page from another origin gets the token to send by message.
+function accountRequest(req, res, what) {
+  const json = (code, v, headers = {}) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers }).end(JSON.stringify(v));
+  if (what === 'me' && req.method === 'GET') return json(200, { accounts: ACCOUNTS.any(), user: ACCOUNTS.session(sessionToken(req)), registration: SETTINGS.read().registration });
+  if (req.method !== 'POST') return json(405, { error: 'POST only' });
+  let body = '';
+  req.on('data', (c) => { body += c; if (body.length > 4096) req.destroy(); });
+  req.on('end', () => {
+    let m;
+    try { m = JSON.parse(body || '{}'); } catch { return json(400, { error: 'bad request' }); }
+    let cross = false;
+    try { cross = !!req.headers.origin && new URL(req.headers.origin).host !== req.headers.host; } catch {}
+    const loggedIn = (l) => json(200, { user: l.user, ...(cross ? { token: l.token } : {}) }, { 'Set-Cookie': sessionCookie(req, l.token) });
+    const addr = req.socket.remoteAddress;
+    if (what === 'register') {
+      if (m.confirm !== undefined && m.password !== m.confirm) return json(400, { error: "the passwords don't match" });
+      const r = ACCOUNTS.register(m.username, m.password, SETTINGS.read().registration);
+      if (r.error) return json(400, r);
+      console.log(`accounts: ${r.user.username} registered (${r.user.role}, ${r.user.status})`);
+      if (r.user.status !== 'active') return json(200, { pending: true, user: r.user });
+      const l = ACCOUNTS.login(m.username, m.password, addr);
+      return l.error ? json(400, { error: l.error }) : loggedIn(l);
+    }
+    if (what === 'login') {
+      const l = ACCOUNTS.login(m.username, m.password, addr);
+      if (l.error) return json(/^too many/.test(l.error) ? 429 : 401, { error: l.error });
+      console.log(`accounts: ${l.user.username} logged in`);
+      return loggedIn(l);
+    }
+    if (what === 'logout') {
+      const t = sessionToken(req) || (typeof m.token === 'string' ? m.token : null);
+      ACCOUNTS.logout(t);
+      dropSockets((ws) => t && ws.session === t, 'logged out');
+      return json(200, { ok: true }, { 'Set-Cookie': sessionCookie(req, null) });
+    }
+    return json(404, { error: 'no such call' });
+  });
+}
+// Consoles whose session ended (logged out, disabled, deleted, a new password): told, then closed.
+function dropSockets(which, reason) {
+  for (const ws of [...sockets]) if (!ws.shipcore && which(ws)) { send(ws, { type: 'logged-out', reason }); ws.close(4401, reason); }
+}
+
 function adminRequest(ws, msg) {
-  if (!ws.local) return send(ws, { type: 'admin-status', error: 'refused: the admin page is for this machine only (localhost)' });
+  if (!adminReach(ws.addr)) return send(ws, { type: 'admin-status', error: `refused: the admin page is for ${SETTINGS.read().adminAccess === 'lan' ? 'this network' : 'this machine (localhost)'} only` });
+  if (needLogin()) {
+    ws.account = ACCOUNTS.session(ws.session);
+    if (ws.account?.role !== 'admin') return send(ws, { type: 'admin-status', error: 'refused: the admin page needs an admin login' });
+  }
+  if (msg.action === 'settings' || msg.action === 'settings-save') return adminSettings(ws, msg);
+  if (['users', 'user', 'user-create'].includes(msg.action)) return adminUsers(ws, msg);
   if (msg.action === 'create') return adminCreate(ws, msg);
   if (msg.action === 'designs' || msg.action === 'design-save') return adminDesigns(ws, msg);
   if (msg.action === 'relay') {
@@ -5211,6 +5302,46 @@ function adminRequest(ws, msg) {
   adminWaiting.set(reqId, ws);
   setTimeout(() => adminWaiting.delete(reqId), 10000);
   process.send({ type: 'admin', reqId, action: ['status', 'restart-ship', 'restart-ships', 'restart-relay'].includes(msg.action) ? msg.action : 'status', ship: typeof msg.ship === 'string' ? msg.ship : undefined });
+}
+// Settings (data/settings.json): the address the relay listens on, registration, where the
+// admin page answers. Checked first (an address this machine has, a port that's free and not
+// 8080); saved, the supervisor restarts the relay on it (its watch on data/).
+async function adminSettings(ws, msg) {
+  const reply = (m) => send(ws, { type: 'admin-settings', ...m, settings: SETTINGS.read(), effective: SETTINGS.effective(), listening: { host: HOST || '', port: PORT }, supervised: !!process.send, accounts: ACCOUNTS.any() });
+  if (msg.action === 'settings') return reply({});
+  const change = {};
+  for (const k of ['host', 'port', 'registration', 'adminAccess']) if (msg.settings?.[k] !== undefined) change[k] = k === 'port' ? Number(msg.settings[k]) : String(msg.settings[k]).trim();
+  const bad = SETTINGS.check(change);
+  if (bad) return reply({ saved: false, error: bad });
+  const port = change.port ?? PORT, host = change.host ?? (HOST || '');
+  const moving = port !== PORT || host !== (HOST || '');
+  // (A new port must be free there; a new address must be one this machine has.)
+  const tried = port !== PORT ? await SETTINGS.portFree(port, host) : host !== (HOST || '') && host ? await SETTINGS.portFree(0, host) : true;
+  if (tried !== true) return reply({ saved: false, error: tried === 'EADDRNOTAVAIL' ? { field: 'host', message: 'this machine has no such address' } : { field: 'port', message: `port ${port} is in use` } });
+  SETTINGS.save(change);
+  console.log(`admin: settings saved (${Object.keys(change).join(', ')})`);
+  reply({ saved: true, moving });
+}
+// The user manager: every account (role, status, created, last login, characters it has used
+// and those aboard now); approve or reject, promote or demote, disable or enable, a new
+// password (shown once), log out everywhere, delete; add one. Never leaves no admin.
+function adminUsers(ws, msg) {
+  const online = (name) => [...users.values()].filter((u) => u.account?.username === name).map((u) => `${u.name} (${u.ship})`);
+  const reply = (m = {}) => send(ws, { type: 'admin-users', ...m, users: ACCOUNTS.list().map((u) => ({ ...u, online: online(u.username) })), registration: SETTINGS.read().registration, me: ws.account?.username || null });
+  if (msg.action === 'users') return reply();
+  if (msg.action === 'user-create') {
+    const r = ACCOUNTS.register(msg.username, msg.password, 'open', { byAdmin: true, role: msg.role });
+    if (!r.error) console.log(`admin: added the account ${r.user.username} (${r.user.role})`);
+    return reply(r.error ? { error: r.error } : { note: `${r.user.username} added (${r.user.role})` });
+  }
+  const name = ACCOUNTS.norm(msg.username), change = String(msg.change || '');
+  const r = ACCOUNTS.update(name, { action: change });
+  if (r.error) return reply({ error: `${name}: ${r.error}` });
+  console.log(`admin: ${change} ${name}`);
+  if (['disable', 'delete', 'logout', 'reset-password', 'reject'].includes(change)) dropSockets((s) => s.account?.username === name, { disable: 'your account was disabled', delete: 'your account was deleted', logout: 'an admin logged you out', 'reset-password': 'your password was reset: log in again', reject: 'your account was not approved' }[change]);
+  for (const s of sockets) if (s.account?.username === name) s.account = ACCOUNTS.session(s.session);
+  const done = { approve: 'approved', reject: 'rejected', promote: 'is an admin now', demote: 'is a player now', disable: 'disabled', enable: 'enabled', delete: 'deleted', logout: `logged out everywhere (${r.ended} session${r.ended === 1 ? '' : 's'})`, 'reset-password': 'has a new password' }[change];
+  return reply({ note: `${name} ${done}`, ...(r.temp ? { temp: { username: name, password: r.temp } } : {}) });
 }
 // The ship design editor: the designs as their files say, and saving one (checked as the
 // loader checks it; a backup kept). Removing a place or system a live ship of that class
