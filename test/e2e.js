@@ -14,6 +14,7 @@ const { chromium } = require('playwright');
 process.env.PORT = process.env.PORT || '8099';
 process.env.BEAM_SECS = process.env.BEAM_SECS || '2'; // the transporter energizes this long (5 s in play)
 process.env.RESERVE_SECS = process.env.RESERVE_SECS || '3';
+process.env.DRYDOCK_RELEASE_SECS = process.env.DRYDOCK_RELEASE_SECS || '3'; // release from drydock (30 s in play)
 process.env.DIAG_SECS = process.env.DIAG_SECS || '2'; // the transporter's level-3 diagnostic (16 s in play) // antimatter containment's internal reserve (9 minutes in play)
 // Ship's computers keep their libraries in a scratch folder for the test.
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-test-'));
@@ -130,7 +131,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     const early = await (await browser.newContext()).newPage();
     await early.goto(URL);
     await early.waitForSelector('#ship option[value="Starbase 47"]:has-text("automated")', { state: 'attached' });
-    assert.deepEqual(await early.$$eval('#ship option:not([disabled])', (os) => os.map((o) => o.value)), ['Deep Space 4', 'Starbase 12', 'Starbase 47', 'Starbase 74']);
+    assert.deepEqual(await early.$$eval('#ship option:not([disabled])', (os) => os.map((o) => o.value)), ['Deep Space 4', 'Starbase 12', 'Starbase 47', 'Starbase 74', 'Utopia Planitia']);
     // The station picker comes from the relay and includes every station.
     await early.waitForSelector('#station option[value="Transporter"]', { state: 'attached' });
     assert.equal(await early.locator('#station option:not([disabled])').count(), 12); // 11 + Operations
@@ -519,7 +520,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.click('#link-form button');
     // The data network map: a pending request is a dashed line, then solid.
     await kops.waitForSelector('#net-map line[stroke-dasharray="10 8"]', { state: 'attached' });
-    assert.equal(await kops.locator('#net-map .net-node').count(), 7); // Enterprise, K'Vatch, the Defiant (kept alive by its computer) and the four starbases
+    assert.equal(await kops.locator('#net-map .net-node').count(), 8); // Enterprise, K'Vatch, the Defiant (kept alive by its computer), the four starbases and the shipyard
     await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await op.waitForFunction(() => window.__operator.network.includes("K'Vatch"));
     await op.waitForFunction(() => window.__operator.graph.links.some((l) => l.includes('Enterprise') && l.includes("K'Vatch")));
@@ -1428,14 +1429,29 @@ const audioBytes = (page) => page.evaluate(async () => {
     await bob.waitForSelector('.bcast--alert:has-text("Held in the Defiant\'s tractor beam")', { state: 'attached' });
     step('the Defiant came alongside, locked a tractor beam on the Enterprise (whose Helm could not break away) and towed it at warp 3');
 
-    // Back to Starbase 12, let go, dock, and install a new warp core.
-    ezri.send({ type: 'helm', dest: { base: 'Starbase 12' }, warp: 3 });
-    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.near)) === 'Starbase 12' && ezri.nav()?.own.warp === 0, 30000);
+    // To the shipyard, let go, dock, and into drydock for a new warp core.
+    ezri.send({ type: 'helm', dest: { base: 'Utopia Planitia' }, warp: 3 });
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.near)) === 'Utopia Planitia' && ezri.nav()?.own.warp === 0, 90000);
     tuvok.send({ type: 'tractor', ship: null });
     await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /Released from the Defiant's tractor beam/.test(m.text)));
+    // (A long tow drained the batteries and the drives flamed out. Docking needs the thrusters:
+    // the emergency battery on Bus B gives the chambers the power to relight.)
+    laforge.send({ type: 'grid', ties: { emergB: ['B'] } });
+    await waitFor(() => laforge.nav()?.own.grid.emerg[1].supplying > 0 || laforge.nav()?.own.grid.thrustersOk);
+    for (const d of ['port', 'starboard']) laforge.send({ type: 'grid', reactor: { name: d, on: true } });
+    await waitFor(() => laforge.nav()?.own.grid.thrustersOk, 20000).catch(() => { const g = laforge.nav()?.own.grid; throw new Error(`no thrusters: ${JSON.stringify({ drives: g?.drives, deu: g?.fuel.deu.tanks.map((t) => [t.name, t.pct]), eps: g?.epsLive, notes: laforge.msgs.filter((m) => m.type === 'notice').slice(-3).map((m) => m.text) })}`); });
     sulu.send(JSON.stringify({ type: 'dock' }));
-    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.docked)) === 'Starbase 12');
-    laforge.send({ type: 'grid', ties: { dock: ['B'] } }); // (docking leaves the connection untied)
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last.own.grid.docked)) === 'Utopia Planitia').catch(() => { throw new Error(`not docked at the shipyard: ${JSON.stringify(suluMsgs.filter((m) => m.type === 'notice').slice(-3).map((m) => m.text))}`); });
+    laforge.send({ type: 'grid', ties: { dock: ['B'], emergB: [] } }); // (docking leaves the connection untied; the emergency battery back off)
+    // Docked isn't enough: a new core needs drydock. In drydock, Helm can't move or undock.
+    laforge.send({ type: 'grid', refit: true });
+    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /only be replaced in drydock/.test(m.text)));
+    sulu.send(JSON.stringify({ type: 'dock', drydock: true }));
+    await waitFor(() => laforge.nav()?.own.grid.drydock.in);
+    helm({ dest: { x: 500, y: 500 }, warp: 1 });
+    await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /in drydock at Utopia Planitia: request release first/.test(m.text)));
+    sulu.send(JSON.stringify({ type: 'dock', undock: true }));
+    await waitFor(() => suluMsgs.filter((m) => m.type === 'notice' && /request release first/.test(m.text)).length >= 2);
     laforge.send({ type: 'grid', refit: true });
     await waitFor(() => laforge.nav()?.own.grid.core === 'offline' && laforge.nav().own.grid.antimatter >= 900); // (full pods; the core's own tank takes some over the bus)
     // (If the EPS collapsed while the core was out, its manifold has to pressurize again for the SIF.)
@@ -1444,7 +1460,20 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => ['deu', 'am'].every((b) => laforge.nav()?.own.grid.fuel[b].tanks.find((x) => x.name === 'core').pct >= 30), 15000);
     laforge.send({ type: 'grid', core: 'start' });
     await waitFor(() => laforge.nav()?.own.grid.core === 'online', 20000);
-    step('towed back to Starbase 12 and released, the Enterprise docked, had a new warp core and full antimatter pods installed, and started it');
+    step('towed to the Utopia Planitia shipyard and released, the Enterprise docked (a new core refused: not in drydock), went into drydock (Helm held, undocking refused), had a new warp core and full antimatter pods installed, and started it');
+    // Release: Helm asks; the shipyard's ops hold it, then release it.
+    const yard = await openOps(browser, 'Utopia Planitia', 'yard ops', 'leah');
+    await yard.waitForSelector('#drydock-list li[data-ship="Enterprise"]', { state: 'attached' });
+    await yard.$eval('#drydock-list li[data-ship="Enterprise"] button:nth-of-type(2)', (b) => b.click()); // Hold
+    await yard.waitForSelector('#drydock-list li[data-ship="Enterprise"]:has-text("HELD")', { state: 'attached' });
+    sulu.send(JSON.stringify({ type: 'dock', release: true }));
+    await new Promise((r) => setTimeout(r, 4500)); // (past the release time)
+    assert.ok(laforge.nav().own.grid.drydock.in, 'released while the shipyard held it');
+    await yard.$eval('#drydock-list li[data-ship="Enterprise"] button:nth-of-type(1)', (b) => b.click()); // Release now
+    await waitFor(() => !laforge.nav()?.own.grid.drydock.in);
+    assert.equal(laforge.nav().own.grid.docked, 'Utopia Planitia', 'still docked after release');
+    await yard.close();
+    step('Helm requested release; the shipyard\'s ops held the Enterprise past its release time, then released it (still docked)');
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;
     // the pods stay contained (their own ties). The deuterium bus: nothing moves without its transfer power.
@@ -1479,11 +1508,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => suluMsgs.filter((m) => m.type === 'notice' && /requests to dock/.test(m.text)).length > asked);
     sulu.send(JSON.stringify({ type: 'dock', answer: 'accept' }));
     await waitFor(() => laforge.nav()?.own.grid.dockedShip === 'Defiant');
-    // Two ports: Starbase 12 on one, the Defiant on the other.
+    // Two ports: the shipyard on one, the Defiant on the other.
     const ports = laforge.nav().own.grid.ports;
-    assert.equal(Object.values(ports).filter((v) => v?.base === 'Starbase 12').length, 1);
+    assert.equal(Object.values(ports).filter((v) => v?.base === 'Utopia Planitia').length, 1);
     assert.equal(Object.values(ports).filter((v) => v?.ship === 'Defiant').length, 1);
-    step("the Defiant asked to dock: the Enterprise's Helm declined, then accepted; the Enterprise has Starbase 12 on one port and the Defiant on the other");
+    step("the Defiant asked to dock: the Enterprise's Helm declined, then accepted; the Enterprise has the shipyard on one port and the Defiant on the other");
     // Docked together across a restart of the Defiant's computer.
     await new Promise((r) => setTimeout(r, 5500));
     await stopComputer(coreD);
@@ -1516,7 +1545,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     ezri.send({ type: 'dock', undock: true });
     await waitFor(() => !laforge.nav()?.own.grid.dockedShip);
     rom.close();
-    step('Connections: the Enterprise exported deuterium to Starbase 12; the Defiant docked with it and exported deuterium and power (Bus B and EPS rows) to it (the Enterprise importing); then undocked');
+    step('Connections: the Enterprise exported deuterium to the shipyard; the Defiant docked with it and exported deuterium and power (Bus B and EPS rows) to it (the Enterprise importing); then undocked');
     ezri.close();
     tuvok.close();
 

@@ -42,6 +42,7 @@
           graph = msg.graph || graph;
           broadcasts = msg.broadcasts || [];
           remoteBlock = !!msg.remoteBlock;
+          renderDrydock(msg.drydock, msg.berths);
           render();
           return true;
         case 'op-ok':
@@ -62,6 +63,22 @@
         }
       }
       return false;
+    }
+
+    // The shipyard's drydock: each ship in it, its release (if requested) and our hold.
+    function renderDrydock(list, berths) {
+      const box = document.getElementById('drydock');
+      if (!box) return;
+      box.hidden = !list;
+      if (!list) return;
+      box.querySelector('h3').textContent = `Drydock (${list.length} of ${berths} berths)`;
+      $('drydock-list').replaceChildren(...(list.length ? list.map((d) => {
+        const li = el('li', { className: 'ops-hail' }, el('span', { className: 'ops-hail__text', textContent: `The ${d.ship}${d.release != null ? ` · release in ${d.release} s` : ''}${d.hold ? ' · HELD' : ''}${d.repair ? ` · repairing ${d.repair}` : ''}` }),
+          el('button', { className: 'lcars-button lcars-button--pill', textContent: 'Release now', onclick: () => send({ type: 'drydock', ship: d.ship, action: 'release' }) }),
+          el('button', { className: `lcars-button lcars-button--pill${d.hold ? '' : ' lcars-button--alert'}`, textContent: d.hold ? 'Stop holding' : 'Hold', onclick: () => send({ type: 'drydock', ship: d.ship, action: d.hold ? 'unhold' : 'hold' }) }));
+        li.dataset.ship = d.ship;
+        return li;
+      }) : [el('li', { className: 'empty', textContent: 'No ships in drydock' })]));
     }
 
     // Remote control of our stations by other vessels: allowed or blocked.

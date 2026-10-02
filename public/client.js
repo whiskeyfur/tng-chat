@@ -1141,7 +1141,9 @@ function renderCombat() {
     // Engineering's own rows: life support, then every power source and its subsystems.
     const engineeringRows = () => [
       parentRow('ties-core-parent', 'Warp core (M/ARC)', 1, grid.core === 'starting' ? `starting ${grid.start} of ${grid.startSecs} s` : grid.core,
-        grid.core === 'ejected' ? [] : grid.core === 'offline' ? [small('Start', 'core-start', () => send({ type: 'grid', core: 'start' }))] : [small('Stop', 'core-stop', () => send({ type: 'grid', core: 'stop' }), true)]),
+        [...(grid.core === 'ejected' ? [] : grid.core === 'offline' ? [small('Start', 'core-start', () => send({ type: 'grid', core: 'start' }))] : [small('Stop', 'core-stop', () => send({ type: 'grid', core: 'stop' }), true)]),
+          // Only in the shipyard's drydock: a new warp core and antimatter pods.
+          ...(grid.drydock?.in ? [small('Replace core', 'core-replace', () => send({ type: 'grid', refit: true }))] : [])]),
       ...(grid.core !== 'ejected' ? [
         // (The core's tanks above the injectors they feed.)
         ...['constriction', 'amConduit'].map((x) => subRow(x, 2)),

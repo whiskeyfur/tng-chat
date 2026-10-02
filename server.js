@@ -51,7 +51,7 @@ const OPS_STATION = 'Operations';   // operators only
 const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew'];
 // Operator commands (everything else from an operator is handled as crew).
 const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-hail', 'cancel-hail', 'transfer',
-  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block']);
+  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock']);
 // Message types one user may send to another; the server adds `from` and forwards.
 const RELAYED = new Set(['call', 'accept', 'decline', 'hangup', 'signal']);
 const STATES = new Set(['idle', 'calling', 'ringing', 'in-call']);
@@ -200,6 +200,8 @@ function broadcastOps(key) {
     linkOutgoing: requests.filter((r) => r.from === key).map(({ id, toShip }) => ({ id, toShip })),
     graph: networkGraph(),
     remoteBlock: !!engOf(key).remoteBlock,
+    // The shipyard's drydock: the ships in it, any release under way, and holds.
+    ...(isShipyard(shipName(key)) ? { drydock: drydocked().filter((o) => shipKey(engOf(o).docked || '') === key).map((o) => ({ ship: shipName(o), hold: !!engOf(o).hold, release: engOf(o).release ? Math.max(0, Math.ceil((engOf(o).release - Date.now()) / 1000)) : null, repair: combatOf(o).repair || null })), berths: DRYDOCK.berths } : {}),
     broadcasts: [...broadcasts.values()].filter((b) => b.ships.has(key) || users.get(b.speaker)?.shipKey === key)
       .map((b) => ({ id: b.bid, speaker: peerInfo(b.speaker), label: b.label, since: b.since })),
   };
@@ -454,6 +456,17 @@ function operatorMessage(op, msg) {
       opLog(other, msg.type === 'link-decline' ? `the ${shipName(op.shipKey)} declined the data link` : `the ${shipName(op.shipKey)} withdrew its data link request`);
       broadcastAllOps();
       return ok(msg.type === 'link-decline' ? `declined the data link from the ${shipName(other)}` : `withdrew the data link request to the ${shipName(other)}`);
+    }
+    case 'drydock': {
+      // The shipyard's ops: release a drydocked ship now, or hold it (or stop holding it).
+      if (!isShipyard(shipName(op.shipKey))) return fail('only the shipyard has a drydock');
+      const t = shipKey(clean(msg.ship)), te = eng.get(t);
+      if (!te?.drydock || shipKey(te.docked || '') !== op.shipKey) return fail(`the ${clean(msg.ship)} is not in our drydock`);
+      if (msg.action === 'release') { releaseDrydock(t, `released by ${op.name}`); return ok(`released the ${shipName(t)} from drydock`); }
+      te.hold = msg.action === 'hold'; te.dirty = true;
+      opLog(t, te.hold ? `${shipName(op.shipKey)} is holding us in drydock` : `${shipName(op.shipKey)} no longer holds us in drydock`);
+      broadcastOps(op.shipKey); scheduleNav();
+      return ok(te.hold ? `holding the ${shipName(t)} in drydock` : `no longer holding the ${shipName(t)}`);
     }
     case 'remote-block': {
       // Ops can refuse remote control of this vessel's stations from other ships.
@@ -994,7 +1007,7 @@ function coreNav(c, key, nav) {
   if (!combat.get(key)?.loaded) {
     combat.set(key, { ...freshCombat(nav.combat), loaded: true });
     eng.set(key, freshEng(nav.eng, { cold: !nav.eng && !nav.warm }));
-    if (!nav.eng && nav.spawn) { spawnAt = STARBASES[Math.floor(Math.random() * STARBASES.length)]; engOf(key).docked = spawnAt.name; }
+    if (!nav.eng && nav.spawn) { spawnAt = SPAWN_BASES[Math.floor(Math.random() * SPAWN_BASES.length)]; engOf(key).docked = spawnAt.name; }
     flowCache.delete(key);
   }
   const current = primaryCore.get(key);
@@ -1057,6 +1070,7 @@ function navCommand(ws, msg) {
     return { error: 'no such destination' };
   };
 
+  if ((msg.type === 'autopilot' || msg.type === 'helm') && engOf(key).drydock && ws.station === 'Helm') return note(`Helm: in drydock at ${engOf(key).docked}: request release first`);
   if (msg.type === 'autopilot') {
     if (ws.station !== 'Helm') return note('Only Helm sets the autopilot');
     if (!msg.target) { autopilots.delete(key); return note('Helm: autopilot off (the ship keeps its course and speed)'); }
@@ -1596,7 +1610,18 @@ const tieNodes = (key) => SOURCE_NODES[key] || loadNodes(key);
 const NEVER_TRIP = new Set(['containment', 'sub:constriction', ...Object.values(AM_CONTAIN)]);
 // Starbases: dock to restock torpedoes, take dock power, repair faster and
 // refit a warp core. A destroyed ship comes back docked at one of them.
-const STARBASES = [{ name: 'Starbase 47', x: 500, y: 120 }, { name: 'Starbase 12', x: 120, y: 860 }, { name: 'Starbase 74', x: 880, y: 820 }, { name: 'Deep Space 4', x: 860, y: 160 }];
+const STARBASES = [{ name: 'Starbase 47', x: 500, y: 120 }, { name: 'Starbase 12', x: 120, y: 860 }, { name: 'Starbase 74', x: 880, y: 820 }, { name: 'Deep Space 4', x: 860, y: 160 }, { name: 'Utopia Planitia', x: 700, y: 450, shipyard: true }];
+// The shipyard: an automated station like the others (dock for supplies and
+// power), which can also drydock a ship. A drydocked ship can't move or
+// undock until it's released; warp core and pod replacement and fast repairs
+// need drydock. Helm requests release: 30 s later, with no repair job under
+// way, unless the shipyard's ops hold it (or release it sooner). Three at a time.
+const SHIPYARD = STARBASES.find((b) => b.shipyard);
+const isShipyard = (name) => !!STARBASES.find((b) => b.name === name)?.shipyard;
+const DRYDOCK = { releaseSecs: Number(process.env.DRYDOCK_RELEASE_SECS) || 30, berths: 3 };
+// New and rebuilt ships come up at an ordinary starbase.
+const SPAWN_BASES = STARBASES.filter((b) => !b.shipyard);
+const drydocked = () => [...eng].filter(([k, e]) => e.drydock && !isBase(k)).map(([k]) => k);
 const DOCK_RANGE = 10;
 // Starbases are on the comm net by themselves: anyone can report aboard,
 // ops included. Automated, they accept data links after a short delay
@@ -1734,6 +1759,7 @@ function freshEng(saved, { cold = false } = {}) {
       return [name, Math.max(0, Math.min(cap, Number(v) || 0))];
     })),
     docked: STARBASES.some((b) => b.name === s.docked) ? s.docked : null,
+    drydock: !!s.drydock && isShipyard(s.docked), release: null, hold: false, // in the shipyard's drydock (kept across restarts)
     breach: 0, selfDestruct: null, towing: null, dirty: false,
     // The warp core's reaction (older saves: running at 70%, 15:1, aligned, conduits open, auto-trim on).
     wc: { rate: Number.isFinite(s.wc?.rate) ? s.wc.rate : 70, actual: s.core === 'online' || (s.core === undefined && !cold) ? (Number.isFinite(s.wc?.actual) ? s.wc.actual : 70) : 0, mix: Number.isFinite(s.wc?.mix) ? s.wc.mix : 15, align: Number.isFinite(s.wc?.align) ? s.wc.align : 100, crystal: Number.isFinite(s.wc?.crystal) ? s.wc.crystal : 100, temp: Number.isFinite(s.wc?.temp) ? s.wc.temp : 0, plasma: s.wc?.plasma ?? !cold, autoTrim: s.wc?.autoTrim ?? !cold, breachT: null },
@@ -1783,7 +1809,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, drydock: !!e.drydock, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
   };
 };
@@ -2165,6 +2191,8 @@ function gridView(k) {
         epsIn: x.kind === 'station' ? Math.round(Object.values(f.cells.dockEps || {}).reduce((a, b) => a + b, 0)) : Math.round(e.fedEps[x.port] ? -e.fedEps[x.port] : Object.values(f.cells.shipEps || {}).reduce((a, b) => a + b, 0)) })),
     // The emergency batteries: charge, and a starbase can swap in a full one.
     emerg: EMERG.names.map((n) => ({ name: n, bus: EMERG.bus[n], level: Math.floor(e.emerg[n]), pct: Math.floor((100 * e.emerg[n]) / EMERG.cap), out: EMERG.out, supplying: Math.round(f.emergUsed[n] || 0) })), canReplace: !!e.docked,
+    // The shipyard's drydock: whether we're docked there, in it, and any release under way.
+    drydock: { shipyard: isShipyard(e.docked), in: !!e.drydock, release: e.release ? Math.max(0, Math.ceil((e.release - Date.now()) / 1000)) : null, hold: !!e.hold },
     dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName),
     // What each port holds: a starbase, a ship (with its power offers), or nothing.
     ports: Object.fromEntries(PORTS.map((p) => {
@@ -2216,11 +2244,11 @@ function gridCommand(ws, msg) {
   if (msg.refit) {
     // A new warp core and antimatter pods, from the starbase. Full pods need a
     // containment feed set to go into; without one they come empty.
-    if (!e.docked) return note('a warp core and antimatter pods can only be replaced at a starbase');
+    if (!e.drydock) return note(`a warp core and antimatter pods can only be replaced in drydock at the shipyard (${SHIPYARD.name})`);
     if (e.core === 'online' || e.core === 'starting') return note('shut the warp core down before replacing it');
     const fill = e.ties.containment.length > 0;
     Object.assign(e, { core: 'offline', start: 0, breach: 0, antimatter: fill ? FUEL.antimatter : 0, contain: { field: 100, reserve: reserveCap() } });
-    said.push(`new warp core and ${fill ? 'full' : 'empty'} antimatter pods installed at ${e.docked} (offline: start it up${fill ? '' : '; set a containment feed and refuel first'})`);
+    said.push(`new warp core and ${fill ? 'full' : 'empty'} antimatter pods installed in drydock at ${e.docked} (offline: start it up${fill ? '' : '; set a containment feed and refuel first'})`);
   }
   // The reaction's settings: rate (the light bar's target), mixture, plasma conduits, trim.
   if (Number.isFinite(msg.coreRate)) { e.wc.rate = Math.max(0, Math.min(100, Math.round(msg.coreRate))); said.push(`warp core reaction rate set to ${e.wc.rate}%`); }
@@ -2383,7 +2411,31 @@ function dockCommand(ws, msg) {
     joinShips(r.from, r.port, key, tp);
     return;
   }
+  // The shipyard's drydock: enter it (docked there), or ask to be released.
+  if (msg.drydock) {
+    if (!isShipyard(e.docked)) return note(`drydock is only at the shipyard (${SHIPYARD.name}): dock there first`);
+    if (e.drydock) return note(`already in drydock at ${e.docked}`);
+    if (drydocked().length >= DRYDOCK.berths) return note(`${e.docked}'s ${DRYDOCK.berths} drydock berths are all in use`);
+    Object.assign(e, { drydock: true, release: null, hold: false, dirty: true });
+    if (primaryCore.get(key) && nav?.warp > 0) send(primaryCore.get(key), { type: 'core-helm', ship: shipName(key), warp: 0 });
+    autopilots.delete(key);
+    opLog(key, `Helm (${ws.name}): entered drydock at ${e.docked}`);
+    opLog(shipKey(e.docked), `the ${shipName(key)} entered drydock`);
+    for (const u of crewOf(key)) send(u, { type: 'notice', text: `Helm: in drydock at ${e.docked}` });
+    broadcastOps(shipKey(e.docked));
+    return gridChanged(key);
+  }
+  if (msg.release) {
+    if (!e.drydock) return note('not in drydock');
+    if (e.release) return note(`release already requested: ${Math.max(0, Math.ceil((e.release - Date.now()) / 1000))} s`);
+    e.release = Date.now() + DRYDOCK.releaseSecs * 1000;
+    opLog(shipKey(e.docked), `the ${shipName(key)} requests release from drydock`);
+    broadcastOps(shipKey(e.docked));
+    note(`release from drydock requested: ${DRYDOCK.releaseSecs} s (once no repair job is under way)`);
+    return gridChanged(key);
+  }
   if (msg.undock) {
+    if (e.drydock && (!PORTS.includes(msg.port) || msg.port === e.dockedPort)) return note(`in drydock at ${e.docked}: request release first`);
     // One port (or all of them).
     const ports = PORTS.includes(msg.port) ? [msg.port] : PORTS;
     for (const p of ports) {
@@ -2426,6 +2478,17 @@ function dockCommand(ws, msg) {
   opLog(key, `Helm (${ws.name}): docked at ${base.name} (${port} dock)`);
   for (const u of crewOf(key)) send(u, { type: 'notice', text: `Helm: docked at ${base.name}` });
   gridChanged(key);
+}
+
+function releaseDrydock(k, how) {
+  const e = engOf(k);
+  if (!e.drydock) return;
+  Object.assign(e, { drydock: false, release: null, hold: false, dirty: true });
+  opLog(k, `${how} from drydock at ${e.docked}: free to undock`);
+  opLog(shipKey(e.docked), `the ${shipName(k)} was ${how} from drydock`);
+  for (const u of crewOf(k)) if (u.station === 'Helm' || u.station === 'Captain' || u.station === 'Engineering') send(u, { type: 'notice', text: `Helm: ${how} from drydock at ${e.docked}: free to undock` });
+  broadcastOps(shipKey(e.docked));
+  gridChanged(k);
 }
 
 // Docked vessels are joined by a hard line through the dock: always in data
@@ -2530,6 +2593,8 @@ function tractorCommand(ws, msg) {
   if (!cores.has(t) || !navState.has(t) || !sensorOk(key, t)) return note(`the ${clean(msg.ship)} is not on sensors`);
   if (distance(key, t) > TRACTOR.range) return note(`the ${shipName(t)} is out of tractor range (${Math.round(distance(key, t))} units; get within ${TRACTOR.range})`);
   if (shields.has(t)) return note(`the ${shipName(t)} has its shields up: the tractor beam can't hold it`);
+  if (engOf(t).drydock) return note(`the ${shipName(t)} is in drydock at ${engOf(t).docked}`);
+  if (e.drydock) return note(`we are in drydock at ${e.docked}`);
   if (towedBy(key)) return note('we are held in a tractor beam ourselves');
   if (towedBy(t) && towedBy(t) !== key) return note(`the ${shipName(t)} is already in the ${shipName(towedBy(t))}'s tractor beam`);
   if (engOf(t).towing === key) return note(`the ${shipName(t)} has us in its tractor beam`);
@@ -2708,7 +2773,7 @@ function destroy(k, cause) {
   c.destroying = true;
   const name = shipName(k);
   for (const o of [...combat.keys()]) if (o !== k && cores.has(o) && distance(k, o) <= BLAST.range) hit(o, BLAST.damage, k, 'the blast');
-  const base = STARBASES[Math.floor(Math.random() * STARBASES.length)];
+  const base = SPAWN_BASES[Math.floor(Math.random() * SPAWN_BASES.length)];
   console.log(`the ${name} was destroyed (${cause}); back at ${base.name}`);
   opLog(k, `the ${name} was destroyed: ${cause}. Rebuilt and docked at ${base.name}`);
   for (const u of crewOf(k)) send(u, { type: 'destroyed', ship: name, cause, base: base.name, at: Date.now() });
@@ -3010,7 +3075,12 @@ setInterval(() => {
     e.computers.forEach((cc, i) => {
       if (cc.state !== 'booting' && cc.state !== 'online') {
         const ts = e.ties[`sub:${COMPUTERS[i]}`] || [];
-        if (ts.some((n) => f.totals[n].available - f.totals[n].used >= COMPUTER.draw)) { cc.state = 'booting'; cc.t = 0; e.dirty = true; flowCache.delete(k); opLog(k, `computer core ${i + 1} booting`); }
+        if (!ts.some((n) => f.totals[n].available - f.totals[n].used >= COMPUTER.draw)) return;
+        // (Try it: only boot if it would actually get its power, so a marginal bus doesn't boot and crash it over and over.)
+        const was = cc.state;
+        cc.state = 'booting'; cc.t = 0; flowCache.delete(k);
+        if (!flow(k).subOk[COMPUTERS[i]]) { cc.state = was; flowCache.delete(k); return; }
+        e.dirty = true; opLog(k, `computer core ${i + 1} booting`);
         return;
       }
       if (!f.subOk[COMPUTERS[i]]) { cc.state = 'crashed'; cc.t = 0; e.dirty = true; opLog(k, `computer core ${i + 1} crashed: power lost`); tellStations(k, ['Engineering'], `Engineering: computer core ${i + 1} crashed (power lost): it boots again when power returns`); return; }
@@ -3074,7 +3144,9 @@ setInterval(() => {
 
     const p = powerOf(k);
     if (c.shield < 100 && p.shields > 0) c.shield = Math.min(100, c.shield + (2 * p.shields) / 100);
-    const fast = e.docked ? REPAIR.docked : 1;
+    const fast = e.drydock ? REPAIR.docked : 1; // (fast repairs only in drydock)
+    // Release from drydock: once the time's up, with no repair job under way, unless the shipyard holds it.
+    if (e.drydock && e.release && now >= e.release && !e.hold && !c.repair) releaseDrydock(k, 'released');
     for (const s of DAMAGEABLE) if (c.damage[s] > 0 && !(f.delivered[s] > 100)) c.damage[s] = Math.max(0, c.damage[s] - (c.repair === s ? REPAIR.directed : REPAIR.auto) * fast);
     if (c.hull < 100) c.hull = Math.min(100, c.hull + (c.repair === 'hull' ? REPAIR.hullDirected : REPAIR.hull) * fast);
     if (c.repair && (c.repair === 'hull' ? c.hull >= 100 : c.damage[c.repair] <= 0)) {

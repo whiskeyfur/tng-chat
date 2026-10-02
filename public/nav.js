@@ -155,7 +155,7 @@
     function renderDock() {
       const g = nav?.own?.grid;
       if (!g) return;
-      const sig = JSON.stringify([g.ports, g.near, g.nearShip, g.dockRequest, g.thrustersOk, dockPort, g.docked]);
+      const sig = JSON.stringify([g.ports, g.near, g.nearShip, g.dockRequest, g.thrustersOk, dockPort, g.docked, g.drydock]);
       if (sig === dockSig) return;
       dockSig = sig;
       const portTap = (pt) => {
@@ -171,11 +171,15 @@
       if (g.near && !g.docked) act.push(button(`Dock at ${g.near}`, 'helm-dock', () => send({ type: 'dock', port: dockPort })));
       if (g.nearShip && !Object.values(g.ports).some((v) => v?.ship === g.nearShip)) act.push(button(`Dock with the ${g.nearShip}`, 'helm-dock-ship', () => send({ type: 'dock', ship: g.nearShip, port: dockPort })));
       for (const b of act) { b.disabled = !!why; if (why) b.title = why; }
-      const undock = Object.entries(g.ports).filter(([, v]) => v).map(([pt, v]) => button(`Undock ${pt} (${v.base || `the ${v.ship}`})`, `helm-undock-${pt}`, () => send({ type: 'dock', undock: true, port: pt }), true));
+      // In drydock the starbase port can't be let go: request release instead.
+      const dd = g.drydock;
+      const undock = Object.entries(g.ports).filter(([pt, v]) => v && !(dd?.in && v.base)).map(([pt, v]) => button(`Undock ${pt} (${v.base || `the ${v.ship}`})`, `helm-undock-${pt}`, () => send({ type: 'dock', undock: true, port: pt }), true));
+      if (dd?.shipyard && !dd.in) act.push(button('Enter drydock', 'helm-drydock', () => send({ type: 'dock', drydock: true })));
+      if (dd?.in) act.push(Object.assign(button(dd.release != null ? `Release in ${dd.release} s${dd.hold ? ' (held by the shipyard)' : ''}` : 'Request release', 'helm-release', () => send({ type: 'dock', release: true })), { disabled: dd.release != null }));
       dockBox.replaceChildren(
         el('div', { className: 'tr-taps' }, portTap('port'), portTap('starboard')),
         el('div', { className: 'ops-form' }, ...act, ...undock),
-        el('span', { className: 'ops-hint', id: 'helm-dock-state', textContent: why && act.length ? `Can't dock: ${why}` : act.length ? '' : (g.near || g.nearShip ? '' : 'Nothing in docking range') }),
+        el('span', { className: 'ops-hint', id: 'helm-dock-state', textContent: dd?.in ? `In drydock at ${g.docked}: Helm is held until the shipyard releases us` : why && act.length ? `Can't dock: ${why}` : act.length ? '' : (g.near || g.nearShip ? '' : 'Nothing in docking range') }),
         ...(g.dockRequest ? [el('div', { className: 'ops-form', id: 'dock-request' }, el('span', { textContent: `The ${g.dockRequest.from} requests to dock (${g.dockRequest.seconds} s)` }),
           button('Accept', 'dock-accept', () => send({ type: 'dock', answer: 'accept', port: dockPort })), button('Decline', 'dock-decline', () => send({ type: 'dock', answer: 'decline' }), true))] : []));
     }
