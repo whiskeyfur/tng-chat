@@ -16,6 +16,7 @@ process.env.BEAM_SECS = process.env.BEAM_SECS || '2'; // the transporter energiz
 process.env.RESERVE_SECS = process.env.RESERVE_SECS || '3';
 process.env.STARBASES_FILE = process.env.STARBASES_FILE || require('path').join(require('os').tmpdir(), `tng-chat-starbases-${process.pid}.json`); // (never the live file)
 process.env.EMH_TREAT_SECS = process.env.EMH_TREAT_SECS || '4'; // the holographic doctor treats a patient this long (60 s in play)
+process.env.SPORE_GROW_SECS = process.env.SPORE_GROW_SECS || '1'; // a spore grows this often (30 s in play)
 process.env.SPORE_CHARGE_SECS = process.env.SPORE_CHARGE_SECS || '3'; // a spore jump charges this long (10 s in play)
 process.env.PREFIX_LOCK_SECS = process.env.PREFIX_LOCK_SECS || '2'; // a wrong command prefix three times locks out this long (60 s in play)
 process.env.DRYDOCK_RELEASE_SECS = process.env.DRYDOCK_RELEASE_SECS || '3'; // release from drydock (30 s in play)
@@ -138,7 +139,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(await early.$$eval('#ship option:not([disabled])', (os) => os.map((o) => o.value)), ['Deep Space 4', 'Starbase 12', 'Starbase 47', 'Starbase 74', 'Utopia Planitia']);
     // The station picker comes from the relay and includes every station.
     await early.waitForSelector('#station option[value="Transporter"]', { state: 'attached' });
-    assert.equal(await early.locator('#station option:not([disabled])').count(), 19); // 18 (the Shuttle Bay, the Brig and the five bridge consoles too) + Operations
+    assert.equal(await early.locator('#station option:not([disabled])').count(), 20); // 19 (the Shuttle Bay, the Brig, the Spore Lab and the five bridge consoles too) + Operations
     step("without a ship's computer there is no ship, not even for ops: only the four automated starbases");
 
     // Ship's computers bring the ships into existence.
@@ -1860,18 +1861,35 @@ const audioBytes = (page) => page.evaluate(async () => {
       detmer.send({ type: 'spore-jump', dest: { x: 800, y: 300 } });
       await waitFor(() => detmer.msgs.some((m) => m.type === 'notice' && /no spore jump: black alert first/.test(m.text)));
       lorca.send({ type: 'alert', level: 'black' });
-      await waitFor(() => { const o = detmer.nav()?.own; return o?.alert === 'black' && !o.grid.spore.why && o.allocated.replicators === 0; }, 15000);
+      await waitFor(() => { const o = detmer.nav()?.own; return o?.alert === 'black' && o.grid.spore.why === 'spores not loaded (Spore Lab)' && o.allocated.replicators === 0; }, 15000);
+      detmer.send({ type: 'spore-jump', dest: { x: 800, y: 300 } });
+      await waitFor(() => detmer.msgs.some((m) => m.type === 'notice' && /no spore jump: spores not loaded \(Spore Lab\)/.test(m.text)));
+      // Loading is by hand, at the Spore Lab: Engineering can't.
+      const saru2 = await crewWs('tilly', 'Discovery', 'Engineering');
+      saru2.send({ type: 'spore-load', on: true });
+      await waitFor(() => saru2.msgs.some((m) => m.type === 'notice' && /spores are loaded by hand, at the Spore Lab console/.test(m.text)));
+      const stamets = await crewWs('stamets', 'Discovery', 'Spore Lab');
+      stamets.send({ type: 'spore-load', on: true });
+      await waitFor(() => { const sp = detmer.nav()?.own.grid.spore; return sp.loaded === 20 && sp.spores <= 81 && !sp.why; });
       detmer.send({ type: 'spore-jump', dest: { x: 800, y: 300 } });
       await waitFor(() => { const o = detmer.nav()?.own; return o && Math.hypot(o.x - 800, o.y - 300) < 1; }, 30000);
       await waitFor(() => detmer.nav()?.own.grid.spore.cooldown > 0);
-      assert.equal(detmer.nav().own.grid.spore.spores, 80, 'a jump takes 20 spores');
+      assert.equal(detmer.nav().own.grid.spore.loaded, 0, 'a jump spends the loaded charge');
+      // Cultivation: the reserve grows only while the chambers have their power.
+      saru2.send({ type: 'grid', ties: { 'system:sporeGrow': [] } });
+      await waitFor(() => !detmer.nav()?.own.grid.spore.growing);
+      const held = detmer.nav().own.grid.spore.spores;
+      await new Promise((r) => setTimeout(r, 2500));
+      assert.equal(detmer.nav().own.grid.spore.spores, held, 'no growth without power');
+      saru2.send({ type: 'grid', ties: { 'system:sporeGrow': ['B'] } });
+      await waitFor(() => detmer.nav()?.own.grid.spore.spores >= held + 2, 15000);
       detmer.send({ type: 'spore-jump', dest: { x: 300, y: 300 } });
       await waitFor(() => detmer.msgs.some((m) => m.type === 'notice' && /no spore jump: the drive is cooling down/.test(m.text)));
       lorca.send({ type: 'alert', level: 'green' });
       await waitFor(() => detmer.nav()?.own.allocated.replicators > 0, 15000);
-      lorca.close(); detmer.close();
+      lorca.close(); detmer.close(); saru2.close(); stamets.close();
       await stopComputer(dc);
-      step('the spore drive: the Discovery (Crossfield class) was refused a jump until black alert, which powered nonessential systems down; then it jumped from 200,200 to 800,300 at once, spent 20 spores and cooled down (a second jump refused); condition green put the systems back');
+      step('the spore drive: the Discovery (Crossfield class) was refused a jump until black alert, which powered nonessential systems down; refused while unloaded; Engineering could not load it (by hand at the Spore Lab only), the Spore Lab loaded 20 from the reserve; then it jumped from 200,200 to 800,300 at once, spent the charge and cooled down; the reserve grew only with the cultivation chambers powered (a second jump refused); condition green put the systems back');
     }
 
     // Power paths: untie Main Engineering from the EPS and the nacelles beyond it (reached through it)

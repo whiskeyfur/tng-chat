@@ -409,16 +409,18 @@ function fillReassign() {
   // Operations right after First Officer.
   const fo = stations.indexOf('First Officer');
   const all = [...stations.slice(0, fo + 1), 'Operations', ...stations.slice(fo + 1)];
-  $('station-taps').replaceChildren(...placeBars(all, (n) => n, (n) => tap(n)));
+  // (The Spore Lab: only aboard a ship with a spore drive.)
+  const own = all.filter((n) => n !== 'Spore Lab' || lastNav?.own?.grid?.spore);
+  $('station-taps').replaceChildren(...placeBars(own, (n) => n, (n) => tap(n)));
   const across = lastNav?.own?.grid?.dockedWith || [];
-  dockSig = JSON.stringify(across);
+  dockSig = JSON.stringify([across, !!lastNav?.own?.grid?.spore]);
   $('dock-stations').replaceChildren(...across.map((v) => {
     const box = document.createElement('div');
     box.className = 'dock-stations';
     box.dataset.vessel = v;
     box.append(Object.assign(document.createElement('h3'), { className: 'ops-subhead', textContent: `Across the dock: ${/^(Starbase|Deep Space) /.test(v) ? v : `the ${v}`}` }),
       Object.assign(document.createElement('div'), { className: 'tr-taps' }));
-    box.lastChild.append(...placeBars(all, (n) => n, (n) => tap(n, v)));
+    box.lastChild.append(...placeBars(all.filter((n) => n !== 'Spore Lab'), (n) => n, (n) => tap(n, v)));
     return box;
   }));
   $('reassign-form').hidden = true;
@@ -772,6 +774,33 @@ function renderDistribution(grid) {
     el('div', { className: 'place-bar dist-buses' }, el('span', { className: 'place-label', textContent: 'Bus' }), ...['A', 'B', 'C', 'EPS', 'Deu', 'AM'].map(tap), el('span', { className: 'place-cap place-cap--r' })),
     el('div', { className: 'dist-wrap' }, svg),
     el('p', { className: 'ops-hint', textContent: 'Power runs source → bus → place → system → subsystem: a load gets this bus\'s power only while everything above it is tied to it (CUT OFF otherwise). Tap a pill to tie it to this bus or untie it.' }));
+}
+// The Spore Propulsion Laboratory: a capsule (a closed, critical monitor) for the drive and
+// the reserve; the Load / Unload taps in a right-capped cluster. Loading is by hand, here only.
+function renderSporeLab(grid) {
+  const box = document.querySelector('[data-sporelab]');
+  const sp = grid?.spore;
+  if (!box || !sp) return;
+  const sig = JSON.stringify([sp.spores, sp.loaded, sp.growing, sp.charging, sp.t, sp.cooldown, sp.why]);
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const row = (k, v, id) => el('li', id ? { id } : {}, el('span', { textContent: k }), el('span', { textContent: v }));
+  const tap = (text, msg, alert, off) => { const b = el('button', { type: 'button', className: `lcars-button lcars-button--pill tr-tap${alert ? ' lcars-button--alert' : ''}`, textContent: text, disabled: !!off }); b.onclick = () => send(msg); return b; };
+  const drive = sp.charging ? `charging a jump (${sp.t} of ${sp.secs} s)` : sp.cooldown ? `cooling down (${sp.cooldown} s)` : sp.loaded ? 'loaded: ready to jump (Helm, at black alert)' : 'empty: load spores to jump';
+  box.replaceChildren(
+    el('div', { className: 'capsule', id: 'sporelab-monitor' }, el('span', { className: 'capsule-cap capsule-cap--l' }),
+      el('ul', { className: 'st-list capsule-body' },
+        row('Spore reserve', `${sp.spores} of ${sp.cap}`, 'sporelab-reserve'),
+        row('Cultivation', sp.spores >= sp.cap ? 'reserve full' : sp.growing ? `growing: 1 every ${sp.growSecs} s` : 'paused: no power to the chambers', 'sporelab-growth'),
+        row('Loaded in the drive', sp.loaded ? `${sp.loaded} (one jump)` : 'none', 'sporelab-loaded'),
+        row('Drive', drive, 'sporelab-drive')),
+      el('span', { className: 'capsule-cap capsule-cap--r' })),
+    el('div', { className: 'place-bar net-bar sporelab-taps' }, el('span', { className: 'place-label', textContent: 'Spore drive' }),
+      tap('Load spores', { type: 'spore-load', on: true }, false, sp.loaded || sp.spores < sp.jump || sp.charging),
+      tap('Unload', { type: 'spore-load', on: false }, true, !sp.loaded || sp.charging),
+      el('span', { className: 'place-cap place-cap--r' })),
+    el('p', { className: 'ops-hint', textContent: `Spores are grown aboard (the cultivation chambers, Bus B, 20 while growing) and loaded into the drive by hand, here: ${sp.jump} a jump.` }));
 }
 function renderBrig(grid) {
   const box = document.querySelector('[data-brig]');
@@ -1467,8 +1496,7 @@ function renderCombat() {
         cell.className = ''; cell.replaceChildren(el('label', { className: 'grid-tie' }, box));
       }
       // A spore drive's reserve: from or to the starbase.
-      const spores = x.kind === 'station' && grid.spore ? [(() => { const c = x.spores; const tr = el('tr', { id: `conn-${slug}-spores` }, el('th', { scope: 'row', className: 'grid-indent grid-indent--2' }, el('span', { textContent: 'Spores' }), el('small', { className: 'grid-note', textContent: `ours ${Math.round((100 * grid.spore.spores) / grid.spore.cap)}%${c.flow ? ` · ${c.flow > 0 ? `+${c.flow}` : c.flow} a second` : ''}` })), ctlCell(io('spores', c)), ...COLS.map(() => el('td', { className: 'grid-na' }))); return tr; })()] : [];
-      return [parent, deu, am, power, eps, ...spores];
+      return [parent, deu, am, power, eps];
     });
     // The stores, one per column under the headings: each bus's battery and
     // the EPS manifold's pressure, how full, and charging (−) or covering a shortfall (+).
@@ -1507,7 +1535,7 @@ function renderCombat() {
       return tr;
     };
     const table = () => {
-      const SYS = { ...Object.fromEntries(POWER), amBus: 'AM bus magnetic containment', spore: 'Spore drive', tractor: 'Tractor beam', drydock1: 'Drydock connection 1', drydock2: 'Drydock connection 2', drydock3: 'Drydock connection 3', industrial: 'Industrial replicators', phaser1: 'Phaser array 1', phaser2: 'Phaser array 2', phaser3: 'Phaser array 3', phaser4: 'Phaser array 4' };
+      const SYS = { ...Object.fromEntries(POWER), amBus: 'AM bus magnetic containment', spore: 'Spore drive', sporeGrow: 'Spore cultivation', tractor: 'Tractor beam', drydock1: 'Drydock connection 1', drydock2: 'Drydock connection 2', drydock3: 'Drydock connection 3', industrial: 'Industrial replicators', phaser1: 'Phaser array 1', phaser2: 'Phaser array 2', phaser3: 'Phaser array 3', phaser4: 'Phaser array 4' };
       // (Every row named: a system without a name here shows its id, and says so.)
       const sysName = (sys) => SYS[sys] || (console.warn(`grid: no display name for the ${sys} system`), sys);
       const crewAt = (st) => comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st).length;
@@ -2068,6 +2096,7 @@ async function onMessage(msg) {
       // The brig's force field changes which stations can be walked to.
       if (!!msg.own?.grid?.brigSealed !== !!window.__brigSealed) { window.__brigSealed = !!msg.own?.grid?.brigSealed; fillReassign(); }
       renderBrig(msg.own?.grid);
+      renderSporeLab(msg.own?.grid);
       renderDistribution(msg.own?.grid);
       // Department readiness (Captain, First Officer): redraw when the answers change.
       if (JSON.stringify(msg.own?.readiness) !== JSON.stringify(window.__readiness)) { window.__readiness = msg.own?.readiness; stationView?.setCrew?.(comms.users); }
@@ -2082,7 +2111,7 @@ async function onMessage(msg) {
       renderCrewPanels();
       renderCombat();
       renderServices();
-      if (JSON.stringify(msg.own?.grid?.dockedWith || []) !== dockSig && !msg.remote?.controlling) fillReassign();
+      if (JSON.stringify([msg.own?.grid?.dockedWith || [], !!msg.own?.grid?.spore]) !== dockSig && !msg.remote?.controlling) fillReassign();
       renderVesselBar(msg.remote);
       break;
     case 'course-plotted':

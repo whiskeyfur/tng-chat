@@ -20,7 +20,7 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
   try {
     run(['server.js']);
     await wait(800);
-    run(['tools/shipcore.js', '--relay', `ws://localhost:${PORT}`, '--data', DATA, '--warm', '--position', '500,500', '--class', 'crossfield', 'Tabletship']); // (a Crossfield: the spore drive's row too)
+    run(['tools/shipcore.js', '--relay', `ws://localhost:${PORT}`, '--data', DATA, '--warm', '--class', 'crossfield', 'Tabletship']); // (a Crossfield, docked at a starbase: the spore drive's rows, and its Connections)
     await wait(2500);
     browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
     // A tablet held landscape, short enough that the grid and the sidebar overflow.
@@ -61,6 +61,9 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
       assert.deepEqual(blank, [], `grid rows without a name (${order})`);
     }
     assert.ok(await page.$('#ties-system-spore'), 'the spore drive has its row');
+    assert.ok(await page.$('#ties-system-sporeGrow'), 'spore cultivation has its row');
+    assert.ok(await page.$('#grid-table tr[id^="conn-"]'), 'docked: the starbase connection is listed');
+    assert.equal(await page.locator('#grid-table tr[id$="-spores"]').count(), 0, 'no Spores row in Connections: spores are grown aboard');
     assert.match(await page.textContent('#ties-system-spore'), /Spore drive/);
     assert.match(await page.textContent('#ties-system-amBus'), /AM bus magnetic containment/);
     step('every grid row on a Crossfield has a name (the AM bus magnetic containment and the spore drive too)');

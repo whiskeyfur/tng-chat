@@ -433,6 +433,11 @@
         live(readout('Targeting scanners', 'gold'), () => `Locked: the ${ship}`)),
     ] }),
     // The brig: a place, no console controls (who's held here, and the force field).
+    // The Spore Propulsion Laboratory (a spore drive ship's): the reserve growing, and the drive
+    // loaded by hand from here (client.js fills it in).
+    'Spore Lab': (ship) => ({ code: 'SPL 14', color: 'violet', panels: [
+      panel('st-sporelab', 'Spore Propulsion Laboratory', 'violet', true, h('div', { class: 'st-sporelab', 'data-sporelab': '' })),
+    ] }),
     Brig: (ship) => ({ code: 'BRG 13', color: 'red', panels: [
       panel('st-brig', 'Brig', 'red', true, h('div', { class: 'st-brig', 'data-brig': '' }, h('p', { class: 'st-brig-title' }, 'BRIG'))),
     ] }),
@@ -532,11 +537,11 @@
           const tapTo = (b, dept) => { b.onclick = () => window.__callReadiness?.(dept); return b; };
           const all = h('li', { class: 'st-dept-all' }, tapTo(h('button', { type: 'button', class: 'lcars-button lcars-button--pill', id: 'readiness-all' }, 'Check all departments'), 'all'));
           ul.replaceChildren(all, ...placeNodes(DEPARTMENTS.filter((d) => !window.__readiness || d in rd), (d) => d, (d) => {
-            const n = aboard.filter((u) => u.station === d && !u.sickbay).length; // sickbay is off duty
+            const n = aboard.filter((u) => (({ 'Spore Lab': 'Engineering' })[u.station] || u.station) === d && !u.sickbay).length; // sickbay is off duty
             const r = rd[d] || { state: 'idle' };
             const said = r.state === 'ready' ? `Ready (${r.ready.length})` : r.state === 'pending' ? `Waiting: ${r.pending.join(', ')}` : r.state === 'nocrew' ? 'No crew' : n ? `${n} on duty` : 'Unmanned';
             // Its people as chips: green once checked in, amber while waiting (no check yet: plain).
-            const here = aboard.filter((u) => u.station === d && !u.sickbay).map((u) => u.name);
+            const here = aboard.filter((u) => (({ 'Spore Lab': 'Engineering' })[u.station] || u.station) === d && !u.sickbay).map((u) => u.name);
             const chips = r.state === 'pending' || r.state === 'ready'
               ? [...r.ready.map((nm) => h('span', { class: 'st-chip', 'data-state': 'ready' }, nm)), ...r.pending.map((nm) => h('span', { class: 'st-chip', 'data-state': 'pending' }, nm))]
               : here.length && r.state !== 'nocrew' ? here.map((nm) => h('span', { class: 'st-chip', 'data-state': 'idle' }, nm)) : [h('span', { class: 'st-dept-count' }, r.state === 'nocrew' ? 'No crew' : 'Unmanned')];

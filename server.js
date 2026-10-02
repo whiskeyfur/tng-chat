@@ -53,11 +53,13 @@ const { classes: CLASSES, starbase: BASE_DESIGN } = CONFIG.loadShips((line) => c
 if (!Object.keys(CLASSES).length || !BASE_DESIGN) { console.error(`config: ${!BASE_DESIGN ? 'no starbase design (config/ships/starbase.json)' : 'no ship classes'} in ${CONFIG.DIR}: the relay can't start`); process.exit(1); }
 const DEFAULT_CLASS = CLASSES.galaxy ? 'galaxy' : Object.keys(CLASSES)[0];
 const OPS_STATION = 'Operations';   // operators only
-const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay', 'Brig', 'Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
+const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay', 'Brig', 'Spore Lab', 'Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
 // The bridge: five dedicated stations, and five consoles whose top buttons pick
 // what they run (one of CONSOLE_MODES). At a bridge console someone's station is
 // what it runs (their controls, notices, orders, readiness) and their console is
 // where they are (its power, ODN link, life support, force fields).
+// A station's department, where it isn't its own (the Spore Lab is Engineering's).
+const DEPT_OF = { 'Spore Lab': 'Engineering' };
 const BRIDGE_CONSOLES = ['Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
 const CONSOLE_MODES = ['Science', 'Engineering', 'Communications', 'Security', 'Medical'];
 const placeOf = (u) => (u.operator ? 'Operations' : u.console || u.station);
@@ -855,7 +857,7 @@ function coreSignOff(ws) {
 
 // Ranges at full sensor power; sensor power scales all three (Engineering).
 const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
-const SYSTEMS = ['engines', 'injectors', 'deflector', 'bussard', 'amBus', 'shields', 'sensors', 'lateral', 'transporter', 'weapons', 'sif', 'idf', 'atmosphere', 'thermal', 'gravity', 'lights', 'lighting', 'replicators', 'recreation', 'drydock1', 'drydock2', 'drydock3', 'industrial', 'phaser1', 'phaser2', 'phaser3', 'phaser4', 'spore'];
+const SYSTEMS = ['engines', 'injectors', 'deflector', 'bussard', 'amBus', 'shields', 'sensors', 'lateral', 'transporter', 'weapons', 'sif', 'idf', 'atmosphere', 'thermal', 'gravity', 'lights', 'lighting', 'replicators', 'recreation', 'drydock1', 'drydock2', 'drydock3', 'industrial', 'phaser1', 'phaser2', 'phaser3', 'phaser4', 'spore', 'sporeGrow'];
 // Starbases only (EPS loads under Engineering): three drydock connections (one
 // per berth: the shipyard's drydocked ships need theirs powered for work to go
 // on) and the industrial replicators. Ships never draw them; starbases have no
@@ -898,7 +900,7 @@ const lsShare = (k, sys) => { const ls = engOf(k).ls, here = locationsOf(k); ret
 // The Bussard collectors (EPS, under Helm) gather interstellar deuterium at
 // warp: up to 5 a second at warp 9, less slower or with less power.
 const BUSSARD = { perSecond: 5 };
-const RATING = { spore: 200, phaser1: 100, phaser2: 100, phaser3: 100, phaser4: 100, drydock1: 50, drydock2: 50, drydock3: 50, industrial: 100, amBus: 10, bussard: 20, engines: 300, atmosphere: 10, thermal: 8, gravity: 20, lights: 6, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
+const RATING = { sporeGrow: 20, spore: 200, phaser1: 100, phaser2: 100, phaser3: 100, phaser4: 100, drydock1: 50, drydock2: 50, drydock3: 50, industrial: 100, amBus: 10, bussard: 20, engines: 300, atmosphere: 10, thermal: 8, gravity: 20, lights: 6, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
 const ratingOf = (s) => RATING[s] ?? 100;
 // Each system's power setting is a limit, 0-150: past 100 (its rating) is
 // emergency overdrive, which slowly damages it, faster the further over it runs.
@@ -906,7 +908,7 @@ const POWER_MAX = 150;
 const OVERDRIVE_DAMAGE = 0.02; // damage per second for each point drawn over 100
 const REACTOR = 360; // power drawn for a full sensor signature (a warm ship idling draws a little less)
 const MIN_SHIELD_POWER = 20;
-const DEFAULT_POWER = { spore: 100, phaser1: 100, phaser2: 100, phaser3: 100, phaser4: 100, drydock1: 100, drydock2: 100, drydock3: 100, industrial: 50, engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lights: 100, lighting: 100, lateral: 100, deflector: 100, bussard: 100, amBus: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
+const DEFAULT_POWER = { sporeGrow: 100, spore: 100, phaser1: 100, phaser2: 100, phaser3: 100, phaser4: 100, drydock1: 100, drydock2: 100, drydock3: 100, industrial: 50, engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lights: 100, lighting: 100, lateral: 100, deflector: 100, bussard: 100, amBus: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
 // actually gets from the power grid (see "the power grid" below): damage caps
 // a system, unarmed weapons draw nothing, and a bus short of power browns out.
@@ -1482,7 +1484,7 @@ function crewCommand(ws, msg) {
       readiness.set(key, r);
       for (const d of depts) {
         // (Its crew at the station, not in sickbay; never the caller.)
-        const crew = crewOf(key).filter((u) => u.station === d && u !== ws && !u.sickbay);
+        const crew = crewOf(key).filter((u) => (DEPT_OF[u.station] || u.station) === d && u !== ws && !u.sickbay);
         const id = newId('r-');
         r[d] = { id, pending: new Set(crew.map((u) => u.id)), ready: new Set(), at: Date.now() };
         for (const u of crew) send(u, { type: 'order', id, from: info(ws), text: `${d}: report when ready`, at: Date.now(), readiness: d });
@@ -1677,7 +1679,8 @@ const designOf = (k) => (isBase(k) ? BASE_DESIGN : classOf(k));
 const placesOf = (k) => designOf(k).places || [];
 const roomOfStation = (k, st) => placesOf(k).find((p) => p.stations.includes(st))?.name || st;
 // The stations aboard (ops always: a runabout's cockpit and a shuttle have Ops too).
-const hasStation = (k, st) => st === 'Operations' || isBase(k) || !classOf(k).stations || classOf(k).stations.includes(st);
+// (The Spore Lab: only aboard a ship with a spore drive.)
+const hasStation = (k, st) => st === 'Operations' || (st === 'Spore Lab' ? !isBase(k) && !!classOf(k).spore : isBase(k) || !classOf(k).stations || classOf(k).stations.includes(st));
 const stationsOf = (k) => STATIONS.filter((st) => hasStation(k, st));
 // A starbase's EPS carries three times a ship's; a ship's follow its class.
 const busMaxOf = (k) => { const c = designOf(k); return { A: c.bus, B: c.bus, C: c.bus, EPS: c.eps }; };
@@ -1820,13 +1823,17 @@ const SHIP_FEED_MAX = 100; // the power that goes across a ship-to-ship connecti
 // comes in (and goes out) on two rows: Power, on Bus B (its set point Battery
 // B full), and EPS, on the EPS (its set point the manifold full); a starbase
 // gives 700 on each, a ship 100.
-const CONN_RES = ['deu', 'am', 'power', 'eps', 'spores'];
-const CONN_POINT = { deu: 50, am: 50, power: 100, eps: 100, spores: 50 };
-// The spore drive (a Crossfield's): a reserve of spores (SPORE.cap; SPORE.jump a
-// jump), taken on at a starbase through Connections' Spores row; a jump charges
-// for SPORE.chargeSecs with the drive getting SPORE.need% of its power, needs
-// black alert, then the ship is there; SPORE.cooldownSecs between jumps.
-const SPORE = { cap: 100, jump: 20, rate: 5, chargeSecs: Number(process.env.SPORE_CHARGE_SECS) || 10, need: 90, cooldownSecs: Number(process.env.SPORE_COOLDOWN_SECS) || 60 };
+const CONN_RES = ['deu', 'am', 'power', 'eps'];
+const CONN_POINT = { deu: 50, am: 50, power: 100, eps: 100 };
+// The spore drive (a Crossfield's, run from the Spore Propulsion Laboratory):
+// spores are grown aboard only, a unit every SPORE.growSecs while the
+// cultivation chambers have their power (up to SPORE.cap; nothing dies off
+// without it). A charge (SPORE.jump) is loaded into the drive by hand at the
+// Spore Lab console (never by automation, remote control or Engineering); a
+// jump spends it, charges for SPORE.chargeSecs with the drive getting
+// SPORE.need% of its power, needs black alert, then the ship is there;
+// SPORE.cooldownSecs between jumps.
+const SPORE = { cap: 100, jump: 20, growSecs: Number(process.env.SPORE_GROW_SECS) || 30, chargeSecs: Number(process.env.SPORE_CHARGE_SECS) || 10, need: 90, cooldownSecs: Number(process.env.SPORE_COOLDOWN_SECS) || 60 };
 const connOf = (e, key) => { const c = (e.conn[key] ||= {}); for (const r of CONN_RES) c[r] ||= { imp: false, exp: false }; return c; };
 // Does this side want to take (in) or give (out) a resource, at its level (%)?
 const wants = (c, level) => ({ in: c.imp && (!c.exp || level < CONN_POINT.deu) && level < 100, out: c.exp && (!c.imp || level > CONN_POINT.deu) && level > 0 });
@@ -1848,8 +1855,8 @@ const bayLinks = (k) => {
 // Every ship we're connected to: at a docking port, or by the bay.
 const partners = (k) => [...shipsDocked(k), ...bayLinks(k)];
 const slotFor = (o, k) => portFor(o, k) || (engOf(o).landed === k ? 'bay' : engOf(k).landed === o ? `bay:${k}` : null);
-const SYSTEM_BUS = { spore: 'EPS', phaser1: 'EPS', phaser2: 'EPS', phaser3: 'EPS', phaser4: 'EPS', drydock1: 'EPS', drydock2: 'EPS', drydock3: 'EPS', industrial: 'EPS', atmosphere: 'A', thermal: 'A', gravity: 'A', lights: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', bussard: 'EPS', amBus: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
-const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B', 'Shuttle Bay': 'B', Brig: 'B', 'Bridge 1': 'A', 'Bridge 2': 'A', 'Bridge 3': 'A', 'Bridge 4': 'A', 'Bridge 5': 'A' };
+const SYSTEM_BUS = { sporeGrow: 'B', spore: 'EPS', phaser1: 'EPS', phaser2: 'EPS', phaser3: 'EPS', phaser4: 'EPS', drydock1: 'EPS', drydock2: 'EPS', drydock3: 'EPS', industrial: 'EPS', atmosphere: 'A', thermal: 'A', gravity: 'A', lights: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', bussard: 'EPS', amBus: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
+const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B', 'Shuttle Bay': 'B', Brig: 'B', 'Spore Lab': 'B', 'Bridge 1': 'A', 'Bridge 2': 'A', 'Bridge 3': 'A', 'Bridge 4': 'A', 'Bridge 5': 'A' };
 // Why this ship can't spore-jump now (null: it can).
 function sporeFault(k) {
   const e = engOf(k);
@@ -1859,15 +1866,15 @@ function sporeFault(k) {
   if (e.drydock) return 'in drydock';
   if (e.landed) return 'landed in a shuttle bay';
   if (e.towing || towedBy(k)) return e.towing ? 'towing a ship' : 'held in a tractor beam';
-  if (e.spores < SPORE.jump) return `not enough spores (${Math.floor(e.spores)} of ${SPORE.jump})`;
   if (e.spore?.ready > Date.now()) return `the drive is cooling down (${Math.ceil((e.spore.ready - Date.now()) / 1000)} s)`;
+  if ((e.spore?.loaded || 0) < SPORE.jump) return 'spores not loaded (Spore Lab)';
   if (!(e.ties['system:spore'] || []).length) return 'the spore drive is untied (Engineering)';
   return null;
 }
-const STATION_SYSTEMS = { Helm: ['engines', 'deflector', 'bussard'], Tactical: ['shields', 'phaser1', 'weapons', 'tractor'], Science: ['sensors', 'lateral'], Engineering: ['sif', 'idf', 'amBus', 'spore', 'lifeSupport'] /* a parent row: its systems carry the ties */, Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
+const STATION_SYSTEMS = { Helm: ['engines', 'deflector', 'bussard'], Tactical: ['shields', 'phaser1', 'weapons', 'tractor'], Science: ['sensors', 'lateral'], Engineering: ['sif', 'idf', 'amBus', 'lifeSupport'] /* a parent row: its systems carry the ties */, Transporter: ['transporter'], Crew: ['replicators', 'recreation'], 'Spore Lab': ['sporeGrow', 'spore'] };
 const LOAD_NODES = {
   atmosphere: AB, thermal: AB, gravity: AB, lights: AB, lighting: AB, lateral: AB, replicators: AB, recreation: AB, // low power
-  transporter: AB,
+  transporter: AB, sporeGrow: AB,
   engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], tractor: ['EPS'], sensors: ['EPS'], deflector: ['EPS'], bussard: ['EPS'], amBus: ['EPS'], sif: ['EPS'], idf: ['EPS'], drydock1: ['EPS'], drydock2: ['EPS'], drydock3: ['EPS'], industrial: ['EPS'], phaser1: ['EPS'], phaser2: ['EPS'], phaser3: ['EPS'], phaser4: ['EPS'], spore: ['EPS'], // high power: EPS only
 };
 // Starbases are flown by the relay (they have no ship's computer): Helm's
@@ -1908,13 +1915,13 @@ function classSystems(k) {
   const c = classOf(k), out = {};
   for (const [st, list] of Object.entries(STATION_SYSTEMS)) {
     if (!hasStation(k, st) && st !== 'Engineering') continue;
-    out[st] = list.flatMap((x) => (x === 'phaser1' ? PHASER_ARRAYS.slice(0, arraysOf(k)) : [x])).filter((x) => (x !== 'transporter' || c.transporter) && (!WARP_DRIVE.includes(x) || c.maxWarp) && (x !== 'spore' || c.spore));
+    out[st] = list.flatMap((x) => (x === 'phaser1' ? PHASER_ARRAYS.slice(0, arraysOf(k)) : [x])).filter((x) => (x !== 'transporter' || c.transporter) && (!WARP_DRIVE.includes(x) || c.maxWarp) && ((x !== 'spore' && x !== 'sporeGrow') || c.spore));
   }
   return out;
 }
 // What each console's grid rows list: a starbase has no warp drive, and has its drydock connections and industrial replicators.
-const stationSystemsOf = (k) => (!isBase(k) ? classSystems(k) : isBase(k) ? { ...STATION_SYSTEMS, Helm: STATION_SYSTEMS.Helm.filter((x) => !WARP_DRIVE.includes(x)), Tactical: ['shields', ...PHASER_ARRAYS, 'weapons', 'tractor'], Engineering: [...STATION_SYSTEMS.Engineering.filter((x) => x !== 'spore'), ...BASE_ONLY.filter((x) => !PHASER_ARRAYS.includes(x))] } : STATION_SYSTEMS);
-const SYSTEM_PRIORITY = ['amBus', 'sif', 'idf', 'atmosphere', 'thermal', 'lighting', 'lights', 'gravity', 'sensors', 'lateral', 'deflector', 'bussard', 'shields', 'engines', 'injectors', 'phaser1', 'phaser2', 'phaser3', 'phaser4', 'spore', 'weapons', 'tractor', 'drydock1', 'drydock2', 'drydock3', 'transporter', 'replicators', 'recreation', 'industrial'];
+const stationSystemsOf = (k) => (!isBase(k) ? classSystems(k) : isBase(k) ? { ...STATION_SYSTEMS, Helm: STATION_SYSTEMS.Helm.filter((x) => !WARP_DRIVE.includes(x)), Tactical: ['shields', ...PHASER_ARRAYS, 'weapons', 'tractor'], Engineering: [...STATION_SYSTEMS.Engineering, ...BASE_ONLY.filter((x) => !PHASER_ARRAYS.includes(x))], 'Spore Lab': [] } : STATION_SYSTEMS);
+const SYSTEM_PRIORITY = ['amBus', 'sif', 'idf', 'atmosphere', 'thermal', 'lighting', 'lights', 'gravity', 'sensors', 'lateral', 'deflector', 'bussard', 'shields', 'engines', 'injectors', 'phaser1', 'phaser2', 'phaser3', 'phaser4', 'spore', 'sporeGrow', 'weapons', 'tractor', 'drydock1', 'drydock2', 'drydock3', 'transporter', 'replicators', 'recreation', 'industrial'];
 // Systems shown under another system in the grid table (Helm > Engines > Plasma injectors).
 const SYSTEM_CHILDREN = { engines: ['injectors'], lifeSupport: LIFE_SUPPORT };
 // Rows with no ties of their own, only their systems' (Engineering > Life support > ...).
@@ -2163,7 +2170,7 @@ function freshEng(saved, { cold = false } = {}) {
     transfer: null, feed: { port: 0, starboard: 0 }, fed: { port: 0, starboard: 0 }, // power offered to a ship docked at each port, and what actually went (Power row: Bus B)
     feedEps: { port: 0, starboard: 0 }, fedEps: { port: 0, starboard: 0 }, // (and the EPS row's)
     // The spore drive: its reserve, and a jump charging (lost on restart) and the cooldown.
-    spores: Number.isFinite(s.spores) ? Math.max(0, Math.min(SPORE.cap, s.spores)) : cold ? 0 : SPORE.cap, spore: { charging: false, t: 0, dest: null, ready: 0 },
+    spores: Number.isFinite(s.spores) ? Math.max(0, Math.min(SPORE.cap, s.spores)) : cold ? 0 : SPORE.cap, spore: { charging: false, t: 0, dest: null, ready: 0, loaded: s.sporeLoaded === SPORE.jump ? SPORE.jump : 0 },
     // The shuttle bay: its doors (Ops opens them), and the bay this craft has landed in (kept across restarts).
     brigField: s.brigField ?? true, // the brig's force field (up to start)
     conduits: !!s.conduits, // (a save from before power paths: its conduits are tied where its loads are, on load)
@@ -2272,7 +2279,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores), brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores * 100) / 100, sporeLoaded: e.spore?.loaded || 0, brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
@@ -2293,6 +2300,7 @@ function usageOf(k, s, c) {
   const w = navState.get(k)?.warp || 0;
   if (isBase(k) ? WARP_DRIVE.includes(s) : BASE_ONLY.includes(s)) return 0;
   if (s === 'spore') return !isBase(k) && classOf(k).spore && engOf(k).spore?.charging ? POWER_MAX : 0; // (only while it charges for a jump)
+  if (s === 'sporeGrow') return !isBase(k) && classOf(k).spore && engOf(k).spores < SPORE.cap ? POWER_MAX : 0; // (while there's room to grow)
   if (!isBase(k) && ((s === 'phaser2' && arraysOf(k) < 2) || (s === 'transporter' && !classOf(k).transporter) || (WARP_DRIVE.includes(s) && !classOf(k).maxWarp))) return 0; // (not aboard this class)
   switch (s) {
     case 'drydock1': case 'drydock2': case 'drydock3': return berthShip(k, Number(s.slice(7))) ? 100 : 0; // while a ship is in that berth
@@ -2674,7 +2682,7 @@ function gridView(k) {
     // The shuttle bay: doors, room, who's landed; and for a craft, the bays in range to land in.
     bay: { capacity: bayCapacity(k), open: !!e.bayOpen, doorsOk: f.subOk.bayDoors !== false, fieldOk: f.subOk.bayField !== false, landed: landedIn(k).map(shipName) },
     landed: e.landed ? shipName(e.landed) : null, bays: baysNear(k),
-    spore: classOf(k).spore && !isBase(k) ? { spores: Math.floor(e.spores), cap: SPORE.cap, jump: SPORE.jump, charging: e.spore.charging, t: e.spore.t, secs: SPORE.chargeSecs, dest: e.spore.dest?.name || (e.spore.dest ? `${Math.round(e.spore.dest.x)}, ${Math.round(e.spore.dest.y)}` : null), cooldown: Math.max(0, Math.ceil((e.spore.ready - Date.now()) / 1000)), why: sporeFault(k) } : null,
+    spore: classOf(k).spore && !isBase(k) ? { spores: Math.floor(e.spores), cap: SPORE.cap, jump: SPORE.jump, loaded: e.spore.loaded || 0, growSecs: SPORE.growSecs, growing: e.spores < SPORE.cap && flow(k).delivered.sporeGrow >= 0.9 * (flow(k).demand.sporeGrow || 1), charging: e.spore.charging, t: e.spore.t, secs: SPORE.chargeSecs, dest: e.spore.dest?.name || (e.spore.dest ? `${Math.round(e.spore.dest.x)}, ${Math.round(e.spore.dest.y)}` : null), cooldown: Math.max(0, Math.ceil((e.spore.ready - Date.now()) / 1000)), why: sporeFault(k) } : null,
     // The shipyard's drydock: whether we're docked there, in it, and any release under way.
     drydock: { shipyard: isShipyard(e.docked), in: !!e.drydock, berth: e.drydock ? e.berth : null, powered: e.drydock ? berthPowered(k) : null, release: e.release ? Math.max(0, Math.ceil((e.release - Date.now()) / 1000)) : null, hold: !!e.hold },
     dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName),
@@ -3295,13 +3303,6 @@ function busDownWhy(e, f, bus) {
 // docked with us, by each side's Import / Export.
 function moveConnections(k, e, f) {
   e.connFlow = {};
-  // Spores (a spore drive's reserve): from or to the starbase, by the Spores row's Import / Export.
-  if (e.docked && classOf(k).spore) {
-    const w = wants(connOf(e, 'station').spores, (100 * e.spores) / SPORE.cap);
-    const moved = w.in ? Math.min(SPORE.rate, SPORE.cap - e.spores) : w.out ? -Math.min(SPORE.rate, e.spores) : 0;
-    if (moved) { e.spores += moved; e.dirty = true; }
-    e.connFlow['station:spores'] = { flow: Math.round(moved), why: '' };
-  }
   const pct = (x, res) => (100 * x[BUS_RESOURCE[res]]) / FUEL[BUS_RESOURCE[res]];
   // Antimatter needs the pods' containment powered on the taking side, and the antimatter bus up on ours.
   const amOk = (x, kk) => (x.ties.containment || []).some((n) => flow(kk).totals[n]?.available >= GRID.containment) && !x.amBusDown && x.core !== 'ejected';
@@ -3430,7 +3431,7 @@ const FREQS = 10;
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
-const SYSTEM_NAMES = { spore: 'spore drive', phaser1: 'phaser array 1', phaser2: 'phaser array 2', phaser3: 'phaser array 3', phaser4: 'phaser array 4', drydock1: 'drydock connection 1', drydock2: 'drydock connection 2', drydock3: 'drydock connection 3', industrial: 'industrial replicators', engines: 'warp field coils', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', bussard: 'Bussard collectors', amBus: 'antimatter bus magnetic containment', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', lights: 'lighting', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
+const SYSTEM_NAMES = { sporeGrow: 'spore cultivation', spore: 'spore drive', phaser1: 'phaser array 1', phaser2: 'phaser array 2', phaser3: 'phaser array 3', phaser4: 'phaser array 4', drydock1: 'drydock connection 1', drydock2: 'drydock connection 2', drydock3: 'drydock connection 3', industrial: 'industrial replicators', engines: 'warp field coils', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', bussard: 'Bussard collectors', amBus: 'antimatter bus magnetic containment', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', lights: 'lighting', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
   injector: 'antimatter injector',
   conduits: 'power transfer conduits', rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
 // What a hit can damage: the systems, and the subsystems that fail when badly damaged.
@@ -3820,6 +3821,10 @@ setInterval(() => {
       e.partnerGoneAt[p] = 0;
       if (nav.warp > 0 || navState.get(o).warp > 0 || distance(k, o) > DOCK_RANGE) undockPort(k, p, 'moved apart');
     }
+    // Spore cultivation: a unit every SPORE.growSecs while the chambers have their power.
+    if (classOf(k).spore && !isBase(k) && e.spores < SPORE.cap && f.demand.sporeGrow > 0 && f.delivered.sporeGrow >= 0.9 * f.demand.sporeGrow) {
+      e.spores = Math.min(SPORE.cap, e.spores + 1 / SPORE.growSecs); e.dirty = true;
+    }
     // The spore drive: a jump charging, while the drive has its power; then the ship is there.
     if (e.spore?.charging) {
       const why = sporeFault(k);
@@ -3831,7 +3836,7 @@ setInterval(() => {
           engOf(k).impulseWant = 0; autopilots.delete(k); navTargets.delete(k);
           const core = primaryCore.get(k);
           if (core) send(core, { type: 'core-set', ship: shipName(k), set: { moveTo: { x: d.x, y: d.y, heading: n.heading } } });
-          e.spores -= SPORE.jump; e.spore = { charging: false, t: 0, dest: null, ready: now + SPORE.cooldownSecs * 1000 }; e.dirty = true;
+          e.spore = { charging: false, t: 0, dest: null, ready: now + SPORE.cooldownSecs * 1000, loaded: 0 }; e.dirty = true;
           opLog(k, `spore jump: arrived at ${d.name ? d0(d.name) : `${Math.round(d.x)}, ${Math.round(d.y)}`}`);
           for (const u of crewOf(k)) send(u, { type: 'notice', text: `Spore jump complete: at ${d.name ? d0(d.name) : `${Math.round(d.x)}, ${Math.round(d.y)}`}` });
           changed = true;
@@ -4881,6 +4886,28 @@ wss.on('connection', (ws, req) => {
       broadcastCrew(ws.shipKey);
       broadcastTraffic();
       opLog(ws.shipKey, `${ws.name} moved from ${was} to ${placeOf(ws)}`);
+      return;
+    }
+
+    // Spores loaded into the drive (or unloaded back into the reserve): by hand, by someone at the
+    // Spore Lab console aboard; never by automation, remote control, a data link or Engineering.
+    if (msg.type === 'spore-load' && ws.id) {
+      const k = ws.shipKey, e = engOf(k), note = (text) => send(ws, { type: 'notice', text: `Spore Lab: ${text}` });
+      if (placeOf(ws) !== 'Spore Lab' || ws.automaton || ws.controlling) return note('spores are loaded by hand, at the Spore Lab console');
+      if (!classOf(k).spore || isBase(k)) return note('no spore drive aboard');
+      if (consoleDark(ws)) return note('console offline, no power on its bus');
+      if (e.spore.charging) return note('the drive is charging a jump');
+      if (msg.on) {
+        if (e.spore.loaded >= SPORE.jump) return note('the drive is already loaded');
+        if (e.spores < SPORE.jump) return note(`not enough spores in the reserve (${Math.floor(e.spores)} of ${SPORE.jump})`);
+        e.spores -= SPORE.jump; e.spore.loaded = SPORE.jump;
+      } else {
+        if (!e.spore.loaded) return note('the drive is empty');
+        e.spores = Math.min(SPORE.cap, e.spores + e.spore.loaded); e.spore.loaded = 0;
+      }
+      e.dirty = true; gridChanged(k);
+      opLog(k, `Spore Lab (${ws.name}): spores ${msg.on ? 'loaded into' : 'unloaded from'} the drive`);
+      tellStations(k, ['Helm', 'Spore Lab'], msg.on ? 'Spore Lab: the drive is loaded (one jump)' : 'Spore Lab: the drive is unloaded');
       return;
     }
 

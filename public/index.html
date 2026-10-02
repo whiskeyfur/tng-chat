@@ -179,6 +179,13 @@
     .dist-map text { font-family: var(--font); letter-spacing: 0.05em; }
     .dist-node { cursor: pointer; }
     .dist-node:hover rect { filter: brightness(1.2); }
+    /* A capsule: a closed, critical monitor (inward-facing caps on both sides). */
+    .capsule { display: flex; align-items: stretch; gap: 6px; margin-bottom: 10px; }
+    .capsule-cap { flex: 0 0 22px; background: var(--lcars-violet); }
+    .capsule-cap--l { border-radius: 22px 0 0 22px; }
+    .capsule-cap--r { border-radius: 0 22px 22px 0; }
+    .capsule-body { flex: 1; margin: 0; padding: 6px 4px; }
+    .capsule-body li { display: flex; justify-content: space-between; gap: 12px; }
     /* A bridge console's top buttons: what it runs. */
     .lcars-header { position: relative; }
     .console-bar { position: absolute; top: 44px; left: calc(var(--side) + 40px); z-index: 6; display: flex; gap: 6px; align-items: center; }
