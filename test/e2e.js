@@ -1214,7 +1214,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(await geordi.evaluate(() => window.__nav.last.own.grid.tieNodes['system:tractor']), ['EPS'], 'the tractor beam ties to the EPS only');
     await geordi.click('#grid-order-operations');
     const sections = await geordi.$$eval('#grid-table tbody tr', (rs) => rs.map((r) => (r.classList.contains('grid-section') ? `[${r.textContent.trim()}]` : r.id)).slice(0, 20));
-    assert.deepEqual(sections.slice(0, 2), ['[Power sources]', 'ties-dock'], sections.join(' '));
+    assert.deepEqual(sections.slice(0, 2), ['[External sources]', 'ties-dock'], sections.join(' '));
     assert.ok(sections.indexOf('[Bus crosslink]') < sections.indexOf('ties-crosslink'), sections.join(' '));
     // Then the fuel storage (the buses, the main tanks), then the consoles.
     assert.deepEqual(sections.slice(sections.indexOf('ties-crosslink') + 1, sections.indexOf('ties-console-Captain')), ['[Fuel storage]', 'fuel-deu', 'tank-deu-main', 'fuel-am', 'tank-am-main']);
@@ -1572,10 +1572,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     const cold = barclay.nav().own.grid;
     assert.equal(cold.core, 'offline');
     assert.equal(cold.antimatter + cold.deuterium, 0);
-    assert.ok(['dock', 'ship', 'core', 'containment', 'crosslink'].every((k) => !cold.ties[k].length), 'a new ship should start with no power source tied in (solar aside: it is wired to Bus B)');
+    assert.ok(['solar', 'dock', 'ship', 'core', 'containment', 'crosslink'].every((k) => !cold.ties[k].length), 'a new ship should start with no power source tied in');
     assert.deepEqual(['A', 'B', 'C', 'EPS'].map((n) => cold.stores[n].level), [100, 100, 100, 0], 'full batteries on each bus; the EPS unpressurized');
     assert.deepEqual(['A', 'B', 'C'].map((n) => cold.stores[n].breaker), [false, false, false], "the batteries' main breakers open");
-    assert.ok(Object.entries(cold.ties).every(([k, v]) => !v.length || ['impulsePort', 'impulseStarboard', 'solar'].includes(k)), `cold iron: nothing tied in (${JSON.stringify(Object.entries(cold.ties).filter(([, v]) => v.length))})`);
+    assert.ok(Object.entries(cold.ties).every(([k, v]) => !v.length || ['impulsePort', 'impulseStarboard'].includes(k)), `cold iron: nothing tied in (${JSON.stringify(Object.entries(cold.ties).filter(([, v]) => v.length))})`);
     // A dark room: no lights and the console dark: black but for Station and comms.
     const dataPage = await openAs(browser, 'data', 'data', 'Excelsior', 'Science');
     await dataPage.waitForFunction(() => document.body.dataset.blackout === 'all');
@@ -1589,16 +1589,21 @@ const audioBytes = (page) => page.evaluate(async () => {
     const engSeen = await inert(engDark);
     assert.ok(engSeen['st-grid'] === false && engSeen['st-msd'] === true && engSeen.reassign === false && engSeen['comms-button'] === false, JSON.stringify(engSeen));
     await engDark.close();
+    // No console power and no local RF: the library and comms are offline (proximity only).
+    await dataPage.waitForSelector('#library-tab[data-offline]');
+    await dataPage.click('#comms-button');
+    await dataPage.waitForSelector('#comms-offline:not([hidden]):has-text("Comms offline: no console power or local RF. Proximity only.")');
+    await dataPage.click('#comms-close');
     assert.equal(await dataPage.isVisible('#reassign-tab'), true, 'the Station button still works');
     await dataPage.click('#reassign-tab');
     await dataPage.waitForSelector('[data-screen="reassign"]:not([hidden])');
     await dataPage.close();
     step("the Excelsior's Science station, unlit and its console dark, went black but for the Station button and comms");
-    // Solar (25) is wired to Bus B for good. Life support is several systems with their own
+    // Solar (25) comes in on Bus B only. Life support is several systems with their own
     // ties: solar alone runs the atmospheric processors (10) and thermal regulation (8) with
     // 7 over for Battery B, but not gravity (20) as well.
-    assert.deepEqual(cold.ties.solar, ['B'], 'solar is on Bus B for good');
-    barclay.send({ type: 'grid', ties: { 'system:atmosphere': ['B'], 'system:thermal': ['B'], 'system:gravity': ['B'] }, breaker: { bus: 'B', on: true } });
+    assert.deepEqual(cold.tieNodes?.solar ?? ['B'], ['B'], 'solar ties to Bus B only');
+    barclay.send({ type: 'grid', ties: { solar: ['B'], 'system:atmosphere': ['B'], 'system:thermal': ['B'], 'system:gravity': ['B'] }, breaker: { bus: 'B', on: true } });
     await waitFor(() => { const g = barclay.nav()?.own.grid; return g?.stores.B.supplying > 0 && g.stores.B.level <= 99 && g.cells.solar.B === 25; }); // (gravity on top: the battery covers it)
     assert.deepEqual(unbalanced(barclay.nav().own.grid), []);
     barclay.send({ type: 'grid', ties: { 'system:gravity': [] } });
@@ -1606,7 +1611,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(unbalanced(barclay.nav().own.grid), [], 'solar 25 = atmosphere 10 + thermal 8 + Battery B charging 7');
     assert.equal(barclay.nav().own.power.lifeSupport, 100, 'atmosphere and thermal at full: life support 100%');
     barclay.send({ type: 'grid', ties: { 'system:atmosphere': [], 'system:thermal': [] }, breaker: { bus: 'B', on: false } });
-    step('life support as several systems: solar alone (Bus B, for good) ran the atmospheric processors (10) and thermal regulation (8) with 7 over for Battery B; gravity (20) on top needed the battery');
+    step('life support as several systems: solar alone (Bus B) ran the atmospheric processors (10) and thermal regulation (8) with 7 over for Battery B; gravity (20) on top needed the battery');
     // Engineering ties in the loads (a usual layout) before bringing anything up.
     barclay.send({ type: 'grid', ties: {
       'console:Engineering': ['A'], 'console:Tactical': ['A'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'system:gravity': ['A'], 'system:lighting': ['A'], 'system:lateral': ['A'],

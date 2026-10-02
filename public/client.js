@@ -217,6 +217,14 @@ function renderProfileTaps(box) {
 }
 for (const box of document.querySelectorAll('[data-profile-taps]')) renderProfileTaps(box);
 
+// The library tab, offline (no console power or local RF): says why instead of opening.
+document.getElementById('library-tab')?.addEventListener('click', (ev) => {
+  const t = ev.currentTarget;
+  if (!t.hasAttribute('data-offline')) return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  log('Library offline: no console power or local RF');
+}, true);
+
 // Shift-click the name and ship in the header: sign out to the sign-in screen
 // to start somewhere new. Leaves the ship (and any call), and forgets the
 // ship, station, screen and menu so nothing signs back in; the name stays.
@@ -847,6 +855,12 @@ function renderCombat() {
   const emergency = dark && me.station === 'Engineering';
   bc.setAlert('emergency', emergency ? `Console on emergency power (no power on ${bus}): Power grid controls only` : null, { level: 'yellow' });
   consoleDark = dark && !emergency;
+  // Comms and the library: this console powered, or the ship's local RF up.
+  const commsOn = !dark || grid.subOk?.rf !== false;
+  comms.setOffline(commsOn ? '' : 'Comms offline: no console power or local RF. Proximity only.');
+  const lib = $('library-tab');
+  lib.toggleAttribute('data-offline', !commsOn);
+  lib.title = commsOn ? '' : 'Library offline: no console power or local RF';
   if (dark) $('console-dark').querySelector('p').textContent = `Console offline · no power on ${bus}`;
   updateCover();
   renderDarkness();
@@ -959,7 +973,7 @@ function renderCombat() {
       const plus = sign ?? SOURCE_ROWS.has(cellKey);
       for (const n of COLS) {
         if (!allowed.includes(n)) { tr.append(el('td', { className: 'grid-na', textContent: '·', title: `can't be tied to ${NODE_NAMES[n]}` })); continue; }
-        const box = el('input', { type: 'checkbox', checked: grid.ties[key].includes(n), ariaLabel: `${label}: ${NODE_NAMES[n]}`, disabled: key === 'solar' }); // (solar is wired to Bus B for good)
+        const box = el('input', { type: 'checkbox', checked: grid.ties[key].includes(n), ariaLabel: `${label}: ${NODE_NAMES[n]}` });
         box.dataset.node = n;
         // One tie for sources and EPS loads: tapping another moves it, tapping the lit one unties it.
         // Several for low-power loads (their load split evenly) and the crosslink.
@@ -1183,7 +1197,7 @@ function renderCombat() {
       const rows = [];
       if (gridOrder === 'operations') {
         // Management layout: power sources, the crosslink, batteries, then the consoles.
-        rows.push(header('Power sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl()]), header('Fuel storage'), ...divide(storageRows()));
+        rows.push(header('External sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl()]), header('Fuel storage'), ...divide(storageRows()));
         for (const st of consoles) rows.push(...consoleRows(st));
       } else {
         // Startup / Shutdown: a checklist, worked top to bottom.
@@ -1280,7 +1294,7 @@ function renderCombat() {
       const manned = Object.keys(grid.consoleOk).filter((st) => comms.users.some((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st));
       const ready = grid.core === 'online' && Object.values(grid.drives).every((d) => d.state === 'running') && (!grid.antimatter || grid.containmentOk)
         && Object.values(grid.taps).some((v) => v > 0) && manned.every((st) => grid.consoleOk[st]);
-      const COLD_KEEP = ['impulsePort', 'impulseStarboard', 'thrustersPort', 'thrustersStarboard', 'solar'];
+      const COLD_KEEP = ['impulsePort', 'impulseStarboard', 'thrustersPort', 'thrustersStarboard'];
       const cold = !['online', 'starting'].includes(grid.core) && Object.values(grid.drives).every((d) => d.state === 'off')
         && Object.values(grid.taps).every((v) => !v) && Object.entries(grid.ties).every(([k, v]) => COLD_KEEP.includes(k) || !v.length)
         && Object.values(grid.stores || {}).every((x) => !x.breaker);

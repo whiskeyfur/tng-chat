@@ -20,6 +20,7 @@
         <span class="lcars-modal__net" id="comms-net"></span>
         <button type="button" class="lcars-button lcars-button--pill" id="comms-close">Close</button>
       </header>
+      <p class="ops-notice comms-offline" id="comms-offline" hidden></p>
       <p class="lcars-note" id="ops-status"></p>
       <p class="ops-notice" id="notice"></p>
       <div class="ops-call" id="call"></div>
@@ -180,6 +181,13 @@
       $('msg-text').value = '';
     };
 
+    // No console power and no local RF: comms are offline (proximity only), nothing usable.
+    function setOffline(reason) {
+      dialog.toggleAttribute('data-offline', !!reason);
+      $('comms-offline').hidden = !reason;
+      $('comms-offline').textContent = reason || '';
+    }
+
     // Text messages need a computer core online aboard: otherwise greyed, with the reason.
     let textBlocked = '';
     function setTextBlocked(reason) {
@@ -228,6 +236,7 @@
       radio,
       setOps,
       setTextBlocked,
+      setOffline,
       get users() { return users; },
       get messages() { return messages.map((m) => ({ from: m.from.name, to: m.to.map((t) => t.name), text: m.text })); },
       get isOpen() { return dialog.open; },

@@ -227,15 +227,18 @@
     /* A dark room: everything black but the Station button and comms. */
     /* Header and footer (Home, Back) and every menu button but Comms and Station (#sections is display: contents, so its buttons are dimmed one by one). */
     body[data-blackout] .lcars-app > :not(.lcars-sidebar):not(.lcars-content),
-    body[data-blackout] .lcars-sidebar > :not(#reassign-tab):not(#comms-button):not(#sections),
+    body[data-blackout] .lcars-sidebar > :not(#reassign-tab):not(#comms-button):not(#sections):not(#library-tab:not([data-offline])),
     body[data-blackout="all"] #sections > *,
     body[data-blackout="engineering"] #sections > :not([data-screen-tab="st-grid"]),
-    body[data-blackout="all"] .lcars-content:not(:has([data-screen="reassign"]:not([hidden]))),
+    body[data-blackout="all"] .lcars-content:not(:has([data-screen="reassign"]:not([hidden]), [data-screen="library"]:not([hidden]))),
     body[data-blackout="engineering"] .lcars-content:not(:has([data-screen="reassign"]:not([hidden]), [data-screen="st-grid"]:not([hidden]))) { filter: brightness(0.06); pointer-events: none; }
     body[data-blackout] .lcars-content { background: #000; }
     .ls-table .ls-tap[data-short] { background: var(--lcars-red); }
     .profile-taps { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; }
     .profile-head { margin: 12px 0 4px; color: var(--lcars-tan); text-transform: uppercase; font-size: 16px; }
+    /* Comms and the library offline: no console power or local RF. */
+    #library-tab[data-offline] { filter: brightness(0.3) saturate(0.2); cursor: not-allowed; }
+    #comms[data-offline] .lcars-modal__frame > :not(.lcars-modal__bar):not(#comms-offline) { opacity: 0.25; pointer-events: none; }
     button.lcars-back { border: 0; font: inherit; color: #000; cursor: pointer; display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 14px 6px 0; letter-spacing: 0.1em; }
     /* Dim: only the label, so the corner stays the colour of the bar it joins. */
     button.lcars-back:disabled { cursor: default; }

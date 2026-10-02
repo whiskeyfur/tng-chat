@@ -1440,7 +1440,7 @@ const storeOf = (node) => (node === 'EPS' ? 'pressure' : `battery${node}`);
 // Every tie is one class: Bus A/B, or the EPS only (the warp core's and
 // impulse drives' outputs). The warp core itself spans both: its
 // subsystems on A/B, its output on the EPS.
-// Solar and dock power come in on Bus B only (solar is wired there for good).
+// Solar and dock power come in on Bus B only.
 const SOURCE_NODES = { ship: AB, solar: ['B'], dock: ['B'], impulsePort: ['EPS'], impulseStarboard: ['EPS'], aux1: ['EPS'], aux2: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: AB, crosslink: AB };
 // Low-power loads and sources may tie to several of Bus A, B and C (a load
 // split evenly over them, a source's output shared evenly); so may the
@@ -1575,7 +1575,6 @@ function freshEng(saved, { cold = false } = {}) {
   const oldThr = (d) => (Array.isArray(s.ties?.[`sub:${d}Thrusters`]) ? (s.ties[`sub:${d}Thrusters`].length ? ['EPS'] : []) : s.thrusters?.[d] === false ? [] : undefined);
   const ties = Object.fromEntries(Object.entries(DEFAULT_TIES).map(([k, d]) => [k, tiesOf(k, s.ties?.[k] ?? (k === 'crosslink' ? oldXl : k === 'thrustersPort' ? oldThr('port') : k === 'thrustersStarboard' ? oldThr('starboard') : s[k]), d)]));
   if (!chainOk(ties.crosslink)) ties.crosslink = []; // (A and C without B: older saves lose the crosslink)
-  ties.solar = ['B']; // (fixed)
   // Older saves: antimatter was true/false (false: core ejected); tanks full.
   const amount = (v, cap) => (Number.isFinite(v) ? Math.max(0, Math.min(cap, v)) : v === false ? 0 : cap);
   const antimatter = amount(s.antimatter, FUEL.antimatter), deuterium = amount(s.deuterium, FUEL.deuterium);
@@ -2144,7 +2143,6 @@ function gridCommand(ws, msg) {
   }
   for (const [k, v] of Object.entries(msg.ties && typeof msg.ties === 'object' ? msg.ties : {})) {
     if (!(k in e.ties) || !Array.isArray(v) || k === 'impulsePort' || k === 'impulseStarboard') continue; // a drive feeds the EPS through its thrusters' tie
-    if (k === 'solar') return note('solar is wired to Bus B for good');
     const allowed = tieNodes(k);
     if (v.some((n) => !allowed.includes(n))) return note(`${NAME[k] || k.split(':')[1]} can only be tied to ${feeds(allowed)}`);
     const list = NODES.filter((n) => v.includes(n));
@@ -2408,6 +2406,14 @@ function dropPowerlessCalls() {
     const via = ships.length < 2 ? 'local' : carriers.get(cid) || 'link';
     const sub = { local: 'rf', link: 'subspace', radio: 'radio' }[via];
     const down = ships.find((k) => !commsUp(k, sub));
+    const cutOff = members.find((u) => !commsReach(u));
+    if (cutOff && !down) {
+      // Someone's console and local RF are both down: they drop out.
+      carriers.delete(cid);
+      for (const u of members) send(u, { type: 'force-hangup', reason: u === cutOff ? `${COMMS_OFFLINE}` : `${cutOff.name}'s comms went offline` });
+      scheduleTraffic();
+      continue;
+    }
     if (!down) continue;
     carriers.delete(cid);
     const what = { rf: 'local RF', subspace: 'subspace relay', radio: 'radio' }[sub];
@@ -2462,6 +2468,10 @@ function tow() {
   }
 }
 const consoleDarkFor = (k, station) => flow(k).consoleOk[station] === false;
+// Comms and the library need this console powered or the ship's local RF up
+// (without either, only proximity chat, which isn't built yet).
+const COMMS_OFFLINE = 'Comms offline: no console power or local RF';
+const commsReach = (u) => !present(u.shipKey) || isBase(u.shipKey) || !consoleDarkFor(u.shipKey, u.operator ? OPS_STATION : u.station) || commsUp(u.shipKey, 'rf');
 
 
 // A ship is destroyed: it takes ships close by with it (some), and comes back
@@ -3108,6 +3118,7 @@ function beamCommand(ws, msg) {
 async function libraryRequest(req, res, urlPath) {
   const ws = tokens.get(req.headers['x-token']);
   if (!ws?.id) return res.writeHead(401).end('Sign in first');
+  if (!commsReach(ws)) return res.writeHead(403).end('Library offline: no console power or local RF');
 
   if (req.method === 'POST' && urlPath === '/api/library') {
     let name;
@@ -3513,6 +3524,7 @@ wss.on('connection', (ws) => {
       const text = clean(msg.text).slice(0, 500);
       const to = [...new Set(Array.isArray(msg.to) ? msg.to : [])].map((id) => typeof id === 'string' && users.get(id)).filter((u) => u && u !== ws);
       if (!text || !to.length) return;
+      if (!commsReach(ws)) return send(ws, { type: 'notice', text: `${COMMS_OFFLINE}: no messages` });
       // Messages are handled by the computer cores: at least one online at each end.
       if (!coresOnline(ws.shipKey)) return send(ws, { type: 'notice', text: 'Communications: no message: computer core offline' });
       const reach = to.filter((u) => sameNetwork(ws.shipKey, u.shipKey) && coresOnline(u.shipKey));
@@ -3547,6 +3559,10 @@ wss.on('connection', (ws) => {
       // unlinked); other ships go through ops.
       if (!target || (msg.type === 'call' && !sameNetwork(ws.shipKey, target.shipKey))) return send(ws, { type: 'unavailable', id: msg.to });
       // Communications' subsystems: local RF for calls aboard, radio between ships.
+      if (msg.type === 'call' && !commsReach(ws)) {
+        send(ws, { type: 'notice', text: `${COMMS_OFFLINE}: the call can't go through` });
+        return send(ws, { type: 'unavailable', id: msg.to });
+      }
       if (msg.type === 'call') {
         // Calls aboard go by local RF; calls to another ship on the data network by the link (subspace relays).
         const same = ws.shipKey === target.shipKey;
