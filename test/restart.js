@@ -60,7 +60,8 @@ async function look() {
     assert.deepEqual(g.ties['console:Helm'], ['A', 'B'], 'a console may share two buses');
     assert.deepEqual(g.ties.thrustersPort, [], 'thrusters that were off stay untied');
     assert.deepEqual(g.ties.thrustersStarboard, ['EPS'], 'thrusters otherwise tied in');
-    assert.deepEqual(g.ties.dock, ['A']);
+    assert.deepEqual(g.ties.dock, ['B'], 'dock power (saved on Bus A) moves to Bus B, its only bus');
+    assert.deepEqual(g.ties.solar, ['B'], 'solar is wired to Bus B');
     step('an older save came through: taps, crosslink, batteries on two buses, EPS ties moved to their bus, thrusters off');
     // (it's been repairing itself since it signed on)
     assert.ok(g.totals.B.condition >= 50 && g.totals.B.condition < 70, `Bus B condition ${g.totals.B.condition}`);

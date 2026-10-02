@@ -874,6 +874,7 @@ function renderCombat() {
           button('Fire torpedo', 'fire-torpedo', () => send({ type: 'fire', weapon: 'torpedo' }), 'lcars-button--alert')),
         el('div', { className: 'ops-readouts' },
           el('div', { className: 'lcars-readout', id: 'wp-phasers' }), el('div', { className: 'lcars-readout', id: 'wp-torpedoes' })),
+        el('p', { className: 'st-state', id: 'wp-torpedo-am' }),
         el('p', { className: 'ops-notice', id: 'weapons-status' }),
         el('p', { className: 'ops-hint', textContent: `Arm phasers to charge the banks (faster with more weapons power; armed weapons draw power, which shows on sensors). A full bank fires, up to ${c.phaser.range} units. Torpedoes reach ${c.torpedo.range} units and reload in ${c.torpedo.reload / 1000} s; ${c.carried} carried, restocked only when docked at a starbase. Shields soak hits until they fail; then the hull and systems take damage, and with no hull left the ship is destroyed.` }));
     }
@@ -896,11 +897,14 @@ function renderCombat() {
     arm.textContent = c.phaser.armed ? 'Stand down phasers' : 'Arm phasers';
     arm.setAttribute('aria-pressed', String(c.phaser.armed));
     updateWeaponTimers();
+    // The torpedo bay's antimatter tank (filled from the antimatter bus by Engineering).
+    const bay = grid.fuel?.am?.tanks.find((t) => t.name === 'torpedo');
+    wp.querySelector('#wp-torpedo-am').textContent = bay ? `Torpedo bay antimatter: ${bay.level} of ${bay.cap}${grid.fuel.am.down ? ' · antimatter bus offline' : ''}` : '';
   }
 
   // Engineering: the warp core's reaction (the Warp core panel).
   const wcp = document.querySelector('[data-warpcore]');
-  if (wcp && grid.warpCore && changed(wcp, grid.warpCore, grid.core, grid.contain, grid.dfeed, grid.start)) {
+  if (wcp && grid.warpCore && changed(wcp, grid.warpCore, grid.core, grid.contain, grid.fuel, grid.start)) {
     const w = grid.warpCore, need = w.need;
     const live = grid.core === 'online' || grid.core === 'starting';
     const state = grid.core === 'ejected' ? 'Ejected' : grid.core === 'starting' ? `Cold ignition · self-sustaining in ${grid.startSecs - grid.start} s` : grid.core === 'online' ? `Running · ${w.actual}% (set ${w.rate}%)` : 'Cold';
@@ -910,12 +914,13 @@ function renderCombat() {
     const mixes = el('span', { className: 'grid-gears' }, ...[10, 12, 15, 20].map((m) => { const b = button(`${m}:1`, `core-mix-${m}`, () => send({ type: 'grid', coreMix: m })); b.setAttribute('aria-pressed', String(w.mix === m)); return b; }));
     const tog = (text, id, on, onTap) => { const b = button(text, id, onTap, 'lcars-toggle'); b.setAttribute('aria-pressed', String(!!on)); return b; };
     // Why the injectors won't open, if they won't.
-    const blocks = [grid.contain?.field < need.field && `containment field ${grid.contain.field}% (needs ${need.field}%)`, grid.dfeed.pressure < need.feed && `deuterium feed ${grid.dfeed.pressure}% (needs ${need.feed}%)`, w.mix < need.mix && `mixture ${w.mix}:1 (cold ignition needs ${need.mix}:1 or richer)`].filter(Boolean);
+    const coreTank = (bus) => grid.fuel?.[bus]?.tanks.find((t) => t.name === 'core')?.pct ?? 0;
+    const blocks = [grid.contain?.field < need.field && `containment field ${grid.contain.field}% (needs ${need.field}%)`, coreTank('deu') < need.light && `its deuterium tank ${coreTank('deu')}% (needs ${need.light}%)`, coreTank('am') < need.light && `its antimatter tank ${coreTank('am')}% (needs ${need.light}%)`, w.mix < need.mix && `mixture ${w.mix}:1 (cold ignition needs ${need.mix}:1 or richer)`].filter(Boolean);
     wcp.replaceChildren(
       el('p', { className: 'st-state', id: 'wc-state', textContent: `Warp core: ${state}${w.breachT != null ? ` · BREACH IN ${w.breachT} s` : ''}` }),
       el('div', { className: 'ops-readouts' },
         ...[['Output', `${w.output} of ${grid.coreMax}`], ['Efficiency', `${w.eff}%`], ['Core temperature', `${Math.round(w.temp)}%${w.temp > need.hot ? ' · HOT' : ''}`], ['Containment field', `${grid.contain?.field}%`],
-          ['Dilithium alignment', `${w.align}%`], ['Crystal integrity', `${w.crystal}%`], ['Deuterium feed', `${grid.dfeed.pressure}%`], ['Mixture', `${w.mix}:1 (best ${need.bestMix}:1)`]]
+          ['Dilithium alignment', `${w.align}%`], ['Crystal integrity', `${w.crystal}%`], ['Core tanks', `deuterium ${coreTank('deu')}% · antimatter ${coreTank('am')}%`], ['Mixture', `${w.mix}:1 (best ${need.bestMix}:1)`]]
           .map(([k, v]) => el('div', { className: 'lcars-readout wc-readout' }, el('span', { textContent: k }), el('b', { textContent: v })))),
       el('div', { className: 'ops-form' }, el('span', { textContent: 'Reaction rate' }), rate),
       el('div', { className: 'ops-form' }, el('span', { textContent: 'Mixture (deuterium : antimatter)' }), mixes),
@@ -924,7 +929,7 @@ function renderCombat() {
         tog(`Plasma conduits to nacelles: ${w.plasma ? 'open' : 'closed'}`, 'wc-plasma', w.plasma, () => send({ type: 'grid', plasma: !w.plasma })),
         button('Trim dilithium', 'wc-trim', () => send({ type: 'grid', trim: true })),
         tog(`Auto-trim: ${w.autoTrim ? 'on' : 'off'}`, 'wc-autotrim', w.autoTrim, () => send({ type: 'grid', autoTrim: !w.autoTrim }))),
-      el('p', { className: 'ops-hint', id: 'wc-hint', textContent: grid.core === 'offline' && blocks.length ? `The injectors won't open: ${blocks.join('; ')}.` : `Cold ignition runs at ${need.rate}% or less for ${grid.startSecs} s, then the rate climbs to its setting. Auto-trim needs all three computer cores (${w.cores} online). Over ${need.hot}% the core wears the containment field down; under ${need.flameout}% feed pressure it flames out.` }));
+      el('p', { className: 'ops-hint', id: 'wc-hint', textContent: grid.core === 'offline' && blocks.length ? `The injectors won't open: ${blocks.join('; ')}.` : `Cold ignition runs at ${need.rate}% or less for ${grid.startSecs} s, then the rate climbs to its setting. Auto-trim needs all three computer cores (${w.cores} online). Over ${need.hot}% the core wears the containment field down; when either of its tanks runs dry it flames out.` }));
     wcp.querySelector('#wc-state').toggleAttribute('data-up', w.breachT != null);
   }
 
@@ -938,8 +943,10 @@ function renderCombat() {
     // The grid as a table: a row per source (and containment, and power fed
     // to a docked ship), a column per bus and the EPS, each cell a tie
     // checkbox with the power flowing through it; the footer is used/available.
-    const NODE_NAMES = { A: 'Bus A', B: 'Bus B', C: 'Bus C', EPS: 'EPS' };
-    const COLS = ['A', 'B', 'C', 'EPS'];
+    const NODE_NAMES = { A: 'Bus A', B: 'Bus B', C: 'Bus C', EPS: 'EPS', Deu: 'Deu. bus', AM: 'AM bus' };
+    // The power buses, then the fuel buses (deuterium, antimatter).
+    const COLS = ['A', 'B', 'C', 'EPS', 'Deu', 'AM'];
+    const FUEL_COL = { deu: 'Deu', am: 'AM' };
     // A row: label (with a note and maybe controls), then a cell per node:
     // the tie checkbox (only where this row may tie) and the power through it,
     // + for supply, − for draw.
@@ -952,7 +959,7 @@ function renderCombat() {
       const plus = sign ?? SOURCE_ROWS.has(cellKey);
       for (const n of COLS) {
         if (!allowed.includes(n)) { tr.append(el('td', { className: 'grid-na', textContent: '·', title: `can't be tied to ${NODE_NAMES[n]}` })); continue; }
-        const box = el('input', { type: 'checkbox', checked: grid.ties[key].includes(n), ariaLabel: `${label}: ${NODE_NAMES[n]}` });
+        const box = el('input', { type: 'checkbox', checked: grid.ties[key].includes(n), ariaLabel: `${label}: ${NODE_NAMES[n]}`, disabled: key === 'solar' }); // (solar is wired to Bus B for good)
         box.dataset.node = n;
         // One tie for sources and EPS loads: tapping another moves it, tapping the lit one unties it.
         // Several for low-power loads (their load split evenly) and the crosslink.
@@ -991,12 +998,14 @@ function renderCombat() {
       const out = drive ? (x.state === 'running' ? ` · ${grid.cells[src]?.EPS || 0} of ${grid.impulseOutput} to the EPS, the rest to thrust` : '') : (x.state === 'running' ? ` · ${grid.cells[src]?.EPS || 0} of ${grid.auxOutput} to the EPS` : '');
       const self = x.epsTap && grid.epsLive && x.state === 'running';
       // The chamber's own pressure (its pump pulls deuterium from the feed): it lights at the feed's minimum.
-      const press = `pressure ${x.pressure}% (lights at ${grid.dfeed.min}%)`;
-      const chamber = subRow(`${rn}Chamber`, 2, `${press}${x.state === 'starting' ? (x.pressure < grid.dfeed.min ? ' · priming' : grid.subOk[`${rn}Chamber`] ? ' · lighting' : ' · NO POWER') : x.state === 'running' ? (self ? ' · self-powered from the EPS' : ' · on its bus ties') : ''}`);
+      // The chamber burns from the reactor's own deuterium tank: it lights at the bus's minimum.
+      const tank = grid.fuel?.deu?.tanks.find((t) => t.name === rn);
+      const press = `tank ${tank?.pct ?? 0}% (lights at ${grid.fuel?.deu?.light ?? 30}%)`;
+      const chamber = subRow(`${rn}Chamber`, 2, `${press}${x.state === 'starting' ? (grid.subOk[`${rn}Chamber`] ? ' · lighting' : ' · NO POWER') : x.state === 'running' ? (self ? ' · self-powered from the EPS' : ' · on its bus ties') : ''}`);
       chamber.querySelector('th span').after(x.state === 'off' ? small('Light', `${rn}-start`, () => send({ type: 'grid', reactor: { name: rn, on: true } })) : small('Shut down', `${rn}-stop`, () => send({ type: 'grid', reactor: { name: rn, on: false } }), true));
       const rows = [
         parentRow(`ties-${src}`, label, 1, `${state}${out}`),
-        subRow(`${rn}Pump`, 2, self ? 'self-powered' : x.state !== 'off' ? 'pulling deuterium from the feed' : ''),
+        ...tankRow('deu', rn), // (the tank above the chamber it feeds)
         chamber,
         toggleRow(`${rn}-epstap`, 'EPS tap', 2, x.epsTap, () => send({ type: 'grid', reactor: { name: rn, epsTap: !x.epsTap } }), x.epsTap ? (grid.epsLive ? 'running, the chamber powers itself from the EPS' : 'the EPS isn\'t energized: on its bus ties') : 'the chamber runs on its bus ties'),
       ];
@@ -1014,12 +1023,34 @@ function renderCombat() {
     };
     const driveRows = (d) => reactorRows(d, grid.drives[d], { drive: true });
     const auxRows = () => Object.entries(grid.aux || {}).flatMap(([a, x]) => reactorRows(a, x));
-    // The deuterium feed: valves, cryo-pumps and slush heaters; pressure, tank, temperature.
-    const feedRows = () => [
-      parentRow('ties-deuterium-parent', 'Deuterium feed', 1, `${grid.dfeed.pressure >= grid.dfeed.min ? 'deuterium available' : 'NO DEUTERIUM AVAILABLE'} · feed ${grid.dfeed.pressure}% · tank ${grid.deuterium} of ${grid.fuelCaps.deuterium} · slush ${grid.dfeed.temp} K`),
-      toggleRow('deuterium-valves', 'Isolation valves', 2, grid.dfeed.valves, () => send({ type: 'grid', valves: !grid.dfeed.valves }), grid.dfeed.valves ? 'open' : 'closed: no feed'),
-      subRow('cryoPumps', 2), subRow('slushHeaters', 2),
-    ];
+    // The fuel buses. A tank row: its level and Fill / Drain, tied to its bus
+    // by the checkbox in that bus's column; an antimatter tank (but the pods,
+    // whose containment has its own row) also ties to the low buses for its
+    // own containment, its field shown. Each system's tank sits under it.
+    const tankRow = (bus, name, level = 2) => {
+      const t = grid.fuel?.[bus]?.tanks.find((x) => x.name === name);
+      if (!t) return [];
+      const fill = small('Fill', `tank-${bus}-${t.name}-fill`, () => send({ type: 'grid', tank: { bus, name: t.name, fill: !t.fill } }));
+      const drain = small('Drain', `tank-${bus}-${t.name}-drain`, () => send({ type: 'grid', tank: { bus, name: t.name, drain: !t.drain } }));
+      for (const [b, on] of [[fill, t.fill], [drain, t.drain]]) { b.classList.add('lcars-toggle'); b.setAttribute('aria-pressed', String(!!on)); }
+      const label = `${bus === 'am' ? 'Antimatter' : 'Deuterium'}${t.name === 'main' ? `: ${t.label}` : ' tank'}`;
+      const note = `${t.level} of ${t.cap} (${t.pct}%)${t.name !== 'main' && t.pct < grid.fuel[bus].light ? ' · LOW' : ''}${t.field != null && t.level > 0 ? ` · containment ${t.field}%${t.field < 100 ? ' FAILING' : ''}` : ''}`;
+      const own = bus === 'am' && t.name !== 'main' && t.containKey;
+      const tr = own ? ties(t.containKey, label, t.containKey, { level, sign: false, note, controls: [fill, drain] })
+        : el('tr', {}, el('th', { scope: 'row', className: `grid-indent grid-indent--${level}` }, el('span', { textContent: label }), fill, drain, el('small', { className: 'grid-note', textContent: note })), ...COLS.map(() => el('td', { className: 'grid-na' })));
+      tr.id = `tank-${bus}-${t.name}`;
+      const cell = tr.children[1 + COLS.indexOf(FUEL_COL[bus])];
+      const box = el('input', { type: 'checkbox', checked: t.tied, ariaLabel: `${label}: ${NODE_NAMES[FUEL_COL[bus]]}` });
+      box.onchange = () => send({ type: 'grid', tank: { bus, name: t.name, tied: box.checked } });
+      cell.className = ''; cell.replaceChildren(el('label', { className: 'grid-tie' }, box));
+      return [tr];
+    };
+    // Fuel storage: the buses' state, then the main storage on each.
+    const storageRows = () => ['deu', 'am'].flatMap((bus) => {
+      const fb = grid.fuel?.[bus];
+      if (!fb) return [];
+      return [parentRow(`fuel-${bus}`, bus === 'deu' ? 'Deuterium bus' : 'Antimatter bus', 1, fb.down ? 'AM BUS CONTAINMENT OFFLINE: nothing moves (power its magnetic containment)' : fb.flow ? `moving ${fb.flow} a second` : 'idle'), ...tankRow(bus, 'main')];
+    });
     // The computer cores: a parent row, then each core with its Boot / Shut down tap and boot stage.
     const computerRows = () => {
       const cs = grid.computers || [];
@@ -1061,11 +1092,13 @@ function renderCombat() {
       parentRow('ties-core-parent', 'Warp core (M/ARC)', 1, grid.core === 'starting' ? `starting ${grid.start} of ${grid.startSecs} s` : grid.core,
         grid.core === 'ejected' ? [] : grid.core === 'offline' ? [small('Start', 'core-start', () => send({ type: 'grid', core: 'start' }))] : [small('Stop', 'core-stop', () => send({ type: 'grid', core: 'stop' }), true)]),
       ...(grid.core !== 'ejected' ? [
-        ...['constriction', 'corePump', 'amConduit', 'injector'].map((x) => subRow(x, 2)),
+        // (The core's tanks above the injectors they feed.)
+        ...['constriction', 'amConduit'].map((x) => subRow(x, 2)),
+        ...tankRow('deu', 'core'), ...tankRow('am', 'core'),
+        subRow('injector', 2),
         ties('core', 'Power transfer conduits', 'core', { level: 2, note: c.damage.conduits >= 50 ? 'DAMAGED: no output' : 'carry the core\'s output into the EPS' }),
         toggleRow('core-plasma', 'Plasma transfer conduits', 2, grid.warpCore?.plasma, () => send({ type: 'grid', plasma: !grid.warpCore?.plasma }), grid.warpCore?.plasma ? 'open to the nacelles: warp' : 'closed: no warp'),
       ] : []),
-      ...feedRows(),
       ...driveRows('port'), ...driveRows('starboard'),
       ...auxRows(),
       ...tapRows(),
@@ -1120,6 +1153,7 @@ function renderCombat() {
           const up = (v) => Math.ceil(v - 1e-9);
           const want = up(sys === 'tractor' ? (grid.towing ? 30 : 0) : grid.demand[sys]), got = up(sys === 'tractor' ? want : grid.delivered[sys]);
           rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { level, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}${got > 100 ? ' · OVERDRIVE' : ''}` : 'off' }));
+          if (sys === 'weapons') rows.push(...tankRow('am', 'torpedo', level + 1)); // the torpedo bay's antimatter
           for (const child of grid.systemChildren[sys] || []) sysRow(child, level + 1);
         };
         for (const sys of grid.stationSystems[st] || []) sysRow(sys, 1);
@@ -1149,7 +1183,7 @@ function renderCombat() {
       const rows = [];
       if (gridOrder === 'operations') {
         // Management layout: power sources, the crosslink, batteries, then the consoles.
-        rows.push(header('Power sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl()]));
+        rows.push(header('Power sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl()]), header('Fuel storage'), ...divide(storageRows()));
         for (const st of consoles) rows.push(...consoleRows(st));
       } else {
         // Startup / Shutdown: a checklist, worked top to bottom.
@@ -1162,7 +1196,7 @@ function renderCombat() {
         const engNoReactors = () => consoleRows('Engineering', { reactors: false });
         const containment = engineeringRows().filter((r) => r.id === 'ties-containment');
         // In Shutdown the core's rows run the other way under it (conduits first, constriction last).
-        const coreRows = () => { const [head, ...rest] = engineeringRows().filter((r) => /^(ties-(core|sub-constriction|sub-corePump|sub-amConduit|sub-injector)|core-plasma)/.test(r.id)); return [head, ...(gridOrder === 'shutdown' ? rest.reverse() : rest)]; };
+        const coreRows = () => { const [head, ...rest] = engineeringRows().filter((r) => /^(ties-(core|sub-constriction|sub-amConduit|sub-injector)|core-plasma|tank-(deu|am)-core)/.test(r.id)); return [head, ...(gridOrder === 'shutdown' ? rest.reverse() : rest)]; };
         const driveRowsAll = () => [...driveRows('port'), ...driveRows('starboard')];
         // Startup fills a tank from the dock (once, to full); Shutdown empties it to the dock.
         const fuelButton = (r) => () => {
@@ -1186,12 +1220,12 @@ function renderCombat() {
             on: () => (busOn ? '' : 'the computer cores need Bus A, B or C energized') },
           { title: 'Antimatter containment', rows: () => containment, extra: antimatterButton, state: () => (!grid.antimatter ? 'Cold' : grid.ties.containment.length && grid.containmentOk ? 'Online' : 'Startup'),
             on: () => (grid.core === 'ejected' ? 'no warp core aboard' : busOn ? '' : 'containment needs Bus A, B or C energized'), off: () => (grid.antimatter ? 'containment can\'t be cut with antimatter aboard: offload it at a starbase' : '') },
-          { title: 'Deuterium feed', rows: feedRows, extra: fuelButton('deuterium'), state: () => (grid.dfeed.pressure >= 100 ? 'Online' : grid.dfeed.valves ? 'Startup' : 'Cold'),
-            on: () => (!grid.deuterium ? 'the feed needs deuterium aboard' : busOn ? '' : 'the cryo-pumps and slush heaters need Bus A, B or C energized') },
+          { title: 'Fuel buses', rows: storageRows, extra: fuelButton('deuterium'), state: () => { const sys = ['deu', 'am'].flatMap((b) => grid.fuel?.[b]?.tanks.filter((t) => t.name !== 'main' && t.name !== 'torpedo') || []); return sys.length && sys.every((t) => t.pct >= (grid.fuel.deu.light || 30)) ? 'Online' : sys.some((t) => t.fill && t.tied) ? 'Startup' : 'Cold'; },
+            on: () => (!grid.deuterium && !grid.antimatter ? 'no fuel aboard: onboard deuterium and antimatter' : '') },
           { title: 'Impulse drives', rows: driveRowsAll, state: () => (drives.every((d) => d.state === 'running') ? 'Online' : drives.some((d) => d.state !== 'off') ? 'Startup' : 'Cold'),
-            on: () => (grid.dfeed.pressure < grid.dfeed.min ? `the reaction chambers light at ${grid.dfeed.min}% deuterium feed pressure` : busOn ? '' : 'the reaction chambers and pumps need Bus A, B or C energized') },
+            on: () => (busOn ? '' : 'the reaction chambers need Bus A, B or C energized') },
           { title: 'Aux fusion reactors', rows: auxRows, state: () => { const xs = Object.values(grid.aux || {}); return xs.length && xs.every((x) => x.state === 'running') ? 'Online' : xs.some((x) => x.state !== 'off') ? 'Startup' : 'Cold'; },
-            on: () => (grid.dfeed.pressure < grid.dfeed.min ? `the reaction chambers light at ${grid.dfeed.min}% deuterium feed pressure` : busOn ? '' : 'the reaction chambers and pumps need Bus A, B or C energized') },
+            on: () => (busOn ? '' : 'the reaction chambers need Bus A, B or C energized') },
           { title: 'EPS taps', rows: tapRows, state: () => (Object.values(grid.taps).some((v) => v > 0) ? 'Online' : 'Cold'),
             on: () => (!grid.epsLive ? `the EPS isn't energized: the manifold charges from ${grid.epsChargeGen}+ of EPS generation` : !(grid.computers || []).some((x) => x.state === 'online') ? 'the EPS taps need a computer core online' : epsOn ? '' : 'the EPS taps need the EPS energized') },
           { title: 'Warp core', rows: coreRows, state: () => ({ online: 'Online', starting: 'Startup', ejected: 'Ejected' })[grid.core] || 'Cold',
@@ -1225,6 +1259,10 @@ function renderCombat() {
         el('tbody', {}, ...rows),
         el('tfoot', {}, el('tr', {}, el('th', { scope: 'row', textContent: 'Used / available / max' }),
           ...COLS.map((n) => {
+            // A fuel bus: what its tanks hold, of what they could.
+            const fb = grid.fuel?.[Object.keys(FUEL_COL).find((b) => FUEL_COL[b] === n)];
+            if (fb) return el('td', { id: `grid-total-${n}` }, `${fb.tanks.reduce((a, x) => a + x.level, 0)} / ${fb.tanks.reduce((a, x) => a + x.cap, 0)}`);
+            if (!grid.totals[n]) return el('td');
             const t = grid.totals[n];
             const td = el('td', { id: `grid-total-${n}` }, `${t.used} / ${t.available} / ${t.max}`, ...(t.condition < 100 ? [el('small', { className: 'grid-note', textContent: `damaged: ${t.condition}% condition` })] : []));
             td.toggleAttribute('data-over', t.tied > t.max || t.condition < 100);
@@ -1242,7 +1280,7 @@ function renderCombat() {
       const manned = Object.keys(grid.consoleOk).filter((st) => comms.users.some((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st));
       const ready = grid.core === 'online' && Object.values(grid.drives).every((d) => d.state === 'running') && (!grid.antimatter || grid.containmentOk)
         && Object.values(grid.taps).some((v) => v > 0) && manned.every((st) => grid.consoleOk[st]);
-      const COLD_KEEP = ['impulsePort', 'impulseStarboard', 'thrustersPort', 'thrustersStarboard'];
+      const COLD_KEEP = ['impulsePort', 'impulseStarboard', 'thrustersPort', 'thrustersStarboard', 'solar'];
       const cold = !['online', 'starting'].includes(grid.core) && Object.values(grid.drives).every((d) => d.state === 'off')
         && Object.values(grid.taps).every((v) => !v) && Object.entries(grid.ties).every(([k, v]) => COLD_KEEP.includes(k) || !v.length)
         && Object.values(grid.stores || {}).every((x) => !x.breaker);

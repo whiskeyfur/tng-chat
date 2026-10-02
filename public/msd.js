@@ -74,7 +74,9 @@
       warp: [g.core === 'online' ? (g.warpCore?.breachT != null ? 'bad' : 'ok') : g.core === 'starting' ? 'busy' : g.core === 'ejected' ? 'bad' : 'off',
         g.warpCore?.breachT != null ? `BREACH ${g.warpCore.breachT} s` : { online: `Running ${g.warpCore?.actual ?? ''}%`, starting: 'Ignition', offline: 'Cold', ejected: 'Ejected' }[g.core]],
       fuel: [!g.antimatter ? 'off' : g.breach != null ? 'bad' : g.contain?.onReserve ? 'warn' : 'ok', !g.antimatter ? 'No antimatter' : `${g.contain?.field}% field${g.contain?.onReserve ? ' · reserve' : ''}`],
-      deut: [g.dfeed?.pressure >= g.dfeed?.min ? 'ok' : g.dfeed?.valves ? 'busy' : 'off', `${g.dfeed?.pressure ?? 0}% feed`],
+      // The fuel buses: the systems' own tanks at their lighting level, or filling.
+      deut: (() => { const sys = ['deu', 'am'].flatMap((b) => g.fuel?.[b]?.tanks.filter((t) => t.name !== 'main' && t.name !== 'torpedo') || []); const low = sys.filter((t) => t.pct < (g.fuel?.deu?.light ?? 30));
+        return [g.fuel?.am?.down ? 'bad' : !low.length ? 'ok' : g.fuel?.deu?.flow || g.fuel?.am?.flow ? 'busy' : 'warn', g.fuel?.am?.down ? 'AM bus offline' : `D ${g.deuterium} · AM ${g.antimatter}`]; })(),
       eps: [g.epsLive ? 'ok' : g.epsGen >= g.epsChargeGen ? 'busy' : 'off', g.epsLive ? 'Energized' : g.epsGen >= g.epsChargeGen ? 'Charging' : 'Dead'],
       sif: [p.sif >= 90 ? 'ok' : p.sif >= 50 ? 'warn' : p.sif > 0 ? 'bad' : 'off', `${p.sif}%`],
       idf: [p.idf >= 90 ? 'ok' : p.idf >= 50 ? 'warn' : p.idf > 0 ? 'bad' : 'off', `${p.idf}%`],
@@ -84,7 +86,7 @@
       tractor: [g.towing ? 'ok' : 'off', g.towing ? `Towing the ${g.towing}` : 'Off'],
     };
   }
-  const TILES = [['fuel', 'Antimatter containment'], ['batt', 'Bus batteries'], ['comp', 'Computer cores'], ['deut', 'Deuterium feed'], ['fusion', 'Fusion reactors'], ['eps', 'EPS grid'],
+  const TILES = [['fuel', 'Antimatter containment'], ['batt', 'Bus batteries'], ['comp', 'Computer cores'], ['deut', 'Fuel buses'], ['fusion', 'Fusion reactors'], ['eps', 'EPS grid'],
     ['atmo', 'Atmosphere'], ['thermal', 'Thermal'], ['gravity', 'Gravity'], ['lighting', 'Emergency lighting'], ['sif', 'Structural integrity'], ['idf', 'Inertial dampers'],
     ['lrs', 'Long-range sensors'], ['sens', 'Lateral sensors'], ['comm', 'Communications'], ['warp', 'Warp core'], ['defl', 'Deflector'], ['shld', 'Shields'], ['trans', 'Transporters'],
     ['impulse', 'Impulse'], ['prop', 'Warp drive'], ['ext', 'Dock and solar power'], ['tractor', 'Tractor beam']];
