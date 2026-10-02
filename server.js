@@ -929,7 +929,7 @@ function navMessage(key) {
   return {
     type: 'nav',
     own: own ? { name: shipName(key), ...own, class: isBase(key) ? null : classOf(key).name, power: powerOf(key), capacity: Object.fromEntries(Object.entries(capacityOf(key)).map(([x, v]) => [x, Math.floor(v)])), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
-      autopilot: autopilots.get(key)?.target || null, transporter: transporterView(key),
+      autopilot: autopilots.get(key)?.target || null, transporter: transporterView(key), readiness: readinessView(key),
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
     bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
@@ -1288,6 +1288,24 @@ const CONFINED_MAY_CALL = new Set(['Security', 'Medical', 'Operations']);
 const alertOf = (k) => navState.get(k)?.alert || 'green';
 const lockoutOf = (k) => !!navState.get(k)?.lockout;
 
+// Department readiness: the Captain or First Officer calls a department (or
+// all of them) to report ready; the crew at those stations each tap Ready (the
+// orders' way). A department is ready (green) once all its crew have checked
+// in, pending (amber) until then, "no crew" when nobody's there. A new call
+// resets that department's answers. The caller isn't asked; on the First
+// Officer's call neither is the Captain (they're not departments anyway).
+const DEPARTMENTS = ['Operations', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter'];
+const readiness = new Map(); // ship key -> { dept -> { id, pending: Set, ready: Set, at } }
+function readinessView(k) {
+  const r = readiness.get(k) || {};
+  const names = (ids) => [...ids].map((id) => users.get(id)?.name).filter(Boolean);
+  return Object.fromEntries(DEPARTMENTS.filter((d) => hasStation(k, d)).map((d) => {
+    const c = r[d];
+    if (!c) return [d, { state: 'idle' }];
+    const pending = names(c.pending), ready = names(c.ready);
+    return [d, { state: !pending.length && !ready.length ? 'nocrew' : pending.length ? 'pending' : 'ready', pending, ready, at: c.at }];
+  }));
+}
 // Orders and who has acknowledged them, for whoever gave them.
 const orders = new Map(); // id -> { id, ship, by, from, text, at, pending, acked }
 function orderStatus(o) {
@@ -1333,7 +1351,28 @@ function crewCommand(ws, msg) {
       opLog(key, `${ws.station === 'Captain' ? "Captain's" : "First Officer's"} orders: ${text}`);
       return;
     }
+    case 'readiness': {
+      // A readiness check: one department, or all of them.
+      if (ws.station !== 'Captain' && ws.station !== 'First Officer') return note('Only the Captain or the First Officer calls for department readiness');
+      const depts = msg.dept === 'all' ? DEPARTMENTS.filter((d) => hasStation(key, d)) : DEPARTMENTS.includes(msg.dept) ? [msg.dept] : [];
+      if (!depts.length) return note('No such department');
+      const r = readiness.get(key) || {};
+      readiness.set(key, r);
+      for (const d of depts) {
+        // (Its crew at the station, not in sickbay; never the caller.)
+        const crew = crewOf(key).filter((u) => u.station === d && u !== ws && !u.sickbay);
+        const id = newId('r-');
+        r[d] = { id, pending: new Set(crew.map((u) => u.id)), ready: new Set(), at: Date.now() };
+        for (const u of crew) send(u, { type: 'order', id, from: info(ws), text: `${d}: report when ready`, at: Date.now(), readiness: d });
+      }
+      opLog(key, `${ws.name}: readiness check, ${msg.dept === 'all' ? 'all departments' : depts[0]}`);
+      scheduleNav();
+      return note(`Readiness check: ${msg.dept === 'all' ? 'all departments' : depts[0]}`);
+    }
     case 'order-ack': {
+      // A readiness check answered: Ready.
+      const rc = Object.values(readiness.get(key) || {}).find((c) => c.id === msg.id);
+      if (rc) { if (rc.pending.delete(ws.id)) rc.ready.add(ws.id); scheduleNav(); return; }
       const o = orders.get(msg.id);
       if (!o || !o.pending.has(ws.id)) return;
       // A reassignment: move now, as walking would (force fields hold).
@@ -3510,7 +3549,7 @@ function stationCommand(ws, msg) {
   const t = msg.type;
   // Off the ODN, the station's controls do nothing (answering an order needs no console).
   const odnOff = !odnLinked(ws.shipKey, ws.operator ? OPS_STATION : ws.station) && !['order-ack', 'order-decline'].includes(t);
-  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'bay-doors', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
+  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'bay-doors', 'readiness', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
     send(ws, { type: 'notice', text: 'Disconnected from the optical data network' });
     return true;
   }
@@ -3522,7 +3561,7 @@ function stationCommand(ws, msg) {
   if (['helm', 'autopilot', 'scan', 'sci-lock', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
-  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'bay-doors'].includes(t)) return gate(crewCommand);
+  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'bay-doors', 'readiness'].includes(t)) return gate(crewCommand);
   if (['lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
   if (t === 'grid') return gridCommand(ws, msg), true; // emergency power: works with the console dark
   if (t === 'tractor') return gate(tractorCommand);

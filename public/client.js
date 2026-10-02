@@ -690,6 +690,8 @@ function openSystem(k) {
 }
 // Engineering's Life support panel: each place aboard, its atmosphere, heat,
 // gravity and lights (taps), and what it's actually getting.
+// Department readiness: call one department (or all) to report ready.
+window.__callReadiness = (dept) => send({ type: 'readiness', dept });
 // Hangar control (the Shuttle Bay's panel): the bay doors (tap to open or
 // close), the containment field, room, and who's landed.
 function renderBay() {
@@ -1860,6 +1862,8 @@ async function onMessage(msg) {
     }
     case 'nav':
       lastNav = msg;
+      // Department readiness (Captain, First Officer): redraw when the answers change.
+      if (JSON.stringify(msg.own?.readiness) !== JSON.stringify(window.__readiness)) { window.__readiness = msg.own?.readiness; stationView?.setCrew?.(comms.users); }
       // The Communications console's subspace bands follow the subspace relay.
       { const g = msg.own?.grid; window.__subspace = g ? { up: g.subOk?.subspace !== false, why: g.ties?.['sub:subspace']?.length ? 'no power to the relay, or it is damaged' : 'the relay is untied (Engineering)' } : null; }
       renderMSD();
@@ -1892,7 +1896,7 @@ async function onMessage(msg) {
     }
     case 'order':
       log(`Captain's orders (${msg.from.title || msg.from.name}): ${msg.text}`);
-      bc.addOrder(msg.from, msg.text, msg.id, msg.reassign);
+      bc.addOrder(msg.from, msg.text, msg.id, msg.reassign, msg.readiness);
       break;
     case 'override':
       // Someone on another vessel has taken over our station with our command prefix.

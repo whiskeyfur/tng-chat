@@ -149,6 +149,8 @@
       for (const [k, a] of alerts) pill(`bcast--alert bcast--${a.level || 'red'}`, a.text, ...(a.dismiss ? [button('Dismiss', () => { alerts.delete(k); render(); })] : []));
       for (const o of orders) {
         const done = (type) => { orders.splice(orders.indexOf(o), 1); if (o.id) send({ type, id: o.id }); render(); };
+        // A readiness check: tap Ready to check in.
+        if (o.readiness) { pill('bcast--order', `Readiness check · ${o.from.title || o.from.name}: ${o.text}`, button('Ready', () => done('order-ack'))); continue; }
         // A reassignment moves you when you acknowledge it; you may decline it.
         pill('bcast--order', `${o.from.station === 'First Officer' ? "First Officer's" : "Captain's"} orders · ${o.from.title || o.from.name}: ${o.text}`,
           button('Acknowledge', () => done('order-ack')), ...(o.reassign ? [button('Decline', () => done('order-decline'), true)] : []));
@@ -192,7 +194,7 @@
         alerts.set(key, { text, level, dismiss });
         render();
       },
-      addOrder(from, text, id, reassign) { orders.push({ from, text, id, reassign }); render(); },
+      addOrder(from, text, id, reassign, readiness) { orders.push({ from, text, id, reassign, readiness }); render(); },
       get speaking() { return speaking ? { bid: speaking.bid, label: speaking.label, listeners: speaking.pcs.size } : null; },
       get listening() { return [...listening.values()].map((l) => ({ bid: l.bid, from: l.from.name, connected: l.pc?.connectionState === 'connected', pc: l.pc })); },
       get shipRadio() { return radio ? { name: radio.name, url: radio.url, playing: !radio.audio.paused } : null; },

@@ -1083,6 +1083,23 @@ const audioBytes = (page) => page.evaluate(async () => {
     await picard.waitForSelector('#st-dept li[data-dept="Tactical"][data-manned]', { state: 'attached' });
     step('the First Officer ordered bob to Medical (he moved on acknowledging); carol in sickbay left Tactical unmanned until discharged');
 
+    // Readiness call-outs: the Captain checks Tactical; carol taps Ready and it goes green. Then all
+    // departments: Medical waits (amber) for bob; one with nobody there shows no crew.
+    await screen(picard, 'st-dept');
+    await picard.click('#st-dept li[data-dept="Tactical"] .st-dept-check');
+    await picard.waitForSelector('#st-dept li[data-dept="Tactical"][data-ready="pending"]', { state: 'attached' });
+    await carol.waitForSelector('.bcast--order:has-text("Readiness check")', { state: 'attached' });
+    await carol.$eval('.bcast--order', (p) => [...p.querySelectorAll('button')].find((b) => b.textContent === 'Ready').click());
+    await picard.waitForSelector('#st-dept li[data-dept="Tactical"][data-ready="ready"]', { state: 'attached' });
+    await picard.click('#readiness-all');
+    await picard.waitForSelector('#st-dept li[data-dept="Medical"][data-ready="pending"]:has-text("bob")', { state: 'attached' });
+    assert.ok(await picard.locator('#st-dept li[data-ready="nocrew"]').count() >= 1, 'an unmanned department should show no crew');
+    await bob.waitForSelector('.bcast--order:has-text("Medical: report when ready")', { state: 'attached' });
+    await bob.$eval('.bcast--order', (p) => [...p.querySelectorAll('button')].find((b) => b.textContent === 'Ready').click());
+    await picard.waitForSelector('#st-dept li[data-dept="Medical"][data-ready="ready"]', { state: 'attached' });
+    await carol.$eval('.bcast--order', (p) => [...p.querySelectorAll('button')].find((b) => b.textContent === 'Ready')?.click());
+    step('readiness call-outs: the Captain checked Tactical (carol tapped Ready: green), then all departments (Medical amber until bob checked in; an empty department: no crew)');
+
     // The Captain: orders to every console, red alert (shields up, frames red), then green.
     await screen(picard, 'st-command');
     await picard.fill('#order-text', 'All hands, prepare for first contact');

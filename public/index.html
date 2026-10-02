@@ -312,6 +312,14 @@
     .st-depts li[data-manned] .st-dept-label { background: #66cc66; }
     .st-dept-count { color: var(--lcars-red); font-size: 18px; }
     .st-depts li[data-manned] .st-dept-count { color: #66cc66; }
+    /* A readiness check: green ready, amber waiting, red no crew. */
+    .st-depts li[data-ready="ready"] .st-dept-label { background: #66cc66; }
+    .st-depts li[data-ready="pending"] .st-dept-label { background: var(--lcars-gold); }
+    .st-depts li[data-ready="pending"] .st-dept-count { color: var(--lcars-gold); }
+    .st-depts li[data-ready="nocrew"] .st-dept-label { background: var(--lcars-red); }
+    .st-depts li[data-ready="nocrew"] .st-dept-count { color: var(--lcars-red); }
+    .st-depts .st-dept-check { min-height: 26px; font-size: 12px; padding: 0 12px; }
+    .st-depts .st-dept-all { grid-column: 1 / -1; }
     .st-roster, .st-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 24px; text-transform: uppercase; }
     .st-roster li, .st-list li { display: flex; justify-content: space-between; gap: 12px; color: var(--lcars-gold); font-size: 20px; border-bottom: 2px dotted #333; }
     .st-roster li span, .st-list li span { color: var(--accent); font-size: 16px; }

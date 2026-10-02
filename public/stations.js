@@ -484,14 +484,21 @@
         for (const ul of container.querySelectorAll('[data-roster]')) {
           ul.replaceChildren(...(aboard.length ? aboard : [{ name: 'No one else aboard', station: '' }]).map((u) => h('li', {}, u.title || u.name, h('span', {}, tags(u)))));
         }
-        // Department readiness: how many are at each duty station; the label is
-        // green when manned, red when not.
+        // Department readiness: how many are at each duty station, and the
+        // answers to the last readiness check (tap Check to call one department,
+        // Check all for every one): green ready, amber waiting, no crew.
+        const rd = window.__readiness || {};
         for (const ul of container.querySelectorAll('[data-depts]')) {
-          ul.replaceChildren(...DEPARTMENTS.map((d) => {
+          const tapTo = (b, dept) => { b.onclick = () => window.__callReadiness?.(dept); return b; };
+          const all = h('li', { class: 'st-dept-all' }, tapTo(h('button', { type: 'button', class: 'lcars-button lcars-button--pill', id: 'readiness-all' }, 'Check all departments'), 'all'));
+          ul.replaceChildren(all, ...DEPARTMENTS.filter((d) => !window.__readiness || d in rd).map((d) => {
             const n = aboard.filter((u) => u.station === d && !u.sickbay).length; // sickbay is off duty
-            return h('li', { 'data-dept': d, 'data-manned': n > 0 },
+            const r = rd[d] || { state: 'idle' };
+            const said = r.state === 'ready' ? `Ready (${r.ready.length})` : r.state === 'pending' ? `Waiting: ${r.pending.join(', ')}` : r.state === 'nocrew' ? 'No crew' : n ? `${n} on duty` : 'Unmanned';
+            return h('li', { 'data-dept': d, 'data-manned': n > 0, 'data-ready': r.state },
               h('span', { class: 'st-dept-label' }, d),
-              h('span', { class: 'st-dept-count' }, n ? `${n} on duty` : 'Unmanned'));
+              h('span', { class: 'st-dept-count' }, said),
+              tapTo(h('button', { type: 'button', class: 'lcars-button lcars-button--pill st-dept-check', 'data-check': d }, 'Check'), d));
           }));
         }
       },
