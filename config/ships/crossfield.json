@@ -591,5 +591,18 @@
   },
   "solar": {
     "output": 25
+  },
+  "fuel": {
+    "antimatter": 1000,
+    "deuterium": 2000,
+    "tanks": {
+      "deu:core": 100,
+      "deu:port": 50,
+      "deu:starboard": 50,
+      "deu:aux1": 50,
+      "deu:aux2": 50,
+      "am:core": 50,
+      "am:torpedo": 100
+    }
   }
 }

@@ -230,6 +230,19 @@
         input.onchange = () => set(Math.max(0, Number(input.value) || 0));
         return field('solar', pick('Solar output', btn('−', 'design-solar-down', () => set(Math.max(0, (d.solar?.output || 0) - 5))), input, btn('+', 'design-solar-up', () => set((d.solar?.output || 0) + 5))));
       })(),
+      // Fuel storage: the main deuterium tank and antimatter pods (what the design holds, and a new ship of it starts with).
+      ...['deuterium', 'antimatter'].map((res) => {
+        const input = el('input', { className: 'ops-input design-num', type: 'number', step: 50, min: 0, value: d.fuel?.[res] ?? '', placeholder: { antimatter: '1000', deuterium: '2000' }[res], ariaLabel: `${res} storage`, id: `design-fuel-${res}` });
+        const set = (v) => { d.fuel = { ...(d.fuel || {}), [res]: Math.max(0, v) }; renderDesigns(); };
+        input.onchange = () => set(Number(input.value) || 0);
+        return field('fuel', pick(res === 'antimatter' ? 'Antimatter pods' : 'Deuterium storage', btn('−', `design-fuel-${res}-down`, () => set((d.fuel?.[res] ?? 0) - 50)), input, btn('+', `design-fuel-${res}-up`, () => set((d.fuel?.[res] ?? 0) + 50))));
+      }),
+      // Its systems' own tanks (the warp core's, the impulse and fusion reactors', the torpedo bay's).
+      field('fuel', pick('System tanks', el('div', { className: 'tr-taps', id: 'design-tanks' }, ...[['deu:core', 'Core (deu.)'], ['am:core', 'Core (AM)'], ['deu:port', 'Port impulse'], ['deu:starboard', 'Starboard impulse'], ['deu:aux1', 'Aux 1'], ['deu:aux2', 'Aux 2'], ['am:torpedo', 'Torpedo bay']].map(([key, label]) => {
+        const input = el('input', { className: 'ops-input design-num', type: 'number', step: 10, min: 0, value: d.fuel?.tanks?.[key] ?? '', ariaLabel: `${label} tank`, id: `design-tank-${key.replace(':', '-')}` });
+        input.onchange = () => { d.fuel = { ...(d.fuel || {}), tanks: { ...(d.fuel?.tanks || {}), [key]: Math.max(0, Number(input.value) || 0) } }; renderDesigns(); };
+        return el('label', { className: 'design-tank' }, el('span', { textContent: label }), input);
+      })))),
       field('fusion', pillBar('Fusion reactors', [tap('Aboard', 'on', d.fusion !== false, () => { delete d.fusion; renderDesigns(); }), tap('None (pure solar)', 'off', d.fusion === false, () => { d.fusion = false; renderDesigns(); })], { groupId: 'design-fusion' })),
       pick('Has', el('div', { className: 'tr-taps', id: 'design-flags' }, flag('Warp core', 'warpCore'), flag('Transporter', 'transporter'), flag('Spore drive', 'spore'), flag('Warp core replaceable', 'refit'))),
       el('h3', { className: 'ops-subhead', textContent: 'Stations' }), field('stations', stations),

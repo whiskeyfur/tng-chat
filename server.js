@@ -1904,10 +1904,16 @@ const TANKS = {
 // moves, the antimatter bus's all the time it's tied (as does its magnetic containment).
 const FUELBUS = { flow: 50, light: 30, transfer: 5 };
 const BUS_RESOURCE = { deu: 'deuterium', am: 'antimatter' };
-const tankCap = (bus, name) => (name === 'main' ? FUEL[BUS_RESOURCE[bus]] : TANKS[bus][name].cap);
+// (The main storage holds what the vessel's design says: its file's "fuel"; e: its grid.)
+const tankCap = (bus, name, e) => (name === 'main' ? (e?.fuelCaps || FUEL)[BUS_RESOURCE[bus]] : e?.tankCaps?.[`${bus}:${name}`] ?? TANKS[bus][name].cap);
+// A design's fuel storage: its file's "fuel" ({ antimatter, deuterium }); none of what it doesn't carry.
+const fuelCapsOf = (k) => { const d = designOf(k); return { antimatter: d.antimatter === false ? 0 : d.fuel?.antimatter ?? FUEL.antimatter, deuterium: d.fuel?.deuterium ?? FUEL.deuterium }; };
+// Its systems' own tanks (the warp core's, the impulse drives', the torpedo bay's...): the design's
+// "fuel.tanks" ({ "deu:core": 100, ... }), else the usual sizes; no antimatter in a design without it.
+const tankCapsOf = (k) => { const d = designOf(k); return Object.fromEntries(Object.entries(TANKS).flatMap(([bus, ts]) => Object.entries(ts).filter(([n]) => n !== 'main').map(([n, t]) => [`${bus}:${n}`, bus === 'am' && d.antimatter === false ? 0 : d.fuel?.tanks?.[`${bus}:${n}`] ?? t.cap]))); };
 const tankLevel = (e, bus, name) => (name === 'main' ? e[BUS_RESOURCE[bus]] : e.tanks[bus][name]);
-const setTank = (e, bus, name, v) => { const x = Math.max(0, Math.min(tankCap(bus, name), v)); if (name === 'main') e[BUS_RESOURCE[bus]] = x; else e.tanks[bus][name] = x; };
-const tankPct = (e, bus, name) => (100 * tankLevel(e, bus, name)) / tankCap(bus, name);
+const setTank = (e, bus, name, v) => { const x = Math.max(0, Math.min(tankCap(bus, name, e), v)); if (name === 'main') e[BUS_RESOURCE[bus]] = x; else e.tanks[bus][name] = x; };
+const tankPct = (e, bus, name) => (100 * tankLevel(e, bus, name)) / (tankCap(bus, name, e) || 1);
 // All the antimatter aboard, wherever it is.
 const amAboard = (e) => e.antimatter + Object.values(e.tanks?.am || {}).reduce((a, b) => a + b, 0);
 // Every antimatter tank keeps its own containment: the pods (the ship's main
@@ -2346,7 +2352,9 @@ function freshEng(saved, { cold = false, k = null } = {}) {
   const newConduits = s.conduits ? CONDUITS.filter((c) => !Array.isArray(s.ties?.[c])) : [];
   // Older saves: antimatter was true/false (false: core ejected); tanks full.
   const amount = (v, cap) => (Number.isFinite(v) ? Math.max(0, Math.min(cap, v)) : v === false ? 0 : cap);
-  const antimatter = amount(s.antimatter, FUEL.antimatter), deuterium = amount(s.deuterium, FUEL.deuterium);
+  const fuelCaps = k ? fuelCapsOf(k) : { antimatter: FUEL.antimatter, deuterium: FUEL.deuterium };
+  const tankCaps = k ? tankCapsOf(k) : null, tcap = (bus, n) => tankCaps?.[`${bus}:${n}`] ?? TANKS[bus][n].cap;
+  const antimatter = amount(s.antimatter, fuelCaps.antimatter), deuterium = amount(s.deuterium, fuelCaps.deuterium);
   if (!ties.containment.length && antimatter > 0) ties.containment = DEFAULT_TIES.containment; // never no feed with antimatter aboard
   // (Older saves: life support was one load; its ties go to all three of its systems.)
   for (const [k, d] of Object.entries(DEFAULT_LOAD_TIES)) ties[k] = tiesOf(k, s.ties?.[k] ?? (LIFE_SUPPORT.includes(k.slice(7)) ? s.ties?.['system:lifeSupport'] : undefined), designTies[k] ?? d);
@@ -2364,7 +2372,7 @@ function freshEng(saved, { cold = false, k = null } = {}) {
     aux: Object.fromEntries(AUX.map((a) => { const v = s.aux?.[a] || {}; const on = v.state === 'running' && deuterium > 0; return [a, { state: on ? 'running' : 'off', start: 0, pressure: on ? 100 : 0, epsTap: v.epsTap ?? false }]; })),
     // The systems' own fuel tanks (older saves: full) and each tank's tie and Fill/Drain
     // (older saves: all tied in, the main storage draining into the systems' tanks, which fill).
-    tanks: Object.fromEntries(Object.entries(TANKS).map(([bus, ts]) => [bus, Object.fromEntries(Object.entries(ts).filter(([n]) => n !== 'main').map(([n, t]) => [n, Number.isFinite(s.tanks?.[bus]?.[n]) ? Math.min(t.cap, s.tanks[bus][n]) : cold ? 0 : t.cap]))])),
+    tanks: Object.fromEntries(Object.entries(TANKS).map(([bus, ts]) => [bus, Object.fromEntries(Object.entries(ts).filter(([n]) => n !== 'main').map(([n]) => [n, Number.isFinite(s.tanks?.[bus]?.[n]) ? Math.min(tcap(bus, n), s.tanks[bus][n]) : cold ? 0 : tcap(bus, n)]))])),
     tankCfg: Object.fromEntries(Object.entries(TANKS).flatMap(([bus, ts]) => Object.keys(ts).map((n) => { const v = s.tankCfg?.[`${bus}:${n}`]; return [`${bus}:${n}`, v ? { tied: !!v.tied, fill: !!v.fill, drain: !!v.drain && !v.fill } : { tied: !cold, fill: !cold && n !== 'main', drain: !cold && n === 'main' }]; }))),
     busFlow: { deu: 0, am: 0 }, busDown: { deu: '', am: '' }, // what moved on each fuel bus, and why it can't (or '')
     // The other antimatter tanks' containment: field and reserve (older saves: full).
@@ -2377,6 +2385,7 @@ function freshEng(saved, { cold = false, k = null } = {}) {
     taps: Object.fromEntries(BUSES.map((X) => { const t = s.taps?.[X]; return [X, typeof t === 'number' ? Math.max(0, Math.min(tapMax[X], t)) : t === false ? 0 : t === true || X !== 'C' ? tapMax[X] : 0]; })), ties,
     // (Restoring: the power paths each load had when saved, and conduits new since: see reconcileConduits.)
     restore: { paths: s.paths && typeof s.paths === 'object' ? s.paths : null, newConduits },
+    fuelCaps, tankCaps, // (its design's fuel storage, and its systems' own tanks)
 
     transfer: null, feed: { port: 0, starboard: 0 }, fed: { port: 0, starboard: 0 }, // power offered to a ship docked at each port, and what actually went (Power row: Bus B)
     feedEps: { port: 0, starboard: 0 }, fedEps: { port: 0, starboard: 0 }, // (and the EPS row's)
@@ -2894,7 +2903,7 @@ function gridView(k) {
   // Shown rounded up (a split load, 8.33..., shows as 9); the sums behind them aren't.
   const r = (o) => Object.fromEntries(Object.entries(o).map(([x, v]) => [x, ceilUp(v)]));
   return {
-    core: e.core, antimatter: Math.floor(e.antimatter), deuterium: Math.floor(e.deuterium), fuelCaps: { antimatter: FUEL.antimatter, deuterium: FUEL.deuterium },
+    core: e.core, antimatter: Math.floor(e.antimatter), deuterium: Math.floor(e.deuterium), fuelCaps: e.fuelCaps || { antimatter: FUEL.antimatter, deuterium: FUEL.deuterium },
     drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state, start: dr.start, thrusters: !!(e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length, epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear, top: Math.round(driveTop(dr) * 1000) / 1000 }]; })),
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state, start: e.aux[a].start, epsTap: e.aux[a].epsTap }])), auxOutput: FUSION.aux,
     // Each place: what's switched on, what it's actually getting, and whether it's lit.
@@ -2906,7 +2915,7 @@ function gridView(k) {
     })(),
     // The fuel buses: each tank's level, tie and Fill/Drain; what moved; the antimatter bus's containment.
     fuel: Object.fromEntries(Object.entries(TANKS).map(([bus, ts]) => [bus, { flow: Math.round(e.busFlow[bus]), down: !!e.busDown[bus], why: e.busDown[bus], light: FUELBUS.light,
-      tanks: Object.entries(ts).map(([n, t]) => ({ name: n, label: t.label, level: Math.floor(tankLevel(e, bus, n)), cap: tankCap(bus, n), pct: Math.floor(tankPct(e, bus, n)), ...e.tankCfg[`${bus}:${n}`],
+      tanks: Object.entries(ts).map(([n, t]) => ({ name: n, label: t.label, level: Math.floor(tankLevel(e, bus, n)), cap: tankCap(bus, n, e), pct: Math.floor(tankPct(e, bus, n)), ...e.tankCfg[`${bus}:${n}`],
         // An antimatter tank's own containment (the pods': the ship's main containment).
         ...(bus !== 'am' ? {} : n === 'main' ? { field: Math.round(e.contain.field), containKey: 'containment' } : { field: Math.round(e.tankContain[n].field), containKey: AM_CONTAIN[n], reserve: Math.round((100 * e.tankContain[n].reserve) / (tankContainDraw(n) * CONTAIN.reserveSecs)) }) })) }])),
     epsLive: e.epsLive, epsGen: Math.round(f.epsGen), epsChargeGen: EPS_CHARGE_GEN, impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
@@ -2981,7 +2990,7 @@ function gridCommand(ws, msg) {
     if (!berthPowered(key)) return note(`${e.docked}'s drydock connection ${e.berth} has no power: the work waits for it`);
     if (e.core === 'online' || e.core === 'starting') return note('shut the warp core down before replacing it');
     const fill = e.ties.containment.length > 0;
-    Object.assign(e, { core: 'offline', start: 0, breach: 0, antimatter: fill ? FUEL.antimatter : 0, contain: { field: 100, reserve: reserveCap() } });
+    Object.assign(e, { core: 'offline', start: 0, breach: 0, antimatter: fill ? (e.fuelCaps?.antimatter ?? FUEL.antimatter) : 0, contain: { field: 100, reserve: reserveCap() } });
     said.push(`new warp core and ${fill ? 'full' : 'empty'} antimatter pods installed in drydock at ${e.docked} (offline: start it up${fill ? '' : '; set a containment feed and refuel first'})`);
   }
   // The reaction's settings: rate (the light bar's target), mixture, plasma conduits, trim.
@@ -3570,10 +3579,10 @@ function moveFuel(k, e, f) {
     const from = names.filter((n) => e.tankCfg[`${bus}:${n}`].drain && tankLevel(e, bus, n) > 0);
     // An antimatter tank takes antimatter only with its containment powered (the pods: theirs).
     const contained = (n) => bus !== 'am' || (n === 'main' ? e.ties.containment : e.ties[AM_CONTAIN[n]] || []).some((x) => f.totals[x]?.available >= (n === 'main' ? GRID.containment : tankContainDraw(n)));
-    const to = names.filter((n) => e.tankCfg[`${bus}:${n}`].fill && tankLevel(e, bus, n) < tankCap(bus, n) && contained(n)).sort((a, b) => (a === 'main') - (b === 'main'));
+    const to = names.filter((n) => e.tankCfg[`${bus}:${n}`].fill && tankLevel(e, bus, n) < tankCap(bus, n, e) && contained(n)).sort((a, b) => (a === 'main') - (b === 'main'));
     let budget = FUELBUS.flow;
     for (const n of to) {
-      let want = Math.min(budget, tankCap(bus, n) - tankLevel(e, bus, n));
+      let want = Math.min(budget, tankCap(bus, n, e) - tankLevel(e, bus, n));
       for (const m of from) {
         if (want <= 0) break;
         const t = Math.min(want, tankLevel(e, bus, m));
@@ -3596,7 +3605,7 @@ function busDownWhy(e, f, bus) {
 // docked with us, by each side's Import / Export.
 function moveConnections(k, e, f) {
   e.connFlow = {};
-  const pct = (x, res) => (100 * x[BUS_RESOURCE[res]]) / FUEL[BUS_RESOURCE[res]];
+  const pct = (x, res) => (100 * x[BUS_RESOURCE[res]]) / ((x.fuelCaps || FUEL)[BUS_RESOURCE[res]] || 1);
   // Antimatter needs the pods' containment powered on the taking side, and the antimatter bus up on ours.
   const amOk = (x, kk) => (x.ties.containment || []).some((n) => flow(kk).totals[n]?.available >= GRID.containment) && !x.amBusDown && x.core !== 'ejected';
   const others = [...(e.docked ? [['station', null]] : []), ...partners(k).map(([, o]) => [o, engOf(o)])];
@@ -3607,7 +3616,7 @@ function moveConnections(k, e, f) {
       if (mine.in) {
         // Taking: from the starbase always; from a ship that's giving.
         const theirs = them ? wants(connOf(them, k)[res], pct(them, res)) : { out: true };
-        const room = FUEL[r] - e[r], have = them ? them[r] : Infinity;
+        const room = (e.fuelCaps || FUEL)[r] - e[r], have = them ? them[r] : Infinity;
         if (!them && !e.connTies[res]) why = `not tied to the ${res === 'am' ? 'AM' : 'Deu.'} bus`;
         else if (e.busDown?.[res]) why = e.busDown[res];
         else if (res === 'am' && !amOk(e, k)) why = 'antimatter containment or the antimatter bus is down';
@@ -4100,7 +4109,7 @@ setInterval(() => {
     for (const n of EMERG.names) if (f.emergUsed[n] > 0) { e.emerg[n] = Math.max(0, e.emerg[n] - f.emergUsed[n]); e.dirty = true; }
     // The Bussard collectors, at warp: deuterium from space.
     { const w = navState.get(k)?.warp || 0;
-      if (w >= 1 && f.delivered.bussard > 0) e.deuterium = Math.min(FUEL.deuterium, e.deuterium + BUSSARD.perSecond * (Math.min(9, w) / 9) * Math.min(1, f.delivered.bussard / 100)); }
+      if (w >= 1 && f.delivered.bussard > 0) e.deuterium = Math.min(e.fuelCaps?.deuterium ?? FUEL.deuterium, e.deuterium + BUSSARD.perSecond * (Math.min(9, w) / 9) * Math.min(1, f.delivered.bussard / 100)); }
     // Fuel: the core burns antimatter and deuterium for what it gives, the impulse reactor deuterium.
     // The core burns from its own tanks.
     if (f.coreUsed > 0) { const burn = (f.coreUsed / GRID.core) * FUEL.coreBurn; setTank(e, 'am', 'core', e.tanks.am.core - burn); setTank(e, 'deu', 'core', e.tanks.deu.core - burn); }
@@ -5514,7 +5523,7 @@ function adminSetClass(ws, msg) {
     delete fresh.restore;
     Object.assign(fresh.ties, classOf(k).ties || {});
     for (const f of ['docked', 'dockedPort', 'shipDocks', 'landed', 'drydock', 'berth', 'conn', 'connTies', 'bayOpen', 'remoteBlock', 'prefix', 'orderLog', 'towing']) if (old[f] !== undefined) fresh[f] = old[f];
-    fresh.antimatter = Math.min(old.antimatter, FUEL.antimatter); fresh.deuterium = Math.min(old.deuterium, FUEL.deuterium);
+    fresh.antimatter = Math.min(old.antimatter, fresh.fuelCaps.antimatter); fresh.deuterium = Math.min(old.deuterium, fresh.fuelCaps.deuterium);
     eng.set(k, fresh);
     deriveConduits(k);
     designReactors(k, true);

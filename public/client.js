@@ -1981,7 +1981,7 @@ function renderCombat() {
       ['Velocity', speed, 'orange'],
       ['Weapons', c.lock ? `Locked: the ${c.lock.name}` : c.phaser.armed ? 'Phasers armed' : 'Standby', 'red'],
       ['Warp core', { online: 'Online', starting: 'Starting', offline: 'Offline', ejected: 'Ejected' }[grid.core], 'blue'],
-      ['Antimatter · deuterium', `${Math.round((grid.antimatter / grid.fuelCaps.antimatter) * 100)}% · ${Math.round((grid.deuterium / grid.fuelCaps.deuterium) * 100)}%`, 'violet'],
+      ['Antimatter · deuterium', `${Math.round((grid.antimatter / (grid.fuelCaps.antimatter || 1)) * 100)}% · ${Math.round((grid.deuterium / (grid.fuelCaps.deuterium || 1)) * 100)}%`, 'violet'],
       ['Damage', damaged.length ? damaged.join(', ') : 'None', 'peach'],
     ];
     if (changed(ss, items, grid.selfDestruct)) {

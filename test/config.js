@@ -119,6 +119,7 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
       d.bus = 90;
       d.places.find((pl) => pl.name === 'Cockpit').rows = d.places.find((pl) => pl.name === 'Cockpit').rows.filter((r) => r !== 'system:lateral');
       d.places.push({ name: 'Sensor Pod', deck: 2, stations: [], rows: ['system:lateral'] });
+      d.fuel = { ...d.fuel, antimatter: 300, tanks: { ...d.fuel.tanks, 'deu:core': 60 } }; // (its fuel storage, from its file)
       fs.writeFileSync(file, JSON.stringify(d, null, 2));
       rp = run(['server.js'], env);
       await wait(1000);
@@ -129,9 +130,12 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
       assert.deepEqual(own.grid.ties['system:lateral'], ['C'], 'its own ties kept');
       assert.ok(own.grid.ties['place:Sensor Pod']?.includes('C'), `the new place carries its load (${JSON.stringify(own.grid.ties['place:Sensor Pod'])})`);
       assert.equal(own.grid.cutOff['system:lateral'], undefined, 'the moved load isn\'t cut off');
+      assert.equal(own.grid.fuelCaps.antimatter, 300, 'its antimatter pods: the size its design gives');
+      assert.equal(own.grid.fuel.deu.tanks.find((t) => t.name === 'core').cap, 60, "its warp core's deuterium tank: the size its design gives");
+      assert.ok(own.grid.antimatter <= 300, 'no more antimatter than the pods hold');
       await kill(sc); await kill(rp);
       fs.rmSync(ED, { recursive: true, force: true }); fs.rmSync(SHIPS, { recursive: true, force: true });
-      step('a design edited: the shuttle kept its class across restarts (saved with it), came up warm with its design\'s ties, then took the new bus limit (90) and its lateral sensors\' new place (Sensor Pod, tied on Bus C) with its own ties kept');
+      step('a design edited: the shuttle kept its class across restarts (saved with it), came up warm with its design\'s ties, then took the new bus limit (90), its lateral sensors\' new place (Sensor Pod, tied on Bus C) with its own ties kept, and its file\'s fuel storage (pods 300, the core\'s deuterium tank 60)');
     }
     // A Galaxy made a runabout (Admin → Fleet): its engineering rebuilt from the runabout's design,
     // nothing of the Galaxy's left (no Security console, brig, crew services) on its grid or tied.

@@ -40,6 +40,8 @@ const SHIP_FIELDS = {
   solar: [(v) => isObj(v) && isNum(v.output) && v.output >= 0, 'its solar arrays: { output } (power, 0 for none)', false],
   antimatter: [isBool, 'true or false (antimatter carried: false for none, no tanks to fill or contain)', false],
   indestructible: [isBool, 'true or false (never destroyed: its safety systems eject the core instead)', false],
+  fuel: [(v) => isObj(v) && ['antimatter', 'deuterium'].every((x) => v[x] === undefined || (isNum(v[x]) && v[x] >= 0)) && (v.tanks === undefined || (isObj(v.tanks) && Object.values(v.tanks).every((n) => isNum(n) && n >= 0))),
+    'its fuel storage: { antimatter, deuterium, tanks?: { "deu:core": 100, ... } }', false],
   fusion: [isBool, 'true or false (impulse and auxiliary fusion reactors aboard)', false],
   org: [(v) => isObj(v) && Array.isArray(v.command) && v.command.every(isPosition) && (v.departments === undefined || (Array.isArray(v.departments) && v.departments.every((d) => isStr(d?.name) && Array.isArray(d.positions) && d.positions.every(isPosition)))),
     'its org chart: { command: [positions], departments: [{ name, positions }] }, a position { id, title, rank, station, n? }', false],

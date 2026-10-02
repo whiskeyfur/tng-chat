@@ -38,7 +38,20 @@
   "solar": {
     "output": 80
   },
-  "fusion": false,
   "antimatter": false,
-  "indestructible": true
+  "indestructible": true,
+  "fusion": false,
+  "fuel": {
+    "antimatter": 0,
+    "deuterium": 0,
+    "tanks": {
+      "deu:core": 0,
+      "deu:port": 0,
+      "deu:starboard": 0,
+      "deu:aux1": 0,
+      "deu:aux2": 0,
+      "am:core": 0,
+      "am:torpedo": 0
+    }
+  }
 }
