@@ -5010,15 +5010,41 @@ server.listen(PORT, () => console.log(`${RELAY_NAME} on http://localhost:${PORT}
 const adminWaiting = new Map(); // request id -> socket
 let adminSeq = 0;
 // The vessels as the admin page shows them: class, crew, ops, where.
+// (The classes this relay has loaded, for the admin page: did a reload apply a design?)
+const adminClasses = () => Object.fromEntries(Object.entries(CLASSES).map(([id, c]) => [id, { name: c.name, bus: c.bus, eps: c.eps }]));
 const adminFleet = () => networkGraph().ships.map((v) => ({ name: v.name, class: v.class, starbase: !!v.starbase, crew: v.crew, ops: v.ops, computer: v.computer, x: v.x, y: v.y }));
 function adminRequest(ws, msg) {
   if (!ws.local) return send(ws, { type: 'admin-status', error: 'refused: the admin page is for this machine only (localhost)' });
   if (msg.action === 'create') return adminCreate(ws, msg);
-  if (!process.send) return send(ws, { type: 'admin-status', error: 'no supervisor: the relay was started on its own (npm start runs the supervisor)', relayName: RELAY_NAME, fleet: adminFleet(), consoles: [...users.values()].map((u) => ({ name: u.name, ship: shipName(u.shipKey), station: u.station })), bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
+  if (msg.action === 'designs' || msg.action === 'design-save') return adminDesigns(ws, msg);
+  if (!process.send) return send(ws, { type: 'admin-status', error: 'no supervisor: the relay was started on its own (npm start runs the supervisor)', relayName: RELAY_NAME, fleet: adminFleet(), classes: adminClasses(), consoles: [...users.values()].map((u) => ({ name: u.name, ship: shipName(u.shipKey), station: u.station })), bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
   const reqId = ++adminSeq;
   adminWaiting.set(reqId, ws);
   setTimeout(() => adminWaiting.delete(reqId), 10000);
   process.send({ type: 'admin', reqId, action: ['status', 'restart-ship', 'restart-ships', 'restart-relay'].includes(msg.action) ? msg.action : 'status', ship: typeof msg.ship === 'string' ? msg.ship : undefined });
+}
+// The ship design editor: the designs as their files say, and saving one (checked as the
+// loader checks it; a backup kept). Removing a place or system a live ship of that class
+// uses asks first (confirm). The supervisor's config watch reloads the relay to apply it.
+function adminDesigns(ws, msg) {
+  const reply = (m) => send(ws, { type: 'admin-designs', ...m });
+  const files = CONFIG.readShips();
+  if (msg.action === 'designs') return reply({ designs: files, loaded: Object.keys(CLASSES), stations: STATIONS, systems: SYSTEMS, subsystems: Object.keys(SUBSYSTEMS) });
+  const id = String(msg.id || '').toLowerCase(), design = msg.design;
+  if (!msg.asNew && !files[id]) return reply({ saved: false, error: { field: 'id', message: 'no such class' } });
+  if (msg.asNew && files[id]) return reply({ saved: false, error: { field: 'id', message: `there's already a class ${id}` } });
+  // (What a live ship of this class would lose: its places, its systems.)
+  const was = files[id];
+  if (was && !msg.confirm) {
+    const lostPlaces = (was.places || []).map((p) => p.name).filter((n) => !(design?.places || []).some((p) => p.name === n));
+    const lostRows = (was.places || []).flatMap((p) => p.rows || []).filter((r) => !(design?.places || []).some((p) => (p.rows || []).includes(r)));
+    const live = [...shipClasses].filter(([k, c]) => c === id && present(k)).map(([k]) => shipName(k));
+    if ((lostPlaces.length || lostRows.length) && live.length) return reply({ saved: false, confirm: { ships: live, places: lostPlaces, rows: lostRows } });
+  }
+  const err = CONFIG.saveShip(id, design);
+  if (err) return reply({ saved: false, error: err });
+  console.log(`admin: design ${id} saved${msg.asNew ? ' (a new class)' : ''}`);
+  reply({ saved: true, id, note: process.send ? 'saved: the supervisor reloads the relay and the ship\'s computers to apply it' : 'saved (no supervisor here: restart the relay to apply it)' });
 }
 // Create a ship (the supervisor starts its computer: --class, docked cold at
 // the starbase picked) or a starbase (here, at the spot picked on the map; kept
@@ -5071,7 +5097,7 @@ process.on('message', (m) => {
   adminWaiting.delete(m.reqId);
   if (!ws) return;
   const consoles = [...users.values()].map((u) => ({ name: u.name, ship: shipName(u.shipKey), station: u.station }));
-  send(ws, { type: 'admin-status', ...m.status, note: m.note, consoles, relayName: RELAY_NAME, fleet: adminFleet(), bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
+  send(ws, { type: 'admin-status', ...m.status, note: m.note, consoles, relayName: RELAY_NAME, fleet: adminFleet(), classes: adminClasses(), bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
 });
 process.on('message', (m) => {
   if (m?.type !== 'reload') return;

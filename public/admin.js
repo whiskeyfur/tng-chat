@@ -23,6 +23,7 @@
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.type === 'hello') { designs = m.designs || {}; system = m.system || null; $('admin-relay-name').textContent = `Relay admin · ${m.relay || ''}`; renderCreate(true); }
       if (m.type === 'admin-status') { status = m; render(); }
+      if (m.type === 'admin-designs') designsMessage(m);
       if (m.type === 'admin-created') { $('create-status').textContent = m.text; $('create-status').className = m.ok ? 'ops-hint ok-note' : 'ops-hint err-note'; send({ type: 'admin', action: 'status' }); }
       // (The pages changed: reload. A relay restart: it reconnects by itself, keeping what's being edited.)
       if (m.type === 'reload' && !m.restart) setTimeout(() => location.reload(), 300);
@@ -123,6 +124,105 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  // --- The ship design editor (config/ships/<class>.json) ------------------------------
+  // Pick a class (taps) and edit it: numbers by entry or the -/+ steppers, lists by taps
+  // (add, remove, move up or down). Save checks it as the loader would (an error shows
+  // beside its field), keeps a backup, and the supervisor reloads to apply it; Save as a
+  // new class writes a new file. Removing a place or row a live ship uses asks first.
+  let ed = { files: {}, stations: [], systems: [], subsystems: [], id: null, draft: null, asNew: false, error: null, note: '', confirm: null, newId: '' };
+  const clone = (v) => JSON.parse(JSON.stringify(v));
+  function designsMessage(m) {
+    if (m.designs) { ed = { ...ed, files: m.designs, stations: m.stations || [], systems: m.systems || [], subsystems: m.subsystems || [] }; if (ed.id && !ed.asNew && m.designs[ed.id]) ed.draft ||= clone(m.designs[ed.id]); }
+    if ('saved' in m) {
+      ed.error = m.error || null; ed.confirm = m.confirm || null;
+      ed.note = m.saved ? m.note : m.confirm ? '' : 'not saved';
+      if (m.saved) { ed.asNew = false; ed.id = m.id; send({ type: 'admin', action: 'designs' }); }
+    }
+    renderDesigns();
+  }
+  function renderDesigns() {
+    const box = $('admin-designs');
+    if (!box) return;
+    const d = ed.draft, err = ed.error;
+    const errAt = (field) => (err && err.field === field ? [el('p', { className: 'err-note design-error', textContent: `${field}: ${err.message}` })] : []);
+    const pick = (label, ...kids) => el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: label }), ...kids);
+    const field = (f, node) => { const w = el('div', { className: 'design-field' }, node, ...errAt(f)); w.dataset.field = f; return w; };
+    const num = (label, f, step = 1, { nullable = false } = {}) => {
+      const input = el('input', { className: 'ops-input design-num', type: 'number', step, value: d[f] ?? '', ariaLabel: label });
+      input.id = `design-${f}`;
+      input.onchange = () => { d[f] = input.value === '' && nullable ? null : Number(input.value); renderDesigns(); };
+      const bump = (k) => () => { d[f] = Math.round(((Number(d[f]) || 0) + k * step) * 100) / 100; renderDesigns(); };
+      return field(f, pick(label, btn('−', `design-${f}-down`, bump(-1)), input, btn('+', `design-${f}-up`, bump(1)), ...(nullable ? [tap('As many as needed', 'null', d[f] === null, () => { d[f] = d[f] === null ? 2 : null; renderDesigns(); })] : [])));
+    };
+    const flag = (label, f) => tap(label, f, !!d[f], () => { d[f] = !d[f]; renderDesigns(); });
+    const ids = Object.keys(ed.files).sort();
+    const list = el('div', { className: 'place-bar', id: 'design-list' }, el('span', { className: 'place-label', textContent: 'Class' }),
+      ...ids.map((id) => tap(ed.files[id].name || id, id, ed.id === id && !ed.asNew, () => { ed.id = id; ed.asNew = false; ed.draft = clone(ed.files[id]); ed.error = null; ed.note = ''; ed.confirm = null; renderDesigns(); })),
+      el('span', { className: 'place-cap place-cap--r' }));
+    const newId = el('input', { className: 'ops-input', id: 'design-new-id', placeholder: 'new class id (e.g. akira)', value: ed.newId, autocomplete: 'off' });
+    newId.oninput = () => { ed.newId = newId.value; };
+    const startNew = (from) => { if (!ed.files[from]) return; ed.draft = clone(ed.files[from]); ed.draft.name = ed.newId ? ed.newId[0].toUpperCase() + ed.newId.slice(1) : `${ed.draft.name} copy`; delete ed.draft.about; ed.id = ed.newId.trim().toLowerCase(); ed.asNew = true; ed.error = null; ed.note = ''; renderDesigns(); };
+    const head = [list, el('div', { className: 'ops-form' }, newId, btn('Duplicate as a new class', 'design-duplicate', () => startNew(ed.id || 'galaxy')), btn('New from Galaxy', 'design-new', () => startNew('galaxy')))];
+    if (!d) return box.replaceChildren(...head, el('p', { className: 'ops-hint', textContent: 'Pick a class to edit, or start a new one.' }));
+    // Stations: all of them, or the ones picked.
+    const stations = el('div', { className: 'tr-taps', id: 'design-stations' }, tap('All stations', 'all', d.stations == null, () => { d.stations = d.stations == null ? ['Helm'] : null; renderDesigns(); }),
+      ...(d.stations == null ? [] : ed.stations.map((st) => tap(st, st, d.stations.includes(st), () => { d.stations = d.stations.includes(st) ? d.stations.filter((x) => x !== st) : [...d.stations, st]; renderDesigns(); }))));
+    // Places: each in order (move up / down), its deck, name, stations and the grid rows found there.
+    const keys = [...ed.systems.map((x) => `system:${x}`), ...ed.subsystems.map((x) => `sub:${x}`)];
+    const places = (d.places || []).map((p, i) => {
+      const name = el('input', { className: 'ops-input', value: p.name, ariaLabel: 'place name' });
+      name.onchange = () => { p.name = name.value; renderDesigns(); };
+      const deck = el('input', { className: 'ops-input design-num', type: 'number', value: p.deck, ariaLabel: 'deck' });
+      deck.onchange = () => { p.deck = Number(deck.value); renderDesigns(); };
+      const move = (k) => () => { const a = d.places; [a[i], a[i + k]] = [a[i + k], a[i]]; renderDesigns(); };
+      const adding = ed.addingTo === i;
+      const sec = el('section', { className: 'design-place' },
+        el('div', { className: 'ops-form' }, el('span', { className: 'tr-label', textContent: 'Deck' }), deck, name,
+          btn('↑', '', move(-1)), btn('↓', '', move(1)), tap('Default', 'default', !!p.default, () => { for (const q of d.places) delete q.default; p.default = true; renderDesigns(); }),
+          btn('Remove place', '', () => { d.places.splice(i, 1); renderDesigns(); }, true)),
+        pick('Stations', el('div', { className: 'tr-taps' }, ...ed.stations.map((st) => tap(st, st, p.stations.includes(st), () => { p.stations = p.stations.includes(st) ? p.stations.filter((x) => x !== st) : [...p.stations, st]; renderDesigns(); })))),
+        pick('Reached via', el('div', { className: 'tr-taps' }, tap('Nothing', '', !p.via, () => { delete p.via; renderDesigns(); }), ...d.places.filter((q) => q !== p).map((q) => tap(q.name, q.name, p.via === q.name, () => { p.via = q.name; renderDesigns(); })))),
+        pick('Found here', el('div', { className: 'tr-taps' }, ...(p.rows || []).map((r) => tap(`${r} ✕`, r, true, () => { p.rows = p.rows.filter((x) => x !== r); renderDesigns(); })),
+          tap(adding ? 'Done adding' : 'Add a system…', 'add', adding, () => { ed.addingTo = adding ? null : i; renderDesigns(); }))),
+        ...(adding ? [el('div', { className: 'tr-taps design-add' }, ...keys.filter((k) => !(p.rows || []).includes(k)).map((k) => tap(k, k, false, () => { p.rows = [...(p.rows || []), k]; renderDesigns(); })))] : []));
+      sec.dataset.place = p.name;
+      return sec;
+    });
+    // Bridge seats (the room mic): x and y in metres, the viewscreen ahead (-y).
+    const seats = Object.entries(d.seats || {}).map(([st, [x, y]]) => {
+      const mk = (v, j) => { const inp = el('input', { className: 'ops-input design-num', type: 'number', step: 0.1, value: v, ariaLabel: `${st} ${j ? 'y' : 'x'}` }); inp.onchange = () => { d.seats[st][j] = Number(inp.value); }; return inp; };
+      return pick(st, mk(x, 0), mk(y, 1), btn('✕', '', () => { delete d.seats[st]; renderDesigns(); }, true));
+    });
+    // Warm-start ties: a load, and the buses it's tied to (taps).
+    const ties = Object.entries(d.ties || {}).map(([k, nodes]) => pick(k, el('div', { className: 'tr-taps' }, ...['A', 'B', 'C', 'EPS'].map((n) => tap(n, n, nodes.includes(n), () => { d.ties[k] = nodes.includes(n) ? nodes.filter((x) => x !== n) : [...nodes, n]; renderDesigns(); })),
+      btn('✕', '', () => { delete d.ties[k]; renderDesigns(); }, true))));
+    const nameIn = el('input', { className: 'ops-input', id: 'design-name', value: d.name || '', ariaLabel: 'class name' });
+    nameIn.onchange = () => { d.name = nameIn.value; renderDesigns(); };
+    box.replaceChildren(...head,
+      el('h3', { className: 'ops-subhead', id: 'design-title', textContent: ed.asNew ? `New class: ${ed.id || '(give it an id above)'}` : `${d.name} (config/ships/${ed.id}.json)` }),
+      ...errAt('id'), ...(err && !err.field ? [el('p', { className: 'err-note', textContent: err.message })] : []),
+      el('h3', { className: 'ops-subhead', textContent: 'Identity' }), field('name', pick('Name', nameIn)),
+      el('h3', { className: 'ops-subhead', textContent: 'Limits' }),
+      num('Low buses (each)', 'bus'), num('EPS', 'eps', 10), num('Warp core ×', 'core', 0.1), num('Top warp', 'maxWarp'), num('Shields ×', 'shields', 0.1), num('Phaser arrays', 'arrays'), num('Torpedoes', 'torpedoes'),
+      num('Docking ports', 'ports', 1, { nullable: true }), num('Shuttle bay', 'bay'),
+      pick('Has', el('div', { className: 'tr-taps', id: 'design-flags' }, flag('Warp core', 'warpCore'), flag('Transporter', 'transporter'), flag('Spore drive', 'spore'), flag('Warp core replaceable', 'refit'))),
+      el('h3', { className: 'ops-subhead', textContent: 'Stations' }), field('stations', stations),
+      el('h3', { className: 'ops-subhead', textContent: 'Places' }), field('places', el('div', { id: 'design-places' }, ...places, btn('Add a place', 'design-add-place', () => { d.places = [...(d.places || []), { name: 'New place', deck: 1, stations: [], rows: [] }]; renderDesigns(); }))),
+      el('h3', { className: 'ops-subhead', textContent: 'Bridge seats (room mic)' }), field('seats', el('div', {}, ...seats)),
+      el('h3', { className: 'ops-subhead', textContent: 'Warm-start ties' }), field('ties', el('div', {}, ...ties)),
+      el('h3', { className: 'ops-subhead', textContent: 'Org chart' }), el('p', { className: 'ops-hint', textContent: 'Positions and ranks: coming with the org chart.' }),
+      ...(ed.confirm ? [el('div', { className: 'ops-notice', id: 'design-confirm' }, el('p', { textContent: `Live ships of this class (${ed.confirm.ships.join(', ')}) use what this removes: ${[...ed.confirm.places, ...ed.confirm.rows].join(', ')}.` }),
+        btn('Save anyway', 'design-save-anyway', () => save(true), true))] : []),
+      el('div', { className: 'ops-form' }, btn(ed.asNew ? 'Save as a new class' : 'Save', 'design-save', () => save(false)),
+        ...(ed.asNew ? [] : [btn('Revert', 'design-revert', () => { ed.draft = clone(ed.files[ed.id]); ed.error = null; ed.note = ''; renderDesigns(); })]),
+        el('span', { className: ed.note && ed.note.startsWith('saved') ? 'ops-hint ok-note' : 'ops-hint err-note', id: 'design-status', textContent: ed.note })));
+  }
+  function save(confirm) {
+    if (ed.asNew) ed.id = (ed.newId || ed.id || '').trim().toLowerCase();
+    send({ type: 'admin', action: 'design-save', id: ed.id, design: ed.draft, asNew: ed.asNew, confirm });
+  }
+  window.__editor = { get state() { return ed; } };
+
   connect();
-  window.addEventListener('screenchange', () => renderChart());
+  window.addEventListener('screenchange', (ev) => { renderChart(); if (ev.detail === 'designs') send({ type: 'admin', action: 'designs' }); });
 })();

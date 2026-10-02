@@ -45,6 +45,13 @@ const SYSTEM_FIELDS = {
   waypoints: [(v) => Array.isArray(v) && v.every((b) => isStr(b?.name) && isPoint(b)), 'a list of { name, x, y }', false],
 };
 
+// A design checked (the same check the loader makes): null, or { field, message }.
+function checkFields(v, fields) {
+  if (!isObj(v)) return { field: '', message: 'not an object' };
+  const bad = Object.entries(fields).find(([k, [ok, , required]]) => (v[k] === undefined ? required : !ok(v[k])));
+  return bad ? { field: bad[0], message: `${v[bad[0]] === undefined ? 'is missing' : 'is wrong'}: it must be ${bad[1][1]}` } : null;
+}
+const checkShip = (v) => checkFields(v, SHIP_FIELDS);
 // Every <name>.json in a folder of config/, checked: { id: content }.
 function loadFolder(sub, fields, log) {
   const dir = path.join(DIR, sub), out = {};
@@ -54,9 +61,8 @@ function loadFolder(sub, fields, log) {
     const where = path.join('config', sub, f);
     let v;
     try { v = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (err) { log(`config: skipping ${where}: not valid JSON (${err.message})`); continue; }
-    if (!isObj(v)) { log(`config: skipping ${where}: not an object`); continue; }
-    const bad = Object.entries(fields).find(([k, [ok, , required]]) => (v[k] === undefined ? required : !ok(v[k])));
-    if (bad) { log(`config: skipping ${where}: field "${bad[0]}" ${v[bad[0]] === undefined ? 'is missing' : 'is wrong'}: it must be ${bad[1][1]}`); continue; }
+    const bad = checkFields(v, fields);
+    if (bad) { log(`config: skipping ${where}: ${bad.field ? `field "${bad.field}" ${bad.message}` : bad.message}`); continue; }
     out[f.slice(0, -5).toLowerCase()] = v;
   }
   return out;
@@ -77,4 +83,24 @@ function loadSystems(log = console.warn) {
   return all;
 }
 
-module.exports = { DIR, loadShips, loadSystems };
+// A design written back (the admin page's editor): checked first, pretty-printed in a stable
+// key order, the old file kept in config/ships/.backup/<class>.<time>.json. Returns null or an error.
+const KEY_ORDER = ['about', 'kind', 'name', ...Object.keys(SHIP_FIELDS)];
+function saveShip(id, design) {
+  if (!/^[a-z][a-z0-9-]{0,31}$/.test(id)) return { field: 'id', message: 'a class id: lower-case letters, digits and -, starting with a letter' };
+  const bad = checkShip(design);
+  if (bad) return bad;
+  const dir = path.join(DIR, 'ships'), file = path.join(dir, `${id}.json`);
+  if (fs.existsSync(file)) {
+    fs.mkdirSync(path.join(dir, '.backup'), { recursive: true });
+    fs.copyFileSync(file, path.join(dir, '.backup', `${id}.${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
+  }
+  const ordered = Object.fromEntries([...KEY_ORDER.filter((k) => k in design), ...Object.keys(design).filter((k) => !KEY_ORDER.includes(k)).sort()].map((k) => [k, design[k]]));
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(ordered, null, 2) + '\n');
+  fs.renameSync(`${file}.tmp`, file);
+  return null;
+}
+// The designs as files say (for the editor): { id: content }.
+const readShips = () => loadFolder('ships', {}, () => {});
+
+module.exports = { DIR, loadShips, loadSystems, checkShip, saveShip, readShips };
