@@ -8,7 +8,7 @@
   "maxWarp": 0,
   "shields": 3,
   "arrays": 4,
-  "warpCore": false,
+  "warpCore": true,
   "refit": false,
   "transporter": true,
   "spore": false,

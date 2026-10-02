@@ -53,5 +53,6 @@
       "am:core": 0,
       "am:torpedo": 0
     }
-  }
+  },
+  "wiring": "places"
 }

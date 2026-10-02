@@ -2462,7 +2462,7 @@ const engOf = (k) => {
     const kept = isBase(k) || isRelay(k) ? baseSettings[shipName(k)]?.eng : undefined; // (the relay keeps the starbases' and the relays')
     eng.set(k, { ...freshEng(kept, { k }), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
     for (const c of CONDUITS) eng.get(k).ties[c] ||= [];
-    if (isRelay(k)) designReactors(k, !kept); // (every load: no antimatter, no reactors)
+    designReactors(k, !kept); // (what its design has: its reactors, its antimatter, its wiring)
     if ((isBase(k) || isRelay(k)) && !eng.get(k).conduits) deriveConduits(k);
     reconcileConduits(k);
   }
@@ -2508,8 +2508,9 @@ function designReactors(k, fresh = false) {
   }
   // (A design that carries no antimatter (its file's "antimatter": false): nothing to contain, nothing to breach.)
   if (d.antimatter === false) { for (const n of Object.keys(e.tanks.am)) e.tanks.am[n] = 0; e.antimatter = 0; e.breach = 0; }
-  // (A new relay: only what its places hold is tied, and its own consoles.)
-  if (fresh && d.kind === 'relay') {
+  // (A design wired by its places ("wiring": "places", the relay's): a new grid ties only what its
+  // places hold, and its own consoles.)
+  if (fresh && d.wiring === 'places') {
     const rows = new Set((d.places || []).flatMap((p) => p.rows || [])), here = new Set(designStations(k) || []);
     for (const x of Object.keys(e.ties)) if ((/^(system|sub):/.test(x) && !CONDUITS.includes(x) && !rows.has(x)) || (x.startsWith('console:') && !here.has(x.slice(8)))) e.ties[x] = [];
   }
@@ -3318,11 +3319,12 @@ function dockCommand(ws, msg) {
 // both at all stop, the bay doors open, and room in the bay.
 function landFault(k, m) {
   const c = classOf(k), e = engOf(k);
-  if (isBase(k) || !['runabout', 'shuttle'].includes(classId(k))) return 'only a shuttle or a runabout lands in a shuttle bay';
+  // (Its design says where it may land: "lands": "any" (any shuttle bay) or "starbase" (a starbase's); not at all without it.)
+  if (isBase(k) || !c.lands) return 'only a shuttle or a runabout lands in a shuttle bay';
   if (e.landed) return `already landed in the ${shipName(e.landed)}'s shuttle bay`;
   if (!present(m) || m === k || !navState.has(m)) return `the ${shipName(m)} isn't here`;
   if (!bayCapacity(m)) return `the ${shipName(m)} has no shuttle bay`;
-  if (classId(k) === 'runabout' && !isBase(m)) return `a ${c.name.toLowerCase()} only lands in a starbase's shuttle bay`;
+  if (c.lands === 'starbase' && !isBase(m)) return `a ${c.name.toLowerCase()} only lands in a starbase's shuttle bay`;
   if (distance(k, m) > DOCK_RANGE) return `the ${shipName(m)} is out of range (${Math.round(distance(k, m))} units; get within ${DOCK_RANGE})`;
   if ((navState.get(k)?.warp || 0) > 0 || (navState.get(m)?.warp || 0) > 0) return 'come to all stop first (both of you)';
   if (!engOf(m).bayOpen) return `the ${shipName(m)}'s shuttle bay doors are closed: ask their hangar control to open them`;
@@ -3331,7 +3333,7 @@ function landFault(k, m) {
   return null;
 }
 // The bays a craft could land in from here (for Helm's taps), with why not.
-const baysNear = (k) => (isBase(k) || !['runabout', 'shuttle'].includes(classId(k)) || engOf(k).landed ? [] : [...new Set([...cores.keys(), ...BASE_KEYS])]
+const baysNear = (k) => (isBase(k) || !classOf(k).lands || engOf(k).landed ? [] : [...new Set([...cores.keys(), ...BASE_KEYS])]
   .filter((m) => m !== k && navState.has(m) && bayCapacity(m) && distance(k, m) <= DOCK_RANGE * 3).map((m) => ({ name: shipName(m), why: landFault(k, m) })));
 // The ship in a shipyard's berth (1-3), and whether a drydocked ship's connection has its power.
 const berthShip = (yard, n) => drydocked().find((o) => shipKey(engOf(o).docked || '') === yard && engOf(o).berth === n) || null;
@@ -5398,7 +5400,7 @@ function greet(ws) {
   send(ws, { type: 'hello', accounts: needLogin(), ...(ws.account ? { account: { username: ws.account.username, role: ws.account.role } } : {}), relay: RELAY_NAME, stations: STATIONS, opsKey: !!OPERATOR_KEY, version: require('./package.json').version,
     // The star chart, and each design's places and bridge seats (for listing consoles by where they are, and the room mic).
     system: { id: SYSTEM_ID, name: STAR_SYSTEM.name, size: STAR_SYSTEM.size, bodies: STAR_SYSTEM.bodies, waypoints: STAR_SYSTEM.waypoints },
-    designs: Object.fromEntries([...Object.entries(CLASSES), ['starbase', BASE_DESIGN], [RELAY_DESIGN.id, RELAY_DESIGN]].map(([id, c]) => [id, { name: c.name, kind: id === 'starbase' ? 'starbase' : c.kind === 'relay' ? 'relay' : 'ship', places: c.places, seats: c.seats }])) });
+    designs: Object.fromEntries([...Object.entries(CLASSES), ['starbase', BASE_DESIGN], [RELAY_DESIGN.id, RELAY_DESIGN]].map(([id, c]) => [id, { name: c.name, kind: id === 'starbase' ? 'starbase' : c.kind || 'ship', places: c.places, seats: c.seats }])) });
   send(ws, { type: 'ships', ships: shipList() });
 }
 

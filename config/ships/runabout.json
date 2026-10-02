@@ -197,5 +197,6 @@
       "am:core": 50,
       "am:torpedo": 100
     }
-  }
+  },
+  "lands": "starbase"
 }
