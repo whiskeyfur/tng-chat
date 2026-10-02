@@ -1275,6 +1275,14 @@ const audioBytes = (page) => page.evaluate(async () => {
     await geordi.waitForSelector('[data-screen="st-ship"]:not([hidden])');
     await geordi.waitForSelector('#sections [data-menu="Power"]');
     step('the menu: Power opened its submenu in place (kept across a reload), Back went up a level, and Home (top-left) went to the top menu and the ship systems screen');
+    // Shift-click the name in the header: back to sign-in, to start somewhere new (nothing signs back in).
+    await geordi.click('#station-sub', { modifiers: ['Shift'] });
+    await geordi.waitForSelector('[data-screen="register"]:not([hidden])');
+    await geordi.waitForTimeout(1500); // (no rejoin)
+    assert.equal(await geordi.evaluate(() => window.__voice.me), null, 'signed out');
+    assert.deepEqual(await geordi.evaluate(() => [document.getElementById('name').value, document.getElementById('ship').value]), ['geordi', ''], 'the name kept, the ship forgotten');
+    await op.waitForFunction(() => !window.__operator.roster.some((u) => u.name === 'geordi'));
+    step('shift-clicking the name in the header signed geordi out to the sign-in screen, name kept, ship and station forgotten');
     await geordi.close();
 
     // The Defiant comes alongside and tows the crippled Enterprise with a tractor beam.

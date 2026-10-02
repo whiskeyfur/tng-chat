@@ -170,6 +170,19 @@ for (const corner of document.querySelectorAll('.lcars-elbow--top')) {
   corner.addEventListener('click', menuHome);
   corner.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); menuHome(); } });
 }
+// Shift-click the name and ship in the header: sign out to the sign-in screen
+// to start somewhere new. Leaves the ship (and any call), and forgets the
+// ship, station, screen and menu so nothing signs back in; the name stays.
+document.getElementById('station-sub')?.addEventListener('click', (ev) => {
+  if (!ev.shiftKey || !me) return;
+  const name = me.name;
+  me = null; // (so nothing saves the sign-in again on the way out)
+  try {
+    sessionStorage.removeItem(REJOIN);
+    localStorage.setItem('voice-reg', JSON.stringify({ name }));
+  } catch {}
+  location.reload();
+});
 function prepareReload(restart) {
   saveRejoin();
   reloading = true;
