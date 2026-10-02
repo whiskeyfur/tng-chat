@@ -1215,9 +1215,9 @@ const audioBytes = (page) => page.evaluate(async () => {
     const sections = await geordi.$$eval('#grid-table tbody tr', (rs) => rs.map((r) => (r.classList.contains('grid-section') ? `[${r.textContent.trim()}]` : r.id)).slice(0, 12));
     assert.deepEqual(sections.slice(0, 2), ['[Power sources]', 'ties-dock'], sections.join(' '));
     assert.ok(sections.indexOf('[Bus crosslink]') < sections.indexOf('ties-crosslink'), sections.join(' '));
-    assert.equal(sections.slice(sections.indexOf('ties-crosslink') + 1).find((x) => !x.startsWith('xflow-')), 'ties-console-Captain');
+    assert.equal(sections[sections.indexOf('ties-crosslink') + 1], 'ties-console-Captain');
     // Power crossing the crosslink shows as a bar under it, the amount in the middle.
-    for (const r of await geordi.$$eval('#grid-table tr.grid-xflow', (rs) => rs.map((x) => ({ id: x.id, label: x.querySelector('.xflow-label').textContent })))) assert.match(r.label, /\d/, JSON.stringify(r));
+    for (const r of await geordi.$$eval('#ties-crosslink .xflow-bar', (bs) => bs.map((x) => ({ flow: x.dataset.flow, label: x.textContent })))) assert.match(r.label, /\d/, JSON.stringify(r));
     // The stores (each bus's battery, the EPS pressure) sit under the headings.
     assert.match(await geordi.textContent('#grid-table thead #grid-stores'), /Battery \d+%.*Battery \d+%.*Battery \d+%.*Pressure \d+%/);
     const STEPS = ['Dock power, Solar', 'Bus batteries and EPS pressure', 'Bus crosslink', 'Engineering console', 'Antimatter containment', 'Impulse drives', 'EPS taps', 'Warp core', 'Consoles and systems'];
@@ -1258,10 +1258,23 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.notEqual(laforge.nav().own.grid.core, 'ejected', 'one press only arms it');
     await geordi.click('#core-eject');
     await waitFor(() => laforge.nav()?.own.grid.core === 'ejected' && !laforge.nav().own.grid.antimatter);
-    // Back (the bottom-left corner): to the power grid, where geordi was before Damage control (and before the refresh).
+    step('Engineering ejected the warp core and antimatter pods from Damage control (armed by one press, fired by a second)');
+    // The menu, LCARS style: Power opens its submenu in place of the column; Back goes up, Home to the top.
+    assert.equal(await geordi.isDisabled('#back-button'), true, 'at the top of the menu, Back is dim');
+    await geordi.click('#sections [data-menu="Power"]');
+    await geordi.waitForSelector('#sections .lcars-nav-button--here:has-text("Power")');
+    assert.deepEqual(await geordi.$$eval('#sections [data-screen-tab]', (bs) => bs.map((b) => b.dataset.screenTab)), ['st-power', 'st-grid'], 'the column is the submenu');
+    await geordi.waitForSelector('[data-screen="st-power"]:not([hidden])');
+    await geordi.reload(); // the menu path is kept
+    await geordi.waitForSelector('#sections .lcars-nav-button--here:has-text("Power")');
     await geordi.click('#back-button');
-    await geordi.waitForSelector('[data-screen="st-grid"]:not([hidden])');
-    step('Engineering ejected the warp core and antimatter pods from Damage control (armed by one press, fired by a second); Back returned to the power grid');
+    await geordi.waitForSelector('#sections [data-menu="Power"]');
+    assert.equal(await geordi.isDisabled('#back-button'), true);
+    await geordi.click('#sections [data-menu="Power"]');
+    await geordi.click('.lcars-elbow--top');
+    await geordi.waitForSelector('[data-screen="st-ship"]:not([hidden])');
+    await geordi.waitForSelector('#sections [data-menu="Power"]');
+    step('the menu: Power opened its submenu in place (kept across a reload), Back went up a level, and Home (top-left) went to the top menu and the ship systems screen');
     await geordi.close();
 
     // The Defiant comes alongside and tows the crippled Enterprise with a tractor beam.
@@ -1539,6 +1552,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'] } }); // dock power on Bus A, shared with B
     await waitFor(() => barclay.nav()?.own.grid.consoleOk.Tactical && barclay.nav().own.power.lifeSupport === 100);
     assert.ok(barclay.nav().own.grid.crossflow.AB > 0, `Bus B drew on Bus A's dock power across the crosslink (${JSON.stringify(barclay.nav().own.grid.crossflow)})`);
+    // The crosslink is a chain, A–B–C: A and C only link through B.
+    barclay.send({ type: 'grid', ties: { crosslink: ['A', 'C'] } });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /A and C link only through B/.test(m.text)));
+    assert.deepEqual(barclay.nav().own.grid.ties.crosslink, ['A', 'B']);
     // Loads have their own ties: consoles on Bus A or B only; engines (high power) on the EPS only.
     barclay.send({ type: 'grid', ties: { 'console:Tactical': ['EPS'] } });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /Tactical can only be tied to Bus A \+ Bus B/.test(m.text)));

@@ -84,7 +84,7 @@ let reloading = false;
 // by hand comes back the same way.
 const shownScreen = () => [...document.querySelectorAll('[data-screen]')].find((x) => !x.hidden)?.dataset.screen;
 function saveRejoin() {
-  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: me.station, screen: shownScreen() })); } catch {}
+  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: me.station, screen: shownScreen(), menu: menuPath })); } catch {}
 }
 window.addEventListener("screenchange", () => { if (me) saveRejoin(); });
 window.addEventListener('pagehide', saveRejoin);
@@ -93,46 +93,83 @@ let pendingScreen = null;
 function restoreScreen() {
   const id = pendingScreen;
   pendingScreen = null;
-  quietScreen = true;
   if (id && document.querySelector(`[data-screen="${CSS.escape(id)}"]`)) showScreen(id);
-  quietScreen = false;
   saveRejoin();
 }
 
-// Back (the bottom-left corner): the screens shown at this station, on this
-// vessel (a remote one too), newest last. Moving to another station starts
-// afresh, so Back never crosses stations. Kept across reloads.
-const HISTORY = 'stchat-history';
-let screenHistory = { key: null, stack: [], at: null };
-try { screenHistory = { ...screenHistory, ...JSON.parse(sessionStorage.getItem(HISTORY) || '{}') }; } catch {}
-let quietScreen = false; // showing a screen that isn't a step forward (Back, a rejoin, a station's first screen)
+// The left-hand menu, LCARS style: tapping a group replaces the column with
+// its own items (the group's button on top, relabelled with where you are);
+// Back (the bottom-left corner) goes up a level, Home (the top-left corner)
+// to the station's top menu and its main screen. Kept across reloads.
+let menuPath = [], pendingMenu = null;
 let controllingVessel = null;
-const historyKey = () => (me ? `${controllingVessel || me.ship}|${me.station}` : null);
-function renderBack() {
-  const b = $('back-button');
-  if (b) b.disabled = !me || screenHistory.key !== historyKey() || !screenHistory.stack.length;
-}
-window.addEventListener('screenchange', (ev) => {
-  const key = historyKey(), id = ev.detail;
-  if (!key) return renderBack();
-  if (screenHistory.key !== key) screenHistory = { key, stack: [], at: null };
-  else if (!quietScreen && screenHistory.at && screenHistory.at !== id) { screenHistory.stack.push(screenHistory.at); screenHistory.stack.splice(0, screenHistory.stack.length - 50); }
-  screenHistory.at = id;
-  try { sessionStorage.setItem(HISTORY, JSON.stringify(screenHistory)); } catch {}
-  renderBack();
-});
-document.getElementById('back-button')?.addEventListener('click', () => {
-  if (screenHistory.key !== historyKey()) return;
-  while (screenHistory.stack.length) {
-    const id = screenHistory.stack.pop();
-    if (!document.querySelector(`[data-screen="${CSS.escape(id)}"]`)) continue;
-    quietScreen = true;
-    showScreen(id);
-    quietScreen = false;
-    return;
+const leafOf = (item) => (typeof item === 'string' ? item : leafOf(item.items[0]));
+function menuLevel() {
+  let items = stationView?.menu || [];
+  const trail = [];
+  for (const label of menuPath) {
+    const g = items.find((x) => typeof x === 'object' && x.label === label);
+    if (!g) break;
+    trail.push(g); items = g.items;
   }
-  renderBack();
-});
+  menuPath = trail.map((g) => g.label);
+  return { items, trail };
+}
+function renderMenu() {
+  const back = $('back-button');
+  if (!stationView) { if (back) back.disabled = true; return; }
+  const { items, trail } = menuLevel();
+  const sec = (id) => stationView.sections.find((x) => x.id === id);
+  const navButton = (label, color) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-nav-button' });
+    if (color) b.style.setProperty('--accent', color);
+    b.append(Object.assign(document.createElement('span'), { textContent: label }));
+    return b;
+  };
+  const buttons = [];
+  if (trail.length) {
+    // Where you are: the open group's button, relabelled (tap it to go up).
+    const here = navButton(trail.map((g) => g.label).join(' › '), sec(leafOf(trail[trail.length - 1]))?.color);
+    here.classList.add('lcars-nav-button--here');
+    here.setAttribute('aria-current', 'location');
+    here.onclick = menuUp;
+    buttons.push(here);
+  }
+  for (const it of items) {
+    if (typeof it === 'string') {
+      const x = sec(it);
+      if (!x) continue;
+      const b = navButton(x.title, x.color);
+      b.dataset.screenTab = x.id;
+      buttons.push(b);
+    } else {
+      const b = navButton(it.label, sec(leafOf(it))?.color);
+      b.classList.add('lcars-nav-button--group');
+      b.dataset.menu = it.label;
+      b.onclick = () => { menuPath.push(it.label); renderMenu(); showScreen(leafOf(it)); };
+      buttons.push(b);
+    }
+  }
+  $('sections').replaceChildren(...buttons);
+  // The screen showing keeps its tab lit.
+  const shown = shownScreen();
+  for (const b of document.querySelectorAll('[data-screen-tab]')) { if (b.dataset.screenTab === shown) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
+  if (back) back.disabled = !trail.length;
+  saveRejoin();
+}
+function menuUp() { if (!menuPath.length) return; menuPath.pop(); renderMenu(); }
+function menuHome() {
+  if (!me) return;
+  menuPath = [];
+  renderMenu();
+  showScreen(stationView ? leafOf(stationView.menu[0]) : 'status');
+}
+document.getElementById('back-button')?.addEventListener('click', menuUp);
+for (const corner of document.querySelectorAll('.lcars-elbow--top')) {
+  corner.setAttribute('role', 'button'); corner.tabIndex = 0; corner.setAttribute('aria-label', 'Home');
+  corner.addEventListener('click', menuHome);
+  corner.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); menuHome(); } });
+}
 function prepareReload(restart) {
   saveRejoin();
   reloading = true;
@@ -156,6 +193,7 @@ function tryRejoin() {
   const r = rejoin;
   rejoin = null;
   pendingScreen = r.screen || null;
+  pendingMenu = Array.isArray(r.menu) ? r.menu : null;
   if (r.station === 'Operations' && opsKeyRequired) { $('name').value = r.name; return; } // needs the code: sign in by hand
   if (r.station === 'Operations') send({ type: 'operator', name: r.name, ship: r.ship });
   else send({ type: 'register', name: r.name, ship: r.ship, station: r.station });
@@ -226,15 +264,10 @@ function showStation() {
   setHeader(stationView.code, `${me.name} · ${me.ship}`, me.station);
   // The top-left elbow and the header bar running from it share the station's colour.
   document.querySelector('.lcars-header').style.setProperty('--elbow', `var(--lcars-${stationView.color})`);
-  $('sections').replaceChildren(...stationView.sections.map((s) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'lcars-nav-button';
-    b.dataset.screenTab = s.id;
-    b.style.setProperty('--accent', s.color);
-    b.append(Object.assign(document.createElement('span'), { textContent: s.title }));
-    return b;
-  }));
+  // A new station starts at the top of its menu (a rejoin goes back where it was).
+  menuPath = pendingMenu || [];
+  pendingMenu = null;
+  renderMenu();
   stationView.setCrew(comms.users);
   // Helm and Science fly and watch the ship on the sector map.
   const navRoot = document.querySelector('[data-helm], [data-sensors]');
@@ -250,9 +283,7 @@ function showStation() {
   fillReassign();
   renderTraffic();
   renderCommLinks();
-  quietScreen = screenHistory.key === historyKey();
-  showScreen(stationView.sections[0].id);
-  quietScreen = false;
+  showScreen(leafOf(stationView.menu[0]));
   restoreScreen();
 }
 
@@ -473,6 +504,17 @@ function energizeCheck() {
   setTimeout(() => { rs.forEach((r) => { r.value = 0; }); energizing = false; }, 900);
 }
 
+// The crosslink's flow bars sit between the checkboxes: measured once laid out (and on resize).
+function placeFlows(row) {
+  for (const bar of row.querySelectorAll('.xflow-bar')) {
+    const td = bar.parentElement, a = td.querySelector('input'), b = td.nextElementSibling?.querySelector('input');
+    if (!a || !b) continue;
+    const r0 = td.getBoundingClientRect(), ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    bar.style.left = `${ra.right - r0.left + 6}px`;
+    bar.style.width = `${Math.max(24, rb.left - ra.right - 12)}px`;
+  }
+}
+window.addEventListener('resize', () => { for (const row of document.querySelectorAll('#ties-crosslink')) placeFlows(row); });
 // Damage control's core eject: armed by the first press, fired by a second within 5 s.
 let ejectArmedAt = 0;
 const ejectArmed = () => Date.now() - ejectArmedAt < 5000;
@@ -863,25 +905,26 @@ function renderCombat() {
       };
       const header = (text, extra = []) => { const tr = el('tr', { className: 'grid-section' }, el('th', { scope: 'rowgroup', colSpan: COLS.length + 1 }, el('span', { textContent: text }), ...extra)); return tr; };
       const divide = (rows) => { rows[rows.length - 1]?.classList.add('grid-crosslink'); return rows; };
-      const xl = () => { const r = crosslinkRow(); r.querySelector('th').className = ''; return r; };
-      // Power moving across the crosslink: a thin bar per pair, spanning the two
-      // buses' columns under the crosslink row (so its checkboxes stay clear),
-      // pulsing the way it flows, with the amount in the middle.
-      const crossflowRows = () => Object.entries(grid.crossflow || {}).map(([pair, v]) => {
-        const [x, y] = pair.split(''), from = v > 0 ? x : y, to = v > 0 ? y : x;
-        const i = COLS.indexOf(x), j = COLS.indexOf(y);
-        const tr = el('tr', { className: 'grid-xflow', id: `xflow-${from}${to}` }, el('th', { scope: 'row', className: 'grid-indent grid-indent--1' }, el('small', { className: 'grid-note', textContent: `Bus ${from} → Bus ${to}` })));
-        for (let c = 0; c < i; c++) tr.append(el('td'));
-        const bar = el('div', { className: `xflow-bar xflow-bar--${COLS.indexOf(from) < COLS.indexOf(to) ? 'right' : 'left'}`, title: `${Math.abs(v)} from Bus ${from} to Bus ${to}` },
-          el('span', { className: 'xflow-label', textContent: `${COLS.indexOf(from) < COLS.indexOf(to) ? '' : '← '}${Math.abs(v)}${COLS.indexOf(from) < COLS.indexOf(to) ? ' →' : ''}` }));
-        tr.append(el('td', { colSpan: j - i + 1 }, bar));
-        for (let c = j + 1; c < COLS.length; c++) tr.append(el('td'));
-        return tr;
-      });
+      const xl = () => { const r = crosslinkRow(); r.querySelector('th').className = ''; return withFlows(r); };
+      // Power moving along the crosslink (A–B, B–C): a bar in the gap between
+      // the two buses' checkboxes, pulsing the way it flows, the amount in the middle.
+      const withFlows = (row) => {
+        for (const [pair, v] of Object.entries(grid.crossflow || {})) {
+          const [x, y] = pair.split(''), from = v > 0 ? x : y, to = v > 0 ? y : x;
+          const td = row.children[1 + COLS.indexOf(x)];
+          if (!td) continue;
+          td.classList.add('xflow-host');
+          td.append(el('div', { className: `xflow-bar xflow-bar--${from === x ? 'right' : 'left'}`, title: `${Math.abs(v)} from Bus ${from} to Bus ${to}` },
+            el('span', { className: 'xflow-label', textContent: `${from === x ? '' : '← '}${Math.abs(v)}${from === x ? ' →' : ''}` })));
+          td.lastChild.dataset.flow = `${from}${to}`;
+        }
+        requestAnimationFrame(() => placeFlows(row));
+        return row;
+      };
       const rows = [];
       if (gridOrder === 'operations') {
         // Management layout: power sources, the crosslink, batteries, then the consoles.
-        rows.push(header('Power sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl(), ...crossflowRows()]));
+        rows.push(header('Power sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl()]));
         for (const st of consoles) rows.push(...consoleRows(st));
       } else {
         // Startup / Shutdown: a checklist, worked top to bottom.
@@ -910,7 +953,7 @@ function renderCombat() {
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
           // (The stores sit under the column headings; this step has no controls.)
           { title: 'Bus batteries and EPS pressure', rows: () => [], state: () => (Object.values(grid.stores || {}).some((x) => x.breaker && x.level > 0) ? 'Online' : 'Cold') },
-          { title: 'Bus crosslink', rows: () => [xl(), ...crossflowRows()], state: () => (grid.ties.crosslink.length >= 2 ? 'Online' : 'Cold'),
+          { title: 'Bus crosslink', rows: () => [xl()], state: () => (grid.ties.crosslink.length >= 2 ? 'Online' : 'Cold'),
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
           { title: 'Engineering console', rows: engNoReactors, state: () => (grid.ties['console:Engineering'].length ? (grid.consoleOk.Engineering ? 'Online' : 'Startup') : 'Cold'),
             on: () => (busOn ? '' : 'the Engineering console needs Bus A, B or C energized'), off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
@@ -1262,9 +1305,9 @@ function showOps() {
   $('ops-log').replaceChildren();
   ops = createOps({ send, comms, me: () => me });
   fillReassign();
-  quietScreen = screenHistory.key === historyKey();
+  menuPath = [];
+  renderMenu();
   showScreen('status');
-  quietScreen = false;
   restoreScreen();
 }
 

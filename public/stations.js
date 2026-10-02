@@ -365,7 +365,8 @@
     ] }),
     Engineering: (ship) => {
       const core = drift(0.92, 0.85, 0.98, 0.01);
-      return { code: 'ENG 06', color: 'orange', panels: [
+      // The menu: the ship's systems first (Home), power in its own submenu.
+      return { code: 'ENG 06', color: 'orange', menu: ['st-ship', 'st-core', { label: 'Power', items: ['st-power', 'st-grid'] }, 'st-damage'], panels: [
         panel('st-ship', `Ship systems · ${ship}`, 'orange', true, shipSide(ship)),
         panel('st-core', 'Warp core', 'sky', false,
           trace(110, 'sky', (t) => 0.6 * Math.sin(t * 9) * Math.sin(t * 1.3) + rand(-0.05, 0.05), 160, 'Warp field harmonics'),
@@ -450,6 +451,8 @@
     const sections = def.panels.map((p) => ({ id: p.id, title: p.querySelector('.lcars-panel__title span').textContent, color: p.style.getPropertyValue('--accent') }));
     return {
       code: def.code,
+      // The left-hand menu: screen ids, and groups ({ label, items }) that open as submenus.
+      menu: def.menu || sections.map((x) => x.id),
       setNav(own) {
         navSpeed = own ? (own.warp >= 1 ? own.warp : own.warp > 0 ? 0.6 : 0.05) : 0;
         if (own?.combat) shieldLevel = own.combat.shield / 100;

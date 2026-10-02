@@ -1321,6 +1321,8 @@ const SOURCES = ['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'co
 // shortfall (last, when nothing else will) and charges from its surplus.
 const STORES = { batteryA: 'A', batteryB: 'B', batteryC: 'C', pressure: 'EPS' };
 const isStore = (name) => name in STORES;
+// The crosslink is a chain, A–B–C: it joins A+B, B+C or all three (A and C only through B).
+const chainOk = (list) => list.length < 2 || list.includes('B');
 const storeOf = (node) => (node === 'EPS' ? 'pressure' : `battery${node}`);
 // Every tie is one class: Bus A/B, or the EPS only (the warp core's and
 // impulse drives' outputs). The warp core itself spans both: its
@@ -1445,6 +1447,7 @@ function freshEng(saved, { cold = false } = {}) {
   // Thrusters were once a load (sub:portThrusters) or on/off (thrusters.port): tied there means tied in.
   const oldThr = (d) => (Array.isArray(s.ties?.[`sub:${d}Thrusters`]) ? (s.ties[`sub:${d}Thrusters`].length ? ['EPS'] : []) : s.thrusters?.[d] === false ? [] : undefined);
   const ties = Object.fromEntries(Object.entries(DEFAULT_TIES).map(([k, d]) => [k, tiesOf(k, s.ties?.[k] ?? (k === 'crosslink' ? oldXl : k === 'thrustersPort' ? oldThr('port') : k === 'thrustersStarboard' ? oldThr('starboard') : s[k]), d)]));
+  if (!chainOk(ties.crosslink)) ties.crosslink = []; // (A and C without B: older saves lose the crosslink)
   // Older saves: antimatter was true/false (false: core ejected); tanks full.
   const amount = (v, cap) => (Number.isFinite(v) ? Math.max(0, Math.min(cap, v)) : v === false ? 0 : cap);
   const antimatter = amount(s.antimatter, FUEL.antimatter), deuterium = amount(s.deuterium, FUEL.deuterium);
@@ -1575,7 +1578,11 @@ function flow(k) {
   const tapRoom = (node) => pool(node).reduce((n, X) => n + Math.max(0, e.taps[X] - buses[X].tapUsed), 0);
   // Power moving between crosslinked buses, per pair: 'AB' > 0 is A to B, < 0 is B to A.
   const crossflow = {};
-  const xflow = (from, to, t) => { if (from === to || t <= 0) return; const k = [from, to].sort().join(''); crossflow[k] = (crossflow[k] || 0) + (from < to ? t : -t); };
+  const xflow = (from, to, t) => {
+    if (from === to || t <= 0) return;
+    if ([from, to].sort().join('') === 'AC') { xflow(from, 'B', t); xflow('B', to, t); return; } // A to C goes through B
+    const k = [from, to].sort().join(''); crossflow[k] = (crossflow[k] || 0) + (from < to ? t : -t);
+  };
   let storesOk = false; // the stores (batteries, EPS pressure) only once every other source has been shared out
   const take = (node, amt, topUp = false) => {
     let got = 0;
@@ -1885,6 +1892,7 @@ function gridCommand(ws, msg) {
     const allowed = tieNodes(k);
     if (v.some((n) => !allowed.includes(n))) return note(`${NAME[k] || k.split(':')[1]} can only be tied to ${feeds(allowed)}`);
     const list = NODES.filter((n) => v.includes(n));
+    if (k === 'crosslink' && !chainOk(list)) return note('A and C link only through B: the crosslink runs A–B–C');
     if (list.length > 1 && !isMulti(k)) return note(`${NAME[k] || k.split(':')[1]} ties to one: Bus A, B or C (the crosslink joins buses)`);
     if (k === 'containment' && !list.length && e.antimatter > 0) return note('antimatter containment can\'t be switched off with antimatter aboard (only self-destruct does that): leave it at least one feed');
     e.ties[k] = list;

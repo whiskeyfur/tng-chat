@@ -191,16 +191,22 @@
     .grid-table .grid-section th span { margin-right: 10px; }
     .lcars-toggle[aria-pressed="false"] { opacity: 0.45; filter: saturate(0.3); }
     .lcars-toggle[aria-pressed="true"] { background: var(--lcars-orange); box-shadow: 0 0 10px var(--lcars-orange); }
-    .grid-table tr.grid-xflow th, .grid-table tr.grid-xflow td { padding-top: 0; padding-bottom: 2px; }
-    .xflow-bar { position: relative; height: 14px; border-radius: 7px; background: rgba(153, 204, 255, 0.2); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+    .grid-table td.xflow-host { position: relative; overflow: visible; }
+    .xflow-host .xflow-bar { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; pointer-events: none; }
+    .xflow-bar { height: 14px; border-radius: 7px; background: rgba(153, 204, 255, 0.2); overflow: hidden; display: flex; align-items: center; justify-content: center; }
     .xflow-bar::before { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 14px, var(--lcars-sky) 14px 22px, transparent 22px 36px); opacity: 0.7; animation: xflow-right 0.9s linear infinite; }
     .xflow-bar--left::before { animation-name: xflow-left; }
     .xflow-label { position: relative; font-size: 11px; color: #fff; background: #000; padding: 0 6px; border-radius: 6px; }
     @keyframes xflow-right { from { background-position: 0 0; } to { background-position: 36px 0; } }
     @keyframes xflow-left { from { background-position: 36px 0; } to { background-position: 0 0; } }
     @media (prefers-reduced-motion: reduce) { .xflow-bar::before { animation: none; } }
+    .lcars-nav-button--here { filter: brightness(1.25); outline: 3px solid var(--lcars-text, #fff); outline-offset: -3px; }
+    .lcars-nav-button--group span::after { content: ' ▸'; }
+    .lcars-elbow--top[role="button"] { cursor: pointer; }
     button.lcars-back { border: 0; font: inherit; color: #000; cursor: pointer; display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 14px 6px 0; letter-spacing: 0.1em; }
-    button.lcars-back:disabled { opacity: 0.35; cursor: default; }
+    /* Dim: only the label, so the corner stays the colour of the bar it joins. */
+    button.lcars-back:disabled { cursor: default; }
+    button.lcars-back:disabled span { opacity: 0.35; }
     button.lcars-back:not(:disabled):hover { filter: brightness(1.2); }
     .grid-chip { display: inline-block; padding: 0 10px; border-radius: 10px; font-size: 12px; color: #000; background: var(--lcars-tan); vertical-align: middle; }
     .grid-chip[data-state="online"] { background: #66cc66; }
@@ -279,7 +285,6 @@
     </header>
 
     <nav class="lcars-sidebar" aria-label="Console">
-      <button type="button" class="lcars-nav-button comms-button" id="comms-button" style="--accent: var(--lcars-orange)" hidden><span>Comms</span></button>
       <div id="sections" style="display: contents"></div>
       <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="status" style="--accent: var(--lcars-gold)" hidden><span>Status</span></button>
       <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="hail" style="--accent: var(--lcars-red)" hidden><span>Hail</span></button>
@@ -288,6 +293,8 @@
       <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="roster" style="--accent: var(--lcars-blue)" hidden><span>Crew roster</span></button>
       <div class="lcars-sidebar__fill"></div>
       <!-- On every console: at the bottom, Library, then Station at the very bottom. -->
+      <!-- Comms: always there (dark rooms too), just above the console log. -->
+      <button type="button" class="lcars-nav-button comms-button" id="comms-button" style="--accent: var(--lcars-orange)" hidden><span>Comms</span></button>
       <button type="button" class="lcars-nav-button" data-screen-tab="log" id="log-tab" style="--accent: var(--lcars-lilac)" hidden><span>Console log</span></button>
       <button type="button" class="lcars-nav-button" data-screen-tab="library" id="library-tab" style="--accent: var(--lcars-violet)" hidden><span>Library</span></button>
       <button type="button" class="lcars-nav-button" data-screen-tab="reassign" id="reassign-tab" style="--accent: var(--lcars-peach)" hidden><span>Station</span></button>
