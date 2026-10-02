@@ -32,8 +32,9 @@
       draw();
     }).observe(wrap);
 
-    // World (0..1000) to canvas, keeping the sector square.
-    const view = () => { const s = Math.min(W, H) / 1000; return { s, ox: (W - 1000 * s) / 2, oy: (H - 1000 * s) / 2 }; };
+    // World (0..the star chart's size) to canvas, keeping the sector square.
+    const SIZE = () => window.STAR_SYSTEM?.size || 1000;
+    const view = () => { const s = Math.min(W, H) / SIZE(); return { s, ox: (W - SIZE() * s) / 2, oy: (H - SIZE() * s) / 2 }; };
     const toScreen = (x, y) => { const v = view(); return [v.ox + x * v.s, v.oy + y * v.s]; };
 
     function draw() {
@@ -41,14 +42,21 @@
       const v = view();
       g.clearRect(0, 0, W, H);
       g.fillStyle = '#050505';
-      g.fillRect(v.ox, v.oy, 1000 * v.s, 1000 * v.s);
+      g.fillRect(v.ox, v.oy, SIZE() * v.s, SIZE() * v.s);
       g.strokeStyle = 'rgba(153,153,255,0.18)';
       g.lineWidth = 1;
-      for (let i = 0; i <= 1000; i += 100) {
-        const [x0, y0] = toScreen(i, 0), [x1, y1] = toScreen(i, 1000);
+      for (let i = 0; i <= SIZE(); i += SIZE() / 10) {
+        const [x0, y0] = toScreen(i, 0), [x1, y1] = toScreen(i, SIZE());
         g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
-        const [a0, b0] = toScreen(0, i), [a1, b1] = toScreen(1000, i);
+        const [a0, b0] = toScreen(0, i), [a1, b1] = toScreen(SIZE(), i);
         g.beginPath(); g.moveTo(a0, b0); g.lineTo(a1, b1); g.stroke();
+      }
+      // The star chart's bodies (the sun, planets): faint, labelled.
+      for (const b of window.STAR_SYSTEM?.bodies || []) {
+        const [x, y] = toScreen(b.x, b.y);
+        g.save(); g.globalAlpha = 0.45; g.fillStyle = b.kind === 'star' ? css('gold') : css('tan');
+        g.beginPath(); g.arc(x, y, Math.max(2, (b.r || 5) * v.s), 0, Math.PI * 2); g.fill();
+        g.globalAlpha = 0.6; g.font = '11px sans-serif'; g.fillText(b.name, x + Math.max(4, (b.r || 5) * v.s) + 3, y + 4); g.restore();
       }
       if (!nav?.own) return;
       const own = nav.own;
@@ -99,7 +107,7 @@
       const wx = (e.clientX - r.left - v.ox) / v.s, wy = (e.clientY - r.top - v.oy) / v.s;
       const hit = nav.ships.filter((s) => s.name !== nav.own?.name).find((s) => Math.hypot(s.x - wx, s.y - wy) * v.s < 16);
       if (hit) { selected = hit.name; waypoint = null; }
-      else if (mode === 'helm' && wx >= 0 && wx <= 1000 && wy >= 0 && wy <= 1000) { selected = null; waypoint = { x: Math.round(wx), y: Math.round(wy) }; }
+      else if (mode === 'helm' && wx >= 0 && wx <= SIZE() && wy >= 0 && wy <= SIZE()) { selected = null; waypoint = { x: Math.round(wx), y: Math.round(wy) }; }
       renderControls();
       draw();
     });

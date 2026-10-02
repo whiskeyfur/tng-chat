@@ -1,0 +1,139 @@
+{
+  "about": "A runabout: a small warp core that can't be replaced; its cockpit has Helm, Ops and Tactical.",
+  "name": "Runabout",
+  "bus": 100,
+  "eps": 250,
+  "core": 0.3,
+  "maxWarp": 5,
+  "shields": 0.4,
+  "arrays": 1,
+  "warpCore": true,
+  "refit": false,
+  "transporter": true,
+  "spore": false,
+  "stations": [
+    "Helm",
+    "Tactical",
+    "Engineering",
+    "Transporter"
+  ],
+  "ports": 1,
+  "bay": 0,
+  "torpedoes": 10,
+  "ties": {
+    "system:replicators": [],
+    "system:recreation": [],
+    "sub:forcefields": [],
+    "sub:bayDoors": [],
+    "sub:bayField": [],
+    "system:gravity": [
+      "C"
+    ],
+    "system:lateral": [
+      "C"
+    ]
+  },
+  "places": [
+    {
+      "name": "Cockpit",
+      "deck": 1,
+      "stations": [
+        "Helm",
+        "Operations",
+        "Tactical"
+      ],
+      "rows": [
+        "system:phaser1",
+        "system:weapons",
+        "system:shields",
+        "system:sensors",
+        "system:lateral",
+        "system:deflector",
+        "system:tractor"
+      ]
+    },
+    {
+      "name": "Aft Compartment",
+      "deck": 1,
+      "stations": [
+        "Engineering",
+        "Transporter"
+      ],
+      "rows": [
+        "system:transporter",
+        "sub:patternBuffers",
+        "sub:targetingScanners",
+        "sub:energizingCoils",
+        "sub:heisenberg",
+        "sub:biofilter",
+        "system:lifeSupport",
+        "system:sif",
+        "system:idf",
+        "ties-computer-parent",
+        "sub:computer1",
+        "sub:computer2",
+        "sub:computer3",
+        "sub:rf",
+        "sub:radio",
+        "sub:subspace",
+        "ties-core-parent",
+        "sub:constriction",
+        "sub:amConduit",
+        "sub:injector",
+        "eps-taps",
+        "system:amBus",
+        "fuel-deu",
+        "sub:deuTransfer",
+        "fuel-am",
+        "sub:amTransfer"
+      ],
+      "default": true
+    },
+    {
+      "name": "Impulse and Aux Pods",
+      "deck": 1,
+      "stations": [],
+      "rows": [
+        "ties-impulsePort",
+        "sub:portChamber",
+        "ties-impulseStarboard",
+        "sub:starboardChamber",
+        "ties-aux1",
+        "sub:aux1Chamber",
+        "ties-aux2",
+        "sub:aux2Chamber"
+      ]
+    },
+    {
+      "name": "Warp Nacelles (port and starboard)",
+      "deck": 1,
+      "stations": [],
+      "rows": [
+        "system:engines",
+        "system:bussard"
+      ]
+    }
+  ],
+  "seats": {
+    "Helm": [
+      -0.6,
+      -1
+    ],
+    "Operations": [
+      0.6,
+      -1
+    ],
+    "Tactical": [
+      0,
+      0.5
+    ],
+    "Engineering": [
+      0,
+      0
+    ],
+    "Transporter": [
+      0,
+      1.5
+    ]
+  }
+}

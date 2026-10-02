@@ -10,8 +10,8 @@
 //   node tools/shipcore.js --relay wss://relay.example.com --data ./ship-data --key secret Enterprise
 //   node tools/shipcore.js --position 500,480 Enterprise   (where a new ship starts; else docked at a starbase)
 //   node tools/shipcore.js --warm Enterprise   (a new ship starts powered up and fuelled, not cold)
-//   node tools/shipcore.js --class runabout Rubicon (a new ship's class: galaxy (the default),
-//                                                 dreadnought, intrepid, crossfield, runabout or shuttle; kept in its .nav.json)
+//   node tools/shipcore.js --class runabout Rubicon (a new ship's class: one of config/ships/<class>.json,
+//                                                 galaxy by default; kept in its .nav.json)
 //
 // Files live in <data>/<ship>/ (default ./shipcore-data, next to where you run
 // it), with an index (.index.json) that also remembers deletions, so a file
@@ -22,6 +22,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const CONFIG = require('./config'); // the designs and the star chart (config/)
 const WebSocket = require('ws');
 
 const TID_LEN = 12;
@@ -89,7 +90,9 @@ const stores = new Map(opts.ships.map((s) => [s.toLowerCase(), new ShipStore(s)]
 // state: { x, y, heading (degrees, 0 = up/north, clockwise), warp (0 = all stop,
 //          0.25 = impulse, 1..9), dest: { x, y, name? } | null }
 
-const SECTOR = 1000;
+// The star chart (config/starsystem/<system>.json; one system for now): its size.
+const CHART_ID = (() => { const all = CONFIG.loadSystems(() => {}); return all.sol ? 'sol' : Object.keys(all)[0]; })();
+const SECTOR = (CHART_ID && CONFIG.loadSystems(() => {})[CHART_ID].size) || 1000;
 const unitsPerSecond = (warp) => (warp <= 0 ? 0 : warp < 1 ? 2 * warp : 2 * warp ** 1.8); // impulse 0.25: 0.5 a second (less with the impulse reactor giving power)
 
 // Power: the reactor's output (450%) split across systems, each 0..100%.
@@ -105,7 +108,7 @@ for (const store of stores.values()) {
     // A new ship: where --position says, or the relay docks it at a starbase.
     // It starts cold (reactor offline, no fuel) unless --warm.
     const p = opts.position || { x: 400 + Math.random() * 200, y: 400 + Math.random() * 200 };
-    store.nav = { x: p.x, y: p.y, heading: Math.floor(Math.random() * 360), warp: 0, dest: null, ...(opts.position ? {} : { spawn: true }), ...(opts.warm ? { warm: true } : {}), ...(opts.class ? { class: opts.class } : {}) };
+    store.nav = { x: p.x, y: p.y, heading: Math.floor(Math.random() * 360), warp: 0, dest: null, system: CHART_ID, ...(opts.position ? {} : { spawn: true }), ...(opts.warm ? { warm: true } : {}), ...(opts.class ? { class: opts.class } : {}) };
   }
   // (Older saves had one life support setting: it goes to its three systems.)
   const was = store.nav.power || {};
@@ -346,8 +349,9 @@ module.exports = { createShipcore, parseArgs };
 
 if (require.main === module) {
   const opts = parseArgs(process.argv.slice(2));
+  if (opts.class && !CONFIG.loadShips(() => {}).classes[opts.class]) { console.error(`no such class: ${opts.class} (config/ships has ${Object.keys(CONFIG.loadShips(() => {}).classes).join(', ')})`); process.exit(1); }
   if (opts.help || !opts.ships.length) {
-    console.log('usage: node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] [--position x,y] [--warm] [--class galaxy|dreadnought|intrepid|crossfield|runabout|shuttle] <ship> [ship...]');
+    console.log(`usage: node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] [--position x,y] [--warm] [--class ${Object.keys(CONFIG.loadShips(() => {}).classes).join('|')}] <ship> [ship...]`);
     process.exit(opts.help ? 0 : 1);
   }
   const core = createShipcore(opts, { onFail: () => process.exit(1) });

@@ -1,0 +1,72 @@
+{
+  "about": "The Sol system: the sector the ships fly in (0..size each way). Starbases and the shipyard are fixed here; bodies and waypoints are drawn on the sector map.",
+  "name": "Sol",
+  "size": 1000,
+  "bodies": [
+    {
+      "name": "Sol",
+      "kind": "star",
+      "x": 500,
+      "y": 500,
+      "r": 14
+    },
+    {
+      "name": "Earth",
+      "kind": "planet",
+      "x": 430,
+      "y": 330,
+      "r": 6
+    },
+    {
+      "name": "Mars",
+      "kind": "planet",
+      "x": 680,
+      "y": 470,
+      "r": 5
+    },
+    {
+      "name": "Jupiter",
+      "kind": "planet",
+      "x": 250,
+      "y": 420,
+      "r": 10
+    },
+    {
+      "name": "Saturn",
+      "kind": "planet",
+      "x": 330,
+      "y": 760,
+      "r": 9
+    }
+  ],
+  "starbases": [
+    {
+      "name": "Starbase 47",
+      "x": 500,
+      "y": 120
+    },
+    {
+      "name": "Starbase 12",
+      "x": 120,
+      "y": 860
+    },
+    {
+      "name": "Starbase 74",
+      "x": 880,
+      "y": 820
+    },
+    {
+      "name": "Deep Space 4",
+      "x": 860,
+      "y": 160
+    },
+    {
+      "name": "Utopia Planitia",
+      "x": 700,
+      "y": 450,
+      "shipyard": true,
+      "berths": 3
+    }
+  ],
+  "waypoints": []
+}

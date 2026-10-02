@@ -452,22 +452,13 @@
   window.STATION_NAMES = [...Object.keys(STATIONS), 'Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
   // Where each console is aboard: the places in deck order (the same rooms as the
   // room mic), the bridge's by seat, forward to aft.
-  window.PLACES = [
-    { name: 'Bridge', deck: 1, stations: ['Helm', 'Operations', 'Captain', 'First Officer', 'Bridge 1', 'Bridge 2', 'Tactical', 'Bridge 3', 'Bridge 4', 'Bridge 5'] },
-    { name: 'Main Shuttle Bay', deck: 4, stations: ['Shuttle Bay'] },
-    { name: 'Transporter Room', deck: 6, stations: ['Transporter'] },
-    { name: 'Security Office', deck: 8, stations: ['Security'] },
-    { name: 'Brig', deck: 8, stations: ['Brig'] },
-    { name: 'Crew Quarters', deck: 9, stations: ['Crew'] },
-    { name: 'Science Lab', deck: 10, stations: ['Science'] },
-    { name: 'Communications Center', deck: 11, stations: ['Communications'] },
-    { name: 'Sickbay', deck: 12, stations: ['Medical'] },
-    { name: 'Main Engineering', deck: 36, stations: ['Engineering'] },
-  ];
-  const PLACE_ORDER = PLACES.flatMap((p) => p.stations);
+  // (Set from the design of the ship (config/ships/<class>.json, by the relay):
+  // its places in deck order, each with its stations; the bridge's by seat.)
+  window.PLACES = window.PLACES || [];
   // Things grouped by where their station is, in deck order: [{ name, label, items }]
   // (in a place, by seat; the same station keeps the order given).
   window.byPlace = (items, stationOf = (x) => x) => {
+    const PLACES = window.PLACES || [], PLACE_ORDER = PLACES.flatMap((p) => p.stations);
     const at = (x) => PLACES.findIndex((p) => p.stations.includes(stationOf(x)));
     const groups = [...PLACES.map((p) => ({ name: p.name, deck: p.deck, label: `Deck ${p.deck} · ${p.name}`, items: [] })), { name: 'Elsewhere', label: 'Elsewhere', items: [] }];
     for (const x of items) groups[at(x) < 0 ? PLACES.length : at(x)].items.push(x);

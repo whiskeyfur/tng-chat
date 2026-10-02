@@ -1395,8 +1395,18 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Then the fuel storage (the buses, the main tanks), then the consoles.
     // (The consoles under a heading for each place: the bridge first, Helm forward.)
     const firstPlace = sections.indexOf('', sections.indexOf('ties-crosslink'));
-    assert.deepEqual(sections.slice(sections.indexOf('ties-crosslink') + 1, firstPlace), ['[Fuel storage]', 'fuel-deu', 'ties-sub-deuTransfer', 'tank-deu-main', 'fuel-am', 'ties-sub-amTransfer', 'tank-am-main']);
+    // (Then everything by where it is aboard, the bridge first: the fuel storage is in its own places now.)
+    assert.deepEqual(sections.slice(sections.indexOf('ties-crosslink') + 1, firstPlace), []);
     assert.equal(sections[firstPlace + 1], 'ties-console-Helm', 'the bridge first, Helm forward');
+    // Every system in its place aboard (the class's config): the warp coils in the nacelles, the pods in
+    // antimatter storage, the computer cores in the computer core; each system's subsystems under it.
+    const placed = await geordi.$$eval('#grid-table tbody tr', (rs) => { let at = null; const out = {}; for (const r of rs) { if (r.classList.contains('grid-place')) at = r.textContent.trim(); else if (at && r.id) (out[r.id] = at); } return out; });
+    assert.equal(placed['ties-system-engines'], 'Deck 38 · Warp Nacelles (port and starboard)');
+    assert.equal(placed['tank-am-main'], 'Deck 34 · Antimatter Storage');
+    assert.equal(placed['ties-sub-computer2'], 'Deck 16 · Computer Core');
+    assert.equal(placed['ties-sub-patternBuffers'], 'Deck 6 · Transporter Room');
+    assert.equal(placed['ties-sub-constriction'], 'Deck 36 · Main Engineering');
+    step('the grid in Operations order by where things are aboard: the warp coils in the nacelles, the pods in antimatter storage, the cores in the computer core, each system with its subsystems');
     // The pods' row carries their containment ties (the low buses); there's no separate containment row.
     assert.equal(await geordi.locator('#tank-am-main input[data-node="A"]').count(), 1, 'the pods tie their containment to the low buses');
     assert.equal(await geordi.locator('#ties-containment').count(), 0, 'a duplicate containment row');

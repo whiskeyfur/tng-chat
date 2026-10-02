@@ -10,25 +10,20 @@
 //
 // const room = createRoomVoice({ send, log, placeOf(id) -> place | null, myPlace() });
 // await room.handle(msg)  // room-* / rsignal messages; true if handled ('gone' is shared)
-// room.setMic(on), room.mic, room.reset()
+// room.setMic(on), room.mic, room.reset()  (opts.seats(): the bridge's seats, by place)
 (function () {
   const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
-  // Bridge seats (metres; the viewscreen is ahead, -y): Helm and Ops forward,
-  // the Captain in the centre with the First Officer beside them, Tactical
-  // behind, the five consoles around the sides and the aft wall (numbered forward to aft).
-  const SEATS = {
-    Operations: [-1.2, -2.2], Helm: [1.2, -2.2], Captain: [0, 0], 'First Officer': [1, 0.2], Tactical: [0, 2.4],
-    'Bridge 1': [-3.5, 0.5], 'Bridge 2': [3.5, 0.5], 'Bridge 3': [-3, 2.6], 'Bridge 4': [3, 2.6], 'Bridge 5': [0, 3.8],
-  };
-  const spot = (place) => SEATS[place] || [0, 0];
+  // Seats (metres; the viewscreen is ahead, -y) come from the ship's design
+  // (config/ships/<class>.json): a place without one is the room's middle.
   // Where a voice sits for this listener: pan (-1 left, 1 right) and gain.
-  function heard(from, at) {
+  function heard(from, at, seats) {
+    const spot = (place) => seats[place] || [0, 0];
     const [x1, y1] = spot(at), [x2, y2] = spot(from);
     const dx = x2 - x1, dist = Math.hypot(dx, y2 - y1);
     return { pan: Math.max(-1, Math.min(1, (0.8 * dx) / (dist + 0.5))), gain: 1 / (1 + dist / 4) };
   }
 
-  window.createRoomVoice = function createRoomVoice({ send, log, placeOf, myPlace }) {
+  window.createRoomVoice = function createRoomVoice({ send, log, placeOf, myPlace, seats = () => ({}) }) {
     let mic = null;             // { stream: Promise<MediaStream | null> }
     const out = new Map();      // listener id -> pc (what we send)
     const ins = new Map();      // speaker id -> { from, pc, el, src, gain, pan } (what we hear)
@@ -63,7 +58,7 @@
     // --- hearing ------------------------------------------------------------
 
     function position(x) {
-      const h = heard(placeOf(x.from.id) || x.from.console || x.from.station, myPlace());
+      const h = heard(placeOf(x.from.id) || x.from.console || x.from.station, myPlace(), seats());
       x.where = h;
       if (x.pan) { x.pan.pan.value = h.pan; x.gain.gain.value = h.gain; }
     }

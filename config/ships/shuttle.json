@@ -1,0 +1,102 @@
+{
+  "about": "A shuttle: no warp core (impulse and batteries), no transporter; Helm and Ops in its cockpit.",
+  "name": "Shuttle",
+  "bus": 60,
+  "eps": 80,
+  "core": 0,
+  "maxWarp": 0,
+  "shields": 0.2,
+  "arrays": 1,
+  "warpCore": false,
+  "refit": false,
+  "transporter": false,
+  "spore": false,
+  "stations": [
+    "Helm"
+  ],
+  "ports": 1,
+  "bay": 0,
+  "torpedoes": 10,
+  "ties": {
+    "system:replicators": [],
+    "system:recreation": [],
+    "sub:forcefields": [],
+    "sub:bayDoors": [],
+    "sub:bayField": [],
+    "system:gravity": [
+      "C"
+    ],
+    "system:lateral": [
+      "C"
+    ],
+    "system:transporter": [],
+    "sub:patternBuffers": [],
+    "sub:targetingScanners": [],
+    "sub:heisenberg": [],
+    "sub:biofilter": [],
+    "sub:energizingCoils": [],
+    "system:amBus": [],
+    "sub:amTransfer": []
+  },
+  "places": [
+    {
+      "name": "Cockpit",
+      "deck": 1,
+      "stations": [
+        "Helm",
+        "Operations"
+      ],
+      "rows": [
+        "system:phaser1",
+        "system:weapons",
+        "system:shields",
+        "system:sensors",
+        "system:lateral",
+        "system:deflector",
+        "system:tractor"
+      ]
+    },
+    {
+      "name": "Aft Compartment",
+      "deck": 1,
+      "stations": [],
+      "rows": [
+        "system:lifeSupport",
+        "system:sif",
+        "system:idf",
+        "ties-computer-parent",
+        "sub:computer1",
+        "sub:computer2",
+        "sub:computer3",
+        "sub:rf",
+        "sub:radio",
+        "sub:subspace",
+        "eps-taps",
+        "fuel-deu",
+        "sub:deuTransfer",
+        "fuel-am",
+        "sub:amTransfer",
+        "ties-impulsePort",
+        "sub:portChamber",
+        "ties-impulseStarboard",
+        "sub:starboardChamber",
+        "ties-aux1",
+        "sub:aux1Chamber",
+        "ties-aux2",
+        "sub:aux2Chamber",
+        "ties-core-parent"
+      ],
+      "default": true
+    }
+  ],
+  "seats": {
+    "Helm": [
+      -0.5,
+      0
+    ],
+    "Operations": [
+      0.5,
+      0
+    ]
+  }
+}

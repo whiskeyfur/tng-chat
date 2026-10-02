@@ -27,7 +27,7 @@ const ROOT = path.join(__dirname, '..');
 const PORT = process.env.PORT || '8085';
 const DATA = path.resolve(process.env.SHIPCORE_DATA || 'shipcore-data');
 const DELAY = Number(process.env.SUPERVISE_DELAY) || 5000;
-const WATCH = process.env.SUPERVISE_WATCH ? process.env.SUPERVISE_WATCH.split(path.delimiter) : ['server.js', 'tools', 'data', 'public'].map((p) => path.join(ROOT, p));
+const WATCH = process.env.SUPERVISE_WATCH ? process.env.SUPERVISE_WATCH.split(path.delimiter) : ['server.js', 'tools', 'data', 'public', 'config'].map((p) => path.join(ROOT, p));
 // Files the relay writes itself: changing them mustn't restart it.
 const IGNORE = [path.join(ROOT, 'data', 'starbases.json')];
 const SHIPCORE = path.join(__dirname, 'shipcore.js');
@@ -142,12 +142,13 @@ async function apply() {
 async function applyChanges() {
   const files = [...changed];
   changed.clear();
-  const kind = (f) => (f.split(path.sep).includes('public') ? 'pages' : path.basename(f) === 'shipcore.js' ? 'computers' : path.basename(f) === 'supervisor.js' ? 'self' : 'relay');
+  // (A design changed, config/: the relay and the ship's computers both read it.)
+  const kind = (f) => (f.split(path.sep).includes('public') ? 'pages' : path.basename(f) === 'shipcore.js' ? 'computers' : path.basename(f) === 'supervisor.js' ? 'self' : f.split(path.sep).includes('config') ? 'config' : 'relay');
   const kinds = new Set(files.map(kind));
   log(`${files.length} file(s) changed: ${[...kinds].join(', ')}`);
   if (kinds.has('self')) log('the supervisor itself changed: run npm start again to use the new one');
-  if (kinds.has('computers')) { log("reloading the ship's computers"); reloadComputers(); }
-  if (kinds.has('relay')) { log('restarting the relay'); await restartRelay(); }
+  if (kinds.has('computers') || kinds.has('config')) { log("reloading the ship's computers"); reloadComputers(); }
+  if (kinds.has('relay') || kinds.has('config')) { log('restarting the relay'); await restartRelay(); }
   else if (kinds.has('pages') && relay?.connected) relay.send({ type: 'reload', restart: false });
 }
 

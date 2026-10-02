@@ -17,6 +17,14 @@ let traffic = [];   // calls in progress on our data network (Communications)
 let lastNav = null; // ships on sensors and our own position, from the relay
 let navPanel = null; // Helm or Science navigation controls (nav.js)
 let ships = [];     // [{ name, ops, shields }]
+// Where consoles are aboard (the places of the ship's design, from config/ships via the relay)
+// and the bridge's seats (the room mic): for my ship, or the one picked to sign in to.
+function applyPlaces() {
+  const pick = (me?.ship || document.getElementById('ship')?.value || '').toLowerCase();
+  const d = window.DESIGNS?.[ships.find((s) => s.name.toLowerCase() === pick)?.classId] || window.DESIGNS?.galaxy;
+  window.PLACES = d?.places || [];
+  window.SEATS = d?.seats || {};
+}
 let relayName = 'Comm relay';   // the relay's name, from its hello
 let opsKeyRequired = true;      // whether the relay asks ops for an authorization code (from its hello)
 let stations = STATION_NAMES; // what the relay accepts (from its hello); all we know until then
@@ -41,7 +49,7 @@ const comms = createComms({
 });
 const bc = createBroadcast({ send, me: () => me, log });
 // The room you're in (the bridge, or your station): proximity chat, by seat on the bridge.
-const room = createRoomVoice({ send, log, placeOf: (id) => { const u = comms.users.find((x) => x.id === id); return u ? u.console || u.station : null; }, myPlace: () => myPlace() });
+const room = createRoomVoice({ send, log, seats: () => window.SEATS || {}, placeOf: (id) => { const u = comms.users.find((x) => x.id === id); return u ? u.console || u.station : null; }, myPlace: () => myPlace() });
 function renderRoomMic() {
   const b = $('room-mic');
   b.setAttribute('aria-pressed', String(room.mic));
@@ -183,7 +191,8 @@ document.getElementById('link')?.addEventListener('click', (ev) => {
 // Create ship below (built once per opening, so typing isn't interrupted).
 let adminBases = [];
 const createDraft = { name: '', cls: null, at: null, x: null, y: null };
-const CREATE_CLASSES = [['galaxy', 'Galaxy'], ['dreadnought', 'Dreadnought'], ['intrepid', 'Intrepid'], ['crossfield', 'Crossfield'], ['runabout', 'Runabout'], ['shuttle', 'Shuttle'], ['starbase', 'Starbase']];
+// The classes to create: each design in config/ships (the relay's hello), starbase last.
+const createClasses = () => Object.entries(window.DESIGNS || {}).sort(([a], [b]) => (a === 'starbase') - (b === 'starbase')).map(([id, d]) => [id, id === 'starbase' ? 'Starbase' : d.name]);
 function renderAdmin(st) {
   const d = adminDialog();
   if (!d.open) return;
@@ -231,7 +240,7 @@ function renderCreate(box, refresh = false) {
   }
   if (!refresh && box.dataset.built) return;
   box.dataset.built = '1';
-  box.querySelector('#create-class').replaceChildren(...CREATE_CLASSES.map(([v, n]) => tap(n, v, createDraft.cls === v, () => { createDraft.cls = v; renderCreate(box, true); })));
+  box.querySelector('#create-class').replaceChildren(...createClasses().map(([v, n]) => tap(n, v, createDraft.cls === v, () => { createDraft.cls = v; renderCreate(box, true); })));
   const where = box.querySelector('#create-where');
   if (createDraft.cls === 'starbase') {
     // A map of the sector (1000 x 1000): click where the new starbase goes.
@@ -1537,8 +1546,25 @@ function renderCombat() {
       const rows = [];
       if (gridOrder === 'operations') {
         // Management layout: power sources, the crosslink, batteries, then the consoles.
-        rows.push(header('External sources'), ...divide([...sourceRows(), ...connectionRows()]), header('Bus crosslink'), ...divide([xl()]), header('Fuel storage'), ...divide(storageRows()));
-        for (const g of byPlace(consoles)) rows.push(placeRow(g.label), ...g.items.flatMap((st) => consoleRows(st)));
+        rows.push(header('External sources'), ...divide([...sourceRows(), ...connectionRows()]), header('Bus crosslink'), ...divide([xl()]));
+        // Then everything else by where it is aboard (the design's places, in deck order): a heading
+        // for each place, then its consoles and systems, each with its subsystems under it. A place
+        // lists its rows ('system:x', 'sub:x', or a row's id); a row it doesn't name stays with the
+        // one before it, and anything no place names goes to the default place.
+        const rowId = (k) => (/^(system|sub|console):/.test(k) ? `ties-${k.replace(':', '-')}` : k);
+        const places = window.PLACES || [], fallback = places.find((p) => p.default) || places[places.length - 1];
+        const placeOfRow = new Map(places.flatMap((p) => [...p.stations.map((st) => [`ties-console-${st}`, p]), ...(p.rows || []).map((k) => [rowId(k), p])]));
+        const segments = [], heads = new Set();
+        for (const r of [...storageRows(), ...consoles.flatMap((st) => consoleRows(st))]) {
+          if ((placeOfRow.has(r.id) && !heads.has(r.id)) || !segments.length) { heads.add(r.id); segments.push({ head: r.id, place: placeOfRow.get(r.id) || fallback, rows: [r] }); }
+          else segments[segments.length - 1].rows.push(r);
+        }
+        const order = (p, id) => { const list = [...p.stations.map((st) => `ties-console-${st}`), ...(p.rows || []).map(rowId)]; return list.indexOf(id) + 1 || 999; };
+        for (const p of [...places].sort((a, b) => a.deck - b.deck)) {
+          const mine = segments.filter((g) => g.place === p).sort((a, b) => order(p, a.head) - order(p, b.head));
+          if (mine.length) rows.push(placeRow(`Deck ${p.deck} · ${p.name}`), ...mine.flatMap((g) => g.rows));
+        }
+        if (!places.length) rows.push(...segments.flatMap((g) => g.rows)); // (no design yet)
       } else {
         // Startup / Shutdown: a checklist, worked top to bottom.
         const busOn = ['A', 'B', 'C'].some((X) => grid.totals[X]?.available > 0);
@@ -1936,6 +1962,7 @@ async function onMessage(msg) {
       break;
     case 'registered':
       me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, console: msg.console || null, title: msg.title };
+      applyPlaces();
       if (msg.profile) setProfile(msg.profile, false);
       token = msg.token;
       if (ops) hideOps();
@@ -2069,6 +2096,10 @@ async function onMessage(msg) {
       break;
     case 'hello': {
       opsKeyRequired = msg.opsKey !== false; // older relays don't say: show it
+      // The star chart, and the designs (each class's places and bridge seats).
+      window.STAR_SYSTEM = msg.system || null;
+      window.DESIGNS = msg.designs || {};
+      applyPlaces();
       updateSignInMode();
       if (msg.relay) {
         relayName = msg.relay;
@@ -2089,6 +2120,7 @@ async function onMessage(msg) {
     }
     case 'ships':
       ships = msg.ships;
+      applyPlaces();
       renderShips(msg.ships);
       if (!me) fillStations(); // (the stations follow the ship picked)
       renderShipState();
@@ -2140,7 +2172,7 @@ function fillStations() {
   fillReassign();
 }
 fillStations();
-$('ship')?.addEventListener('change', () => fillStations());
+$('ship')?.addEventListener('change', () => { applyPlaces(); fillStations(); });
 
 $('register-form').onsubmit = (e) => {
   e.preventDefault();

@@ -1,0 +1,319 @@
+{
+  "about": "The USS Discovery's class: Intrepid-sized, with a spore drive.",
+  "name": "Crossfield",
+  "bus": 250,
+  "eps": 700,
+  "core": 0.8,
+  "maxWarp": 9,
+  "shields": 0.9,
+  "arrays": 1,
+  "warpCore": true,
+  "refit": true,
+  "transporter": true,
+  "spore": true,
+  "stations": null,
+  "ports": 2,
+  "bay": 2,
+  "torpedoes": 10,
+  "ties": {},
+  "places": [
+    {
+      "name": "Bridge",
+      "deck": 1,
+      "stations": [
+        "Helm",
+        "Operations",
+        "Captain",
+        "First Officer",
+        "Bridge 1",
+        "Bridge 2",
+        "Tactical",
+        "Bridge 3",
+        "Bridge 4",
+        "Bridge 5"
+      ],
+      "rows": []
+    },
+    {
+      "name": "Phaser Arrays",
+      "deck": 2,
+      "stations": [],
+      "rows": [
+        "system:phaser1",
+        "system:phaser2",
+        "system:phaser3",
+        "system:phaser4"
+      ]
+    },
+    {
+      "name": "Sensor Arrays",
+      "deck": 2,
+      "stations": [],
+      "rows": [
+        "system:sensors",
+        "system:lateral"
+      ]
+    },
+    {
+      "name": "Transporter Room",
+      "deck": 3,
+      "stations": [
+        "Transporter"
+      ],
+      "rows": [
+        "system:transporter",
+        "sub:patternBuffers",
+        "sub:targetingScanners",
+        "sub:energizingCoils",
+        "sub:heisenberg",
+        "sub:biofilter"
+      ]
+    },
+    {
+      "name": "Subspace Communications",
+      "deck": 3,
+      "stations": [],
+      "rows": [
+        "sub:rf",
+        "sub:radio",
+        "sub:subspace"
+      ]
+    },
+    {
+      "name": "Security Office",
+      "deck": 4,
+      "stations": [
+        "Security"
+      ],
+      "rows": [
+        "sub:forcefields"
+      ]
+    },
+    {
+      "name": "Brig",
+      "deck": 4,
+      "stations": [
+        "Brig"
+      ],
+      "rows": [
+        "sub:brigField"
+      ]
+    },
+    {
+      "name": "Shield Generators",
+      "deck": 5,
+      "stations": [],
+      "rows": [
+        "system:shields"
+      ]
+    },
+    {
+      "name": "Sickbay",
+      "deck": 5,
+      "stations": [
+        "Medical"
+      ],
+      "rows": [
+        "sub:holoEmitters"
+      ]
+    },
+    {
+      "name": "Science Lab",
+      "deck": 6,
+      "stations": [
+        "Science"
+      ],
+      "rows": []
+    },
+    {
+      "name": "Communications Center",
+      "deck": 6,
+      "stations": [
+        "Communications"
+      ],
+      "rows": []
+    },
+    {
+      "name": "Navigational Deflector",
+      "deck": 6,
+      "stations": [],
+      "rows": [
+        "system:deflector"
+      ]
+    },
+    {
+      "name": "Crew Quarters",
+      "deck": 7,
+      "stations": [
+        "Crew"
+      ],
+      "rows": [
+        "system:replicators",
+        "system:recreation"
+      ]
+    },
+    {
+      "name": "Environmental Control",
+      "deck": 7,
+      "stations": [],
+      "rows": [
+        "system:lifeSupport"
+      ]
+    },
+    {
+      "name": "Structural Integrity",
+      "deck": 7,
+      "stations": [],
+      "rows": [
+        "system:sif",
+        "system:idf"
+      ]
+    },
+    {
+      "name": "Computer Core",
+      "deck": 7,
+      "stations": [],
+      "rows": [
+        "ties-computer-parent",
+        "sub:computer1",
+        "sub:computer2",
+        "sub:computer3"
+      ]
+    },
+    {
+      "name": "Main Shuttle Bay",
+      "deck": 8,
+      "stations": [
+        "Shuttle Bay"
+      ],
+      "rows": [
+        "sub:bayDoors",
+        "sub:bayField"
+      ]
+    },
+    {
+      "name": "Impulse Engine Room",
+      "deck": 9,
+      "stations": [],
+      "rows": [
+        "ties-impulsePort",
+        "sub:portChamber",
+        "ties-impulseStarboard",
+        "sub:starboardChamber"
+      ]
+    },
+    {
+      "name": "Torpedo Bay",
+      "deck": 9,
+      "stations": [],
+      "rows": [
+        "system:weapons"
+      ]
+    },
+    {
+      "name": "Tractor Beam Emitter",
+      "deck": 9,
+      "stations": [],
+      "rows": [
+        "system:tractor"
+      ]
+    },
+    {
+      "name": "Auxiliary Power",
+      "deck": 10,
+      "stations": [],
+      "rows": [
+        "ties-aux1",
+        "sub:aux1Chamber",
+        "ties-aux2",
+        "sub:aux2Chamber"
+      ]
+    },
+    {
+      "name": "Deuterium Tankage",
+      "deck": 10,
+      "stations": [],
+      "rows": [
+        "fuel-deu",
+        "sub:deuTransfer"
+      ]
+    },
+    {
+      "name": "Antimatter Storage",
+      "deck": 10,
+      "stations": [],
+      "rows": [
+        "fuel-am",
+        "sub:amTransfer",
+        "system:amBus"
+      ]
+    },
+    {
+      "name": "Main Engineering",
+      "deck": 10,
+      "stations": [
+        "Engineering"
+      ],
+      "rows": [
+        "ties-core-parent",
+        "sub:constriction",
+        "sub:amConduit",
+        "sub:injector",
+        "eps-taps",
+        "system:spore"
+      ],
+      "default": true
+    },
+    {
+      "name": "Warp Nacelles (port and starboard)",
+      "deck": 11,
+      "stations": [],
+      "rows": [
+        "system:engines",
+        "system:bussard"
+      ]
+    }
+  ],
+  "seats": {
+    "Helm": [
+      1.2,
+      -2.2
+    ],
+    "Operations": [
+      -1.2,
+      -2.2
+    ],
+    "Captain": [
+      0,
+      0
+    ],
+    "First Officer": [
+      1,
+      0.2
+    ],
+    "Bridge 1": [
+      -3.5,
+      0.5
+    ],
+    "Bridge 2": [
+      3.5,
+      0.5
+    ],
+    "Tactical": [
+      0,
+      2.4
+    ],
+    "Bridge 3": [
+      -3,
+      2.6
+    ],
+    "Bridge 4": [
+      3,
+      2.6
+    ],
+    "Bridge 5": [
+      0,
+      3.8
+    ]
+  }
+}

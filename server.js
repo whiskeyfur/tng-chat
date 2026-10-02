@@ -47,6 +47,11 @@ const RELAY_NAME = process.env.RELAY_NAME || 'Subspace Relay Station 47';
 const MAX_UPLOAD = Number(process.env.MAX_UPLOAD_MB || 200) * 1024 * 1024;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, ...
+// The designs (config/ships/<class>.json; see tools/config.js).
+const CONFIG = require('./tools/config');
+const { classes: CLASSES, starbase: BASE_DESIGN } = CONFIG.loadShips((line) => console.warn(line));
+if (!Object.keys(CLASSES).length || !BASE_DESIGN) { console.error(`config: ${!BASE_DESIGN ? 'no starbase design (config/ships/starbase.json)' : 'no ship classes'} in ${CONFIG.DIR}: the relay can't start`); process.exit(1); }
+const DEFAULT_CLASS = CLASSES.galaxy ? 'galaxy' : Object.keys(CLASSES)[0];
 const OPS_STATION = 'Operations';   // operators only
 const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay', 'Brig', 'Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
 // The bridge: five dedicated stations, and five consoles whose top buttons pick
@@ -55,7 +60,6 @@ const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'E
 // where they are (its power, ODN link, life support, force fields).
 const BRIDGE_CONSOLES = ['Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
 const CONSOLE_MODES = ['Science', 'Engineering', 'Communications', 'Security', 'Medical'];
-const BRIDGE = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Operations', ...BRIDGE_CONSOLES];
 const placeOf = (u) => (u.operator ? 'Operations' : u.console || u.station);
 const modeOf = (k, c) => (CONSOLE_MODES.includes(eng.get(k)?.bridgeModes?.[c]) ? eng.get(k).bridgeModes[c] : CONSOLE_MODES[BRIDGE_CONSOLES.indexOf(c)]);
 // Put someone at a station (a bridge console: running what it's set to).
@@ -264,7 +268,7 @@ function networkGraph() {
 function shipList() {
   const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys(), ...BASE_KEYS]);
   return [...live].map((k) => ({
-    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, ...(isBase(k) ? { starbase: true } : { class: classOf(k).name, stations: stationsOf(k) }),
+    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, system: SYSTEM_ID, ...(isBase(k) ? { starbase: true, classId: 'starbase' } : { class: classOf(k).name, classId: classId(k), stations: stationsOf(k) }),
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
 // Starbases run themselves (no ship's computer needed), so they're always there.
@@ -840,7 +844,7 @@ const SYSTEMS = ['engines', 'injectors', 'deflector', 'bussard', 'amBus', 'shiel
 const BASE_ONLY = ['drydock1', 'drydock2', 'drydock3', 'industrial', 'phaser3', 'phaser4'];
 // Phaser arrays (EPS, under Tactical, each with its own light bar): a ship has one, a starbase four.
 const PHASER_ARRAYS = ['phaser1', 'phaser2', 'phaser3', 'phaser4'];
-const arraysOf = (k) => (isBase(k) ? 4 : Math.min(4, classOf(k).arrays));
+const arraysOf = (k) => Math.min(4, designOf(k).arrays);
 // Tactical's locks (shared by the phasers and the tractor beam): a ship up to 6, a starbase 24.
 const lockMax = (k) => 6 * arraysOf(k);
 const WARP_DRIVE = ['engines', 'injectors', 'bussard'];
@@ -860,9 +864,16 @@ const LIFE_SUPPORT = ['atmosphere', 'thermal', 'gravity', 'lights', 'lighting'];
 // lights switched on or off. A system draws for the places it's on in (so
 // switching areas off saves power), and serves them only while it has its
 // power. Emergency lighting lights any place whose lights are on but unpowered.
-const LOCATIONS = [...STATIONS, OPS_STATION];
+// Places with life support: every station, and the designs' places without one
+// (a nacelle, the computer core...); a vessel has its own (locationsOf), in deck order.
+const LOCATIONS = [...STATIONS, OPS_STATION, ...new Set([...Object.values(CLASSES), BASE_DESIGN].flatMap((c) => (c.places || []).filter((p) => !p.stations.length).map((p) => p.name)))];
+const locationsOf = (k) => {
+  const places = [...placesOf(k)].sort((a, b) => a.deck - b.deck), has = (st) => hasStation(k, st) || st === OPS_STATION;
+  const listed = places.flatMap((p) => (p.stations.length ? p.stations.filter(has) : [p.name]));
+  return [...new Set([...listed, ...[...STATIONS, OPS_STATION].filter((st) => has(st) && !listed.includes(st))])];
+};
 const LS_SYSTEMS = ['atmosphere', 'thermal', 'gravity', 'lights'];
-const lsShare = (k, sys) => { const ls = engOf(k).ls; return LOCATIONS.filter((l) => ls[l]?.[sys] !== false).length / LOCATIONS.length; };
+const lsShare = (k, sys) => { const ls = engOf(k).ls, here = locationsOf(k); return here.filter((l) => ls[l]?.[sys] !== false).length / here.length; };
 // What a system draws at 100% (most: 100).
 // The Bussard collectors (EPS, under Helm) gather interstellar deuterium at
 // warp: up to 5 a second at warp 9, less slower or with less power.
@@ -1067,7 +1078,7 @@ function coreNav(c, key, nav) {
   if (isBase(key)) return; // a computer for a starbase only holds its library: the station runs itself
   const clean = { x: nav.x, y: nav.y, heading: Number(nav.heading) || 0, warp: Number(nav.warp) || 0, dest: nav.dest || null };
   const was = shipClasses.get(key);
-  if (CLASSES[nav.class]) shipClasses.set(key, nav.class); else if (!shipClasses.has(key)) shipClasses.set(key, 'galaxy');
+  if (CLASSES[nav.class]) shipClasses.set(key, nav.class); else if (!shipClasses.has(key)) shipClasses.set(key, DEFAULT_CLASS);
   if (was !== shipClasses.get(key)) broadcastShips(); // (the sign-in list shows each ship's class and stations)
   if (ALERTS.includes(nav.alert)) clean.alert = nav.alert;
   if (nav.lockout) clean.lockout = true;
@@ -1078,14 +1089,14 @@ function coreNav(c, key, nav) {
   // computer says --warm or --position.
   let spawnAt = null;
   if (!combat.get(key)?.loaded) {
-    combat.set(key, { ...freshCombat(nav.combat), loaded: true });
+    combat.set(key, { ...freshCombat(nav.combat, torpedoesOf(key)), loaded: true });
     eng.set(key, freshEng(nav.eng, { cold: !nav.eng && !nav.warm }));
     restoreLinks(key, nav.eng?.links);
     if (!classOf(key).warpCore) Object.assign(engOf(key), { core: 'ejected', antimatter: 0 }); // (a shuttle has no warp core: impulse and batteries)
     // A small craft brought up ready to go: wiring that fits its buses, and EPS taps no wider than they are.
     if (!nav.eng && nav.warm) {
       const e = engOf(key), b = busMaxOf(key);
-      Object.assign(e.ties, CLASS_TIES[classId(key)] || {});
+      Object.assign(e.ties, classOf(key).ties || {});
       for (const X of BUSES) e.taps[X] = Math.min(e.taps[X], b[X]);
     }
     if (!nav.eng && nav.spawn) { spawnAt = STARBASES.find((b) => b.name === pendingSpawn.get(key)) || SPAWN_BASES[Math.floor(Math.random() * SPAWN_BASES.length)]; pendingSpawn.delete(key); engOf(key).docked = spawnAt.name; }
@@ -1535,7 +1546,7 @@ function crewCommand(ws, msg) {
       if (ws.station !== 'Security') return note('Only Security puts force fields around people');
       const u = aboard(msg.who);
       if (!u) return note('That crew member is not aboard');
-      if (msg.on && !BRIDGE.includes(placeOf(u))) return note(`${u.name} is not on the bridge`);
+      if (msg.on && roomOf(u) !== roomOfStation(key, 'Helm')) return note(`${u.name} is not on the bridge`);
       u.fielded = !!msg.on;
       opLog(key, `Security (${ws.name}): force field ${msg.on ? 'around' : 'down from'} ${u.name}`);
       send(u, { type: 'notice', text: msg.on ? `Security: a force field holds you at ${placeOf(u)}` : 'Security: the force field around you is down' });
@@ -1631,32 +1642,22 @@ const BUS_MAX = { A: 300, B: 300, C: 300, EPS: 1000 };
 // the buses' and the EPS's limits, the warp core's output and the top warp,
 // the shields' strength, the phaser arrays, whether there's a warp core and a
 // transporter, which stations it has, and its docking ports.
-const ALL_STATIONS = null; // (every station)
-const CLASSES = {
-  galaxy: { name: 'Galaxy', bus: 300, eps: 1000, core: 1, maxWarp: 9, shields: 1, arrays: 1, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2, bay: 4 },
-  dreadnought: { name: 'Dreadnought', bus: 400, eps: 1500, core: 1.4, maxWarp: 9, shields: 1.5, arrays: 2, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2, bay: 4 },
-  intrepid: { name: 'Intrepid', bus: 250, eps: 700, core: 0.8, maxWarp: 9, shields: 0.8, arrays: 1, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2, bay: 2 },
-  runabout: { name: 'Runabout', bus: 100, eps: 250, core: 0.3, maxWarp: 5, shields: 0.4, arrays: 1, warpCore: true, refit: false, transporter: true, stations: ['Helm', 'Tactical', 'Engineering', 'Transporter'], ports: 1, bay: 0 },
-  // The USS Discovery's class: Intrepid-sized, with a spore drive.
-  crossfield: { name: 'Crossfield', bus: 250, eps: 700, core: 0.8, maxWarp: 9, shields: 0.9, arrays: 1, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2, bay: 2, spore: true },
-  shuttle: { name: 'Shuttle', bus: 60, eps: 80, core: 0, maxWarp: 0, shields: 0.2, arrays: 1, warpCore: false, refit: false, transporter: false, stations: ['Helm'], ports: 1, bay: 0 },
-};
-// A small craft's wiring when its computer brings it up ready to go (--warm):
-// what a Galaxy ties in, trimmed to its little buses (nothing for stations or
-// systems it hasn't got, and some life support moved to Bus C). A new ship
-// that starts cold has nothing tied but the ODN, whatever its class.
-const CLASS_TIES = {
-  runabout: { 'system:replicators': [], 'system:recreation': [], 'sub:forcefields': [], 'sub:bayDoors': [], 'sub:bayField': [], 'system:gravity': ['C'], 'system:lateral': ['C'] },
-  shuttle: { 'system:replicators': [], 'system:recreation': [], 'sub:forcefields': [], 'sub:bayDoors': [], 'sub:bayField': [], 'system:transporter': [], 'sub:patternBuffers': [], 'sub:targetingScanners': [], 'sub:heisenberg': [], 'sub:biofilter': [], 'sub:energizingCoils': [], 'system:amBus': [], 'sub:amTransfer': [], 'system:gravity': ['C'], 'system:lateral': ['C'] },
-};
+// (The classes' designs are in config/ships/<class>.json, the starbases' in
+// config/ships/starbase.json: see tools/config.js. Ships of a class not there
+// are the default class.)
 const shipClasses = new Map(); // ship key -> class id
-const classOf = (k) => CLASSES[shipClasses.get(k)] || CLASSES.galaxy;
-const classId = (k) => (CLASSES[shipClasses.get(k)] ? shipClasses.get(k) : 'galaxy');
+const classOf = (k) => CLASSES[shipClasses.get(k)] || CLASSES[DEFAULT_CLASS];
+const classId = (k) => (CLASSES[shipClasses.get(k)] ? shipClasses.get(k) : DEFAULT_CLASS);
+// A vessel's design: its class's, or the starbases' own.
+const designOf = (k) => (isBase(k) ? BASE_DESIGN : classOf(k));
+// Where its stations are: its places (in deck order) and the room a station is in.
+const placesOf = (k) => designOf(k).places || [];
+const roomOfStation = (k, st) => placesOf(k).find((p) => p.stations.includes(st))?.name || st;
 // The stations aboard (ops always: a runabout's cockpit and a shuttle have Ops too).
 const hasStation = (k, st) => st === 'Operations' || isBase(k) || !classOf(k).stations || classOf(k).stations.includes(st);
 const stationsOf = (k) => STATIONS.filter((st) => hasStation(k, st));
 // A starbase's EPS carries three times a ship's; a ship's follow its class.
-const busMaxOf = (k) => (isBase(k) ? { ...BUS_MAX, EPS: 3000 } : (() => { const c = classOf(k); return { A: c.bus, B: c.bus, C: c.bus, EPS: c.eps }; })());
+const busMaxOf = (k) => { const c = designOf(k); return { A: c.bus, B: c.bus, C: c.bus, EPS: c.eps }; };
 // Supplies: the warp core burns antimatter and deuterium (per second, at full
 // output; less as it gives less), each impulse drive deuterium while it runs.
 // Refuel or offload at a starbase, or pass them between ships docked together.
@@ -1814,7 +1815,7 @@ const shipsDocked = (k) => PORTS.map((p) => [p, engOf(k).shipDocks[p]]).filter((
 // docked ship (its own slot each side: 'bay' aboard the craft, 'bay:<craft>'
 // aboard the mothership). In a starbase's bay, it's docked at the starbase.
 const BAY = { doors: 3, field: 5 };
-const bayCapacity = (k) => (isBase(k) ? 8 : classOf(k).bay || 0);
+const bayCapacity = (k) => designOf(k).bay || 0;
 const landedIn = (k) => [...eng].filter(([o, oe]) => oe.landed === k && present(o)).map(([o]) => o);
 const bayLinks = (k) => {
   const e = engOf(k);
@@ -1939,7 +1940,13 @@ const tieNodes = (key) => SOURCE_NODES[key] || loadNodes(key);
 const NEVER_TRIP = new Set(['containment', 'sub:constriction', ...Object.values(AM_CONTAIN)]);
 // Starbases: dock to restock torpedoes, take dock power, repair faster and
 // refit a warp core. A destroyed ship comes back docked at one of them.
-const STARBASES = [{ name: 'Starbase 47', x: 500, y: 120 }, { name: 'Starbase 12', x: 120, y: 860 }, { name: 'Starbase 74', x: 880, y: 820 }, { name: 'Deep Space 4', x: 860, y: 160 }, { name: 'Utopia Planitia', x: 700, y: 450, shipyard: true }];
+// (The star chart, its starbases and the shipyard among them, is config/starsystem/<system>.json;
+// there's one system for now, and every ship and starbase is in it.)
+const SYSTEMS_CONFIG = CONFIG.loadSystems((line) => console.warn(line));
+const SYSTEM_ID = SYSTEMS_CONFIG.sol ? 'sol' : Object.keys(SYSTEMS_CONFIG)[0];
+if (!SYSTEM_ID) { console.error(`config: no star chart in ${CONFIG.DIR}/starsystem: the relay can't start`); process.exit(1); }
+const STAR_SYSTEM = SYSTEMS_CONFIG[SYSTEM_ID];
+const STARBASES = STAR_SYSTEM.starbases.map((b) => ({ name: b.name, x: b.x, y: b.y, system: SYSTEM_ID, ...(b.shipyard ? { shipyard: true, berths: b.berths || 3 } : {}) }));
 // The shipyard: an automated station like the others (dock for supplies and
 // power), which can also drydock a ship. A drydocked ship can't move or
 // undock until it's released; warp core and pod replacement and fast repairs
@@ -1947,7 +1954,7 @@ const STARBASES = [{ name: 'Starbase 47', x: 500, y: 120 }, { name: 'Starbase 12
 // way, unless the shipyard's ops hold it (or release it sooner). Three at a time.
 const SHIPYARD = STARBASES.find((b) => b.shipyard);
 const isShipyard = (name) => !!STARBASES.find((b) => b.name === name)?.shipyard;
-const DRYDOCK = { releaseSecs: Number(process.env.DRYDOCK_RELEASE_SECS) || 30, berths: 3 };
+const DRYDOCK = { releaseSecs: Number(process.env.DRYDOCK_RELEASE_SECS) || 30, berths: SHIPYARD?.berths || 3 };
 // New and rebuilt ships come up at an ordinary starbase.
 const SPAWN_BASES = STARBASES.filter((b) => !b.shipyard);
 const drydocked = () => [...eng].filter(([k, e]) => e.drydock && !isBase(k)).map(([k]) => k);
@@ -2549,7 +2556,7 @@ function gridView(k) {
       // Served: the system has power (at less than full, it serves them less well: life support's level shows that).
       const servedAll = Object.fromEntries(LS_SYSTEMS.map((x) => { const u = 100 * lsShare(k, x); return [x, u > 0 && f.delivered[x] > 0.5]; }));
       const emergency = (f.delivered.lighting || 0) >= 99;
-      return Object.fromEntries(LOCATIONS.map((l) => { const on = e.ls[l]; const got = Object.fromEntries(LS_SYSTEMS.map((x) => [x, on[x] && servedAll[x]])); return [l, { on, got, lit: got.lights || (on.lights && emergency), emergency: on.lights && !got.lights && emergency }]; }));
+      return Object.fromEntries(locationsOf(k).map((l) => { const on = e.ls[l]; const got = Object.fromEntries(LS_SYSTEMS.map((x) => [x, on[x] && servedAll[x]])); return [l, { on, got, lit: got.lights || (on.lights && emergency), emergency: on.lights && !got.lights && emergency }]; }));
     })(),
     // The fuel buses: each tank's level, tie and Fill/Drain; what moved; the antimatter bus's containment.
     fuel: Object.fromEntries(Object.entries(TANKS).map(([bus, ts]) => [bus, { flow: Math.round(e.busFlow[bus]), down: !!e.busDown[bus], why: e.busDown[bus], light: FUELBUS.light,
@@ -2688,7 +2695,7 @@ function gridCommand(ws, msg) {
   }
   // Life support in a place (or 'all'): { ls: { loc, sys, on } }.
   if (msg.ls && LS_SYSTEMS.includes(msg.ls.sys) && (msg.ls.loc === 'all' || LOCATIONS.includes(msg.ls.loc))) {
-    for (const l of msg.ls.loc === 'all' ? LOCATIONS : [msg.ls.loc]) e.ls[l][msg.ls.sys] = !!msg.ls.on;
+    for (const l of msg.ls.loc === 'all' ? locationsOf(key) : [msg.ls.loc]) e.ls[l][msg.ls.sys] = !!msg.ls.on;
     said.push(`${SYSTEM_NAMES[msg.ls.sys]} ${msg.ls.on ? 'on' : 'off'} ${msg.ls.loc === 'all' ? 'everywhere' : `at ${msg.ls.loc}`}`);
   }
 
@@ -2755,7 +2762,7 @@ const dockRequests = new Map(); // target ship key -> { from, port, until }
 // Maneuvering thrusters work while an impulse drive runs.
 const thrustersOk = (k) => DRIVES.some((d) => engOf(k).drives[d].state === 'running') && engOf(k).deuterium > 0;
 // (A runabout or a shuttle has one docking port.)
-const portsOf = (k) => (isBase(k) ? PORTS : PORTS.slice(0, classOf(k).ports));
+const portsOf = (k) => (designOf(k).ports == null ? PORTS : PORTS.slice(0, designOf(k).ports));
 const freePort = (k, want) => (portsOf(k).includes(want) && !portTaken(k, want) ? want : portsOf(k).find((p) => !portTaken(k, p)) || null);
 const portTaken = (k, p) => !!(engOf(k).shipDocks[p] || (engOf(k).docked && engOf(k).dockedPort === p));
 
@@ -3263,7 +3270,7 @@ function destroy(k, cause) {
   releaseTractor(k, `the ${name} was destroyed`);
   const tower = towedBy(k);
   if (tower) releaseTractor(tower, `the ${name} was destroyed`);
-  combat.set(k, { ...freshCombat(), loaded: true });
+  combat.set(k, { ...freshCombat(undefined, torpedoesOf(k)), loaded: true });
   transporters.delete(k);
   for (const [o, t] of transporters) if (t.lock === k && !t.energizing) dropLock(o, `the ${name} was destroyed`);
   undockShips(k, `the ${name} was destroyed`);
@@ -3319,18 +3326,19 @@ const AIMABLE = DAMAGEABLE.filter((x) => !/^bus/.test(x));
 const damageName = (x) => SYSTEM_NAMES[x] || SUBSYSTEMS[x]?.name || x;
 const combat = new Map(); // ship key -> { hull, shield, damage, torpedoes, repair, lock, armed, phaserCharge, torpedoAt, restockAt, hitAt, hitBy, dirty }
 
-function freshCombat(saved) {
+function freshCombat(saved, carried = TORPEDO.carried) {
   const s = saved && typeof saved === 'object' ? saved : {};
   const num = (v, d, max = 100) => (Number.isFinite(v) ? Math.max(0, Math.min(max, v)) : d);
   return {
     hull: num(s.hull, 100) || 100, shield: num(s.shield, 100),
     damage: Object.fromEntries(DAMAGEABLE.map((k) => [k, num(s.damage?.[k] ?? (LIFE_SUPPORT.includes(k) ? s.damage?.lifeSupport : undefined), 0)])),
-    torpedoes: num(s.torpedoes, TORPEDO.carried, TORPEDO.carried),
+    torpedoes: num(s.torpedoes, carried, carried),
     repair: s.repair === 'hull' || DAMAGEABLE.includes(s.repair) ? s.repair : null,
     lock: null, locks: [], aim: {}, arrays: [0, 0, 0, 0], yield: num(s.yield, YIELD.start, 10) || YIELD.start, shieldFreq: num(s.shieldFreq, 1 + Math.floor(Math.random() * FREQS), FREQS) || 1, weaponFreq: num(s.weaponFreq, 1 + Math.floor(Math.random() * FREQS), FREQS) || 1, armed: false, phaserCharge: 0, torpedoAt: 0, restockAt: Date.now(), hitAt: 0, hitBy: null, dirty: false,
   };
 }
-const combatOf = (k) => { if (!combat.has(k)) combat.set(k, freshCombat(isBase(k) ? baseSettings[shipName(k)]?.combat : undefined)); return combat.get(k); };
+const torpedoesOf = (k) => designOf(k).torpedoes ?? TORPEDO.carried;
+const combatOf = (k) => { if (!combat.has(k)) combat.set(k, freshCombat(isBase(k) ? baseSettings[shipName(k)]?.combat : undefined, torpedoesOf(k))); return combat.get(k); };
 const round1 = (v) => Math.round(v * 10) / 10;
 const savedCombat = (k) => {
   const c = combatOf(k);
@@ -3356,7 +3364,7 @@ function combatView(k) {
   return {
     hull: Math.round(c.hull), shield: Math.round(c.shield),
     damage: Object.fromEntries(DAMAGEABLE.map((s) => [s, Math.ceil(c.damage[s])])),
-    repair: c.repair, torpedoes: c.torpedoes, carried: TORPEDO.carried,
+    repair: c.repair, torpedoes: c.torpedoes, carried: torpedoesOf(k),
     phaser: { range: PHASER.range, armed: c.armed, charge: Math.floor(Math.max(...c.arrays.slice(0, arraysOf(k)))), arrays: c.arrays.slice(0, arraysOf(k)).map(Math.floor) },
     torpedo: { range: TORPEDO.range, ready: Math.max(0, c.torpedoAt - now), reload: torpedoLoad(c.yield), yield: c.yield, antimatter: YIELD.antimatter * c.yield, bay: Math.floor(engOf(k).tanks?.am?.torpedo || 0) },
     freq: { shields: c.shieldFreq, weapons: c.weaponFreq, max: FREQS },
@@ -3397,7 +3405,7 @@ function hit(t, dmg, from, what = '', aim = null, { torpedo = false, yield: y = 
   const said = through ? ['on their shield frequency: straight through'] : [];
   if (shields.has(t) && !through) {
     // Shield strength drained per point of damage: less with more shield power.
-    const drain = (dmg * 60) / Math.max(MIN_SHIELD_POWER, powerOf(t).shields) / (isBase(t) ? 3 : classOf(t).shields); // (a starbase's shields hold three times as much; a ship's by its class)
+    const drain = (dmg * 60) / Math.max(MIN_SHIELD_POWER, powerOf(t).shields) / designOf(t).shields; // (by its design: a starbase's hold three times a Galaxy's)
     if (c.shield > drain || torpedo) { c.shield = Math.max(0, c.shield - drain); rest = 0; } else { rest = dmg * (1 - c.shield / drain); c.shield = 0; } // (a torpedo's tenth all goes on the shields)
     said.push(`their shields at ${Math.round(c.shield)}%`);
     if (c.shield <= 0) {
@@ -3744,7 +3752,7 @@ setInterval(() => {
       c.repair = null;
     }
     if (c.armed) for (let i = 0; i < arraysOf(k); i++) if (c.arrays[i] < 100) c.arrays[i] = Math.min(100, c.arrays[i] + (PHASER.chargeRate * (f.delivered[PHASER_ARRAYS[i]] || 0)) / 100);
-    if (!e.docked || c.torpedoes >= TORPEDO.carried) c.restockAt = now;
+    if (!e.docked || c.torpedoes >= torpedoesOf(k)) c.restockAt = now;
     else if (now - c.restockAt >= TORPEDO.restock) { c.torpedoes++; c.restockAt = now; }
     for (const t of [...c.locks]) if (!present(t) || !(isBase(t) || sensorOk(k, t))) {
       opLog(k, `weapons lock on the ${shipName(t)} lost`);
@@ -3818,7 +3826,7 @@ function automaton(k, station) {
 function engineeringSteps(k, mode) {
   const e = engOf(k), a = automaton(k, 'Engineering'), g = (m) => gridCommand(a, m);
   const docked = !!e.docked, tied = (key) => (e.ties[key] || []).length > 0;
-  const defaults = { ...DEFAULT_LOAD_TIES, ...(CLASS_TIES[classId(k)] || {}) };
+  const defaults = { ...DEFAULT_LOAD_TIES, ...(isBase(k) ? {} : classOf(k).ties || {}) };
   // (What this vessel has: its class's systems and stations; a starbase's own.)
   const has = (x) => {
     if (x.startsWith('console:')) return hasStation(k, x.slice(8));
@@ -3900,7 +3908,7 @@ function panelRoutine(k, p) {
     // Atmosphere, heat, gravity and lights on where there are people, off where there aren't.
     const a = automaton(k, 'Engineering');
     const here = new Set(crewOf(k).map(placeOf));
-    for (const l of LOCATIONS) for (const x of LS_SYSTEMS) {
+    for (const l of locationsOf(k)) for (const x of LS_SYSTEMS) {
       const want = here.has(l);
       if (!!e.ls[l]?.[x] !== want) { gridCommand(a, { ls: { sys: x, loc: l, on: want } }); return `${SYSTEM_NAMES[x]} ${want ? 'on' : 'off'} at ${l}`; }
     }
@@ -4571,7 +4579,7 @@ function leaveBroadcasts(u, oldId = u.id) {
 // own. Someone with their room mic on sends it to everyone else in the room
 // over one-way connections, as for all hands; the relay keeps who hears whom
 // as people come and go, and relays the setup.
-const roomOf = (u) => (BRIDGE.includes(placeOf(u)) ? 'Bridge' : placeOf(u));
+const roomOf = (u) => roomOfStation(u.shipKey, placeOf(u));
 const inRoom = (a, b) => a !== b && a.shipKey === b.shipKey && roomOf(a) === roomOf(b);
 function syncRooms() {
   for (const sp of users.values()) {
@@ -4891,7 +4899,10 @@ wss.on('connection', (ws) => {
 
   // The relay's own station list, so pages only offer stations it accepts
   // (and can tell when the relay is older than the pages).
-  send(ws, { type: 'hello', relay: RELAY_NAME, stations: STATIONS, opsKey: !!OPERATOR_KEY, version: require('./package.json').version });
+  send(ws, { type: 'hello', relay: RELAY_NAME, stations: STATIONS, opsKey: !!OPERATOR_KEY, version: require('./package.json').version,
+    // The star chart, and each design's places and bridge seats (for listing consoles by where they are, and the room mic).
+    system: { id: SYSTEM_ID, name: STAR_SYSTEM.name, size: STAR_SYSTEM.size, bodies: STAR_SYSTEM.bodies, waypoints: STAR_SYSTEM.waypoints },
+    designs: Object.fromEntries([...Object.entries(CLASSES), ['starbase', BASE_DESIGN]].map(([id, c]) => [id, { name: c.name, kind: id === 'starbase' ? 'starbase' : 'ship', places: c.places, seats: c.seats }])) });
   send(ws, { type: 'ships', ships: shipList() });
 });
 
