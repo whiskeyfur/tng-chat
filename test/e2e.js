@@ -905,18 +905,37 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => suluMsgs.some((m) => m.type === 'course-plotted' && m.label === 'the Defiant'));
     step('Science scanned the Defiant (distance, ops, life signs by name and species, their locations with shields down) and plotted a course for Helm');
 
-    // Helm takes the Enterprise out of subspace range: the data link drops,
-    // and the Defiant is no longer in range to hail.
+    // Helm takes the Enterprise out of radio range: the Defiant is no longer in
+    // range to hail, but the data link holds (subspace reaches the whole system).
     helm({ dest: { x: 950, y: 950 }, warp: 7 }); // default engine power (80%) gives warp 7.2 at most
     // At warp the Bussard collectors draw and gather deuterium (at rest they draw nothing).
     await spock.waitForFunction(() => window.__nav.last.own.warp >= 1 && window.__nav.last.own.power.bussard > 0);
-    await op.waitForFunction(() => !window.__operator.network.includes('Defiant'), null, { timeout: 20000 });
-    await op.waitForFunction(() => !window.__operator.ships.includes('Defiant'));
-    await op.waitForSelector('#ops-log li:has-text("out of subspace range")', { state: 'attached' });
+    await op.waitForFunction(() => !window.__operator.ships.includes('Defiant'), null, { timeout: 20000 });
+    assert.ok(await op.evaluate(() => window.__operator.network.includes('Defiant')), 'the data link dropped out of radio range');
+    assert.ok(await op.evaluate(() => window.__operator.linkShips.includes('Starbase 74')), 'a far starbase should be in data link reach (the whole system)');
     assert.ok((await spock.evaluate(() => window.__nav.last.own.warp)) > 0 || (await spock.evaluate(() => window.__nav.last.own.x)) > 800);
     beamSelf();
     await waitFor(() => randMsgs.some((m) => m.type === 'notice' && /out of transporter range/.test(m.text)));
-    step('Helm flew the Enterprise out of subspace range at warp 7: the data link dropped, the Defiant left hailing range, and beaming over is out of range');
+    step('Helm flew the Enterprise out of radio range at warp 7: the Defiant left hailing range and beaming over is out of range, but the data link held (subspace reaches the whole system)');
+    // A subspace relay down drops the link; back up, a new one opens across the system.
+    const kyle = new WebSocket(`ws://localhost:${process.env.PORT}`);
+    await new Promise((r) => kyle.on('open', r));
+    kyle.send(JSON.stringify({ type: 'register', name: 'kyle', ship: 'Enterprise', station: 'Engineering' }));
+    await new Promise((r) => setTimeout(r, 300));
+    kyle.send(JSON.stringify({ type: 'grid', ties: { 'sub:subspace': [] } }));
+    await op.waitForFunction(() => !window.__operator.network.includes('Defiant'), null, { timeout: 15000 });
+    await op.waitForSelector('#ops-log li:has-text("a subspace relay is down")', { state: 'attached' });
+    await op.waitForFunction(() => !window.__operator.linkShips.includes('Defiant'));
+    kyle.send(JSON.stringify({ type: 'grid', ties: { 'sub:subspace': ['B'] } }));
+    await op.waitForFunction(() => window.__operator.linkShips.includes('Defiant'), null, { timeout: 15000 });
+    await screen(op, 'link');
+    await op.selectOption('#link-ship', 'Defiant');
+    await op.click('#link-form button');
+    await screen(dops, 'link');
+    await dops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
+    await op.waitForFunction(() => window.__operator.network.includes('Defiant'));
+    kyle.close();
+    step('with the Enterprise\'s subspace relay untied the data link dropped; tied again, a new link opened with the far-off Defiant');
 
     // And back: intercept the Defiant, arriving within transporter range.
     helm({ dest: { ship: 'Defiant' }, warp: 7 });
@@ -1886,7 +1905,7 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // Communications' local RF without power: no calls aboard.
     barclay.send({ type: 'grid', ties: { 'sub:rf': [] } });
-    await waitFor(() => barclay.nav()?.own.grid.subOk.rf === false);
+    await waitFor(() => barclay.nav()?.own.grid.subOk.rf === false).catch(() => { const g = barclay.nav()?.own.grid; throw new Error(`local RF still up: ${JSON.stringify({ rf: g?.subOk.rf, ties: g?.ties['sub:rf'], navs: barclay.msgs.filter((m) => m.type === 'nav').length, last: barclay.msgs.slice(-3).map((m) => m.type + (m.text ? `: ${m.text}` : '')) })}`); });
     barclay.send({ type: 'call', to: id('ro', 'Excelsior'), cid: 'x1' });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /local RF has no power/.test(m.text)));
     step("with Communications' local RF untied, a call aboard the Excelsior was refused");

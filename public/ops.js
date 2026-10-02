@@ -13,6 +13,7 @@
     const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
     const voice = comms.voice;
     let roster = [], ships = [], incoming = [], outgoing = [];
+    let linkShips = []; // ships a data link can reach (the whole system over subspace)
     let links = [], hardLinks = [], network = [], linkIncoming = [], linkOutgoing = [];
     let graph = { ships: [], links: [], requests: [] };
     let broadcasts = [];
@@ -37,6 +38,7 @@
           logShipChanges(ships, msg.ships);
           ({ users: roster, ships, incoming, outgoing, links, network, linkIncoming, linkOutgoing } = msg);
           hardLinks = msg.hardLinks || [];
+          linkShips = msg.linkShips || ships;
           graph = msg.graph || graph;
           broadcasts = msg.broadcasts || [];
           remoteBlock = !!msg.remoteBlock;
@@ -193,7 +195,7 @@
           el('span', { className: 'ops-hail__text', textContent: `Requesting a data link with the ${r.toShip}` }),
           el('button', { className: 'lcars-button lcars-button--pill lcars-button--alert', textContent: 'Withdraw', onclick: () => send({ type: 'link-cancel', request: r.id }) }))));
       if (!reqList.children.length) reqList.append(el('li', { className: 'empty', textContent: 'No link requests' }));
-      const linkable = ships.filter((s) => !links.includes(s));
+      const linkable = linkShips.filter((s) => !links.includes(s));
       const linkSel = $('link-ship');
       const keepLink = linkSel.value;
       linkSel.replaceChildren(...linkable.map((s) => new Option(s, s)));
@@ -326,6 +328,7 @@
       get incoming() { return incoming; },
       get outgoing() { return outgoing; },
       get links() { return links; },
+      get linkShips() { return linkShips; },
       get network() { return network; },
       get linkIncoming() { return linkIncoming; },
       get graph() { return graph; },

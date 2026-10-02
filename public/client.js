@@ -1731,6 +1731,8 @@ async function onMessage(msg) {
       break;
     case 'nav':
       lastNav = msg;
+      // The Communications console's subspace bands follow the subspace relay.
+      { const g = msg.own?.grid; window.__subspace = g ? { up: g.subOk?.subspace !== false, why: g.ties?.['sub:subspace']?.length ? 'no power to the relay, or it is damaged' : 'the relay is untied (Engineering)' } : null; }
       renderMSD();
       comms.setTextBlocked(msg.own?.grid?.computers && !msg.own.grid.computers.some((x) => x.state === 'online') ? 'Computer core offline: no text messages' : '');
       navPanel?.update(msg);

@@ -180,6 +180,9 @@ function broadcastOps(key) {
   const commsShips = [...users.values()].filter((u) => u.station === 'Communications').map((u) => u.shipKey);
   const otherShips = [...new Set([...[...operators].map((op) => op.shipKey), ...commsShips, ...BASE_KEYS, ...crewless])]
     .filter((k) => k !== key && (commsOk(key, k) || hardLine(key, k))).map(shipName).sort();
+  // Ships a data link could reach: the whole system over subspace (both relays up), or a hard line.
+  const linkShips = [...new Set([...[...operators].map((op) => op.shipKey), ...commsShips, ...BASE_KEYS, ...crewless])]
+    .filter((k) => k !== key && linkReach(key, k)).map(shipName).sort();
   const describe = (h) => ({ id: h.id, fromShip: shipName(h.fromShip), toShip: shipName(h.toShip), caller: peerInfo(h.caller) });
   const all = [...hails.values()];
   const requests = [...linkRequests.values()].map((r) => ({ id: r.id, fromShip: shipName(r.fromShip), toShip: shipName(r.toShip), from: r.fromShip, to: r.toShip }));
@@ -187,7 +190,7 @@ function broadcastOps(key) {
     type: 'roster',
     ship: shipName(key),
     users: roster,
-    ships: otherShips,
+    ships: otherShips, linkShips,
     incoming: all.filter((h) => h.toShip === key).map(describe),
     outgoing: all.filter((h) => h.fromShip === key).map(describe),
     links: linkedTo(key).map(shipName).sort(),
@@ -204,7 +207,7 @@ function broadcastOps(key) {
   // An ops console remote-controlling this vessel's ops gets its picture too.
   for (const u of users.values()) if (u.operator && u.controlling === key) send(u, msg);
   // Communications runs data links too: it gets the link picture.
-  const links = { type: 'comm-links', ships: otherShips, links: msg.links, hardLinks: msg.hardLinks, network: msg.network, linkIncoming: msg.linkIncoming, linkOutgoing: msg.linkOutgoing };
+  const links = { type: 'comm-links', ships: linkShips, links: msg.links, hardLinks: msg.hardLinks, network: msg.network, linkIncoming: msg.linkIncoming, linkOutgoing: msg.linkOutgoing };
   for (const u of comms) send(u, links);
 }
 
@@ -320,7 +323,7 @@ function operatorMessage(op, msg) {
         if (target === op.shipKey) return fail('that is this ship');
         if (target === caller.shipKey) return fail(`${caller.name} is from the ${shipName(target)}`);
         if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship)}: no operator on duty`);
-        if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
+        if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of radio range (${rangeText(op.shipKey, target)})`);
         if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
         const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now() };
         hails.set(h.id, h);
@@ -354,7 +357,7 @@ function operatorMessage(op, msg) {
       const automated = isBase(target) && !opsOf(target).length;
       if (automated && !crewOf(target).length) return fail(`${shipName(target)} (automated): nobody aboard to take the call. Docking is open, and data links are accepted automatically`);
       if (!automated && !opsOf(target).length) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
-      if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
+      if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of radio range (${rangeText(op.shipKey, target)})`);
       if (!commsUp(op.shipKey, 'radio')) return fail('our radio has no power: hails go out by radio');
       if (!commsUp(target, 'radio')) return fail(`no answer: the ${shipName(target)}'s radio is down`);
       if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
@@ -406,7 +409,7 @@ function operatorMessage(op, msg) {
       const answers = opsOf(target).length || crewOf(target).some((u) => u.station === 'Communications');
       if (!answers && !isBase(target) && !crewless) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no ops or Communications on duty`);
       if (!hardLine(op.shipKey, target)) {
-        if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of subspace range (${rangeText(op.shipKey, target)})`);
+        if (!subspaceOk(op.shipKey, target)) return fail(`the ${shipName(target)} is not in this star system`);
         if (!commsUp(op.shipKey, 'subspace')) return fail('our subspace relay has no power: data links need it');
         if (!commsUp(target, 'subspace')) return fail(`the ${shipName(target)}'s subspace relay is down`);
       }
@@ -439,7 +442,7 @@ function operatorMessage(op, msg) {
       const other = msg.type === 'link-cancel' ? req.toShip : req.fromShip;
       if (msg.type === 'link-accept') {
         if (!opsOf(other).length && !crewOf(other).some((u) => u.station === 'Communications')) { broadcastOps(op.shipKey); return fail(`no ops or Communications on duty aboard the ${shipName(other)}`); }
-        if (!hardLine(op.shipKey, other) && !commsOk(op.shipKey, other)) { broadcastOps(op.shipKey); return fail(`the ${shipName(other)} is out of subspace range (${rangeText(op.shipKey, other)})`); }
+        if (!hardLine(op.shipKey, other) && !subspaceOk(op.shipKey, other)) { broadcastOps(op.shipKey); return fail(`the ${shipName(other)} is not in this star system`); }
         if (!hardLine(op.shipKey, other) && (!commsUp(op.shipKey, 'subspace') || !commsUp(other, 'subspace'))) { broadcastOps(op.shipKey); return fail('a subspace relay is down: no data link'); }
         links.add(linkKey(req.fromShip, req.toShip));
         opLog(other, `the ${shipName(op.shipKey)} accepted: data link open`);
@@ -761,7 +764,7 @@ function coreSignOff(ws) {
 // Ranges at full sensor power; sensor power scales all three (Engineering).
 const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
 const SYSTEMS = ['engines', 'injectors', 'deflector', 'bussard', 'amBus', 'shields', 'sensors', 'lateral', 'transporter', 'weapons', 'sif', 'idf', 'atmosphere', 'thermal', 'gravity', 'lights', 'lighting', 'replicators', 'recreation'];
-// Sensors: the long-range sensors (EPS) set sensor and subspace range; the
+// Sensors: the long-range sensors (EPS) set sensor and radio range; the
 // lateral arrays (a low bus) see close in and give the transporter its range.
 // The navigational deflector (EPS) needs the long-range sensors; warp needs it.
 // The structural integrity field and inertial dampers (EPS) hold the ship
@@ -850,8 +853,16 @@ const maxWarp = (k) => { const l = speedLimits(k); return l.warp || l.impulse; }
 const impulseRate = (k) => Math.max(0, ...DRIVES.filter((d) => engOf(k).drives[d].state === 'running').map((d) => FUSION.gears[engOf(k).drives[d].gear].rate));
 // Is this speed within what the ship has? (impulse and warp are separate)
 const speedOk = (k, w) => { const l = speedLimits(k); return w <= 0 || (w < 1 ? w <= l.impulse + 1e-9 : w <= l.warp); };
-// Both ships' sensors have to reach for subspace comms (hails, data links).
+// Both ships' sensors have to reach for radio (hails, calls between ships).
 const commsOk = (a, b) => a === b || distance(a, b) <= Math.min(rangesOf(a).comms, rangesOf(b).comms);
+// Subspace (data links) reaches the whole star system while both ends' subspace
+// relays work (checked with commsUp). The map is one star system for now:
+// vessels carry a system id so more can come later.
+const HOME_SYSTEM = 'home';
+const systemOf = (k) => navState.get(k)?.system || HOME_SYSTEM;
+const subspaceOk = (a, b) => a === b || (present(a) && present(b) && navState.has(a) && navState.has(b) && systemOf(a) === systemOf(b));
+// Can these two hold a data link right now: a hard line, or subspace with both relays up?
+const linkReach = (a, b) => hardLine(a, b) || (subspaceOk(a, b) && commsUp(a, 'subspace') && commsUp(b, 'subspace'));
 const sensorOk = (a, b) => a === b || distance(a, b) <= rangesOf(a).sensors * signatureOf(b);
 const transporterOk = (a, b) => a === b || distance(a, b) <= rangesOf(a).transporter;
 const navState = new Map();   // ship key -> { x, y, heading, warp, dest }
@@ -955,7 +966,7 @@ function scheduleNav() {
     linkTick();
     // Ops consoles list the ships in hailing range: refresh them when that changes.
     const keys = [...new Set([...cores.keys(), ...BASE_KEYS])].sort();
-    const sig = keys.flatMap((a, i) => keys.slice(i + 1).filter((b) => commsOk(a, b)).map((b) => `${a}|${b}`)).join(',');
+    const sig = keys.flatMap((a, i) => keys.slice(i + 1).filter((b) => commsOk(a, b)).map((b) => `${a}|${b}`)).join(',') + keys.map((a) => (commsUp(a, 'subspace') ? 1 : 0)).join('');
     if (sig !== lastRangeSig) { lastRangeSig = sig; broadcastAllOps(); }
     checkRemotes();
     const byShip = new Map();
@@ -1602,7 +1613,7 @@ function autoAcceptLink(id) {
   if (!req) return; // answered already
   linkRequests.delete(id);
   const base = shipName(req.toShip);
-  if ((!opsOf(req.fromShip).length && !crewOf(req.fromShip).some((u) => u.station === 'Communications')) || (!hardLine(req.fromShip, req.toShip) && (!commsOk(req.fromShip, req.toShip) || !commsUp(req.fromShip, 'subspace')))) { opLog(req.fromShip, `${base} could not open the data link`); broadcastAllOps(); return; }
+  if ((!opsOf(req.fromShip).length && !crewOf(req.fromShip).some((u) => u.station === 'Communications')) || !linkReach(req.fromShip, req.toShip)) { opLog(req.fromShip, `${base} could not open the data link`); broadcastAllOps(); return; }
   links.add(linkKey(req.fromShip, req.toShip));
   opLog(req.fromShip, `${base} (automated) accepted: data link open`);
   opLog(req.toShip, `data link with the ${shipName(req.fromShip)} open (automated)`);
@@ -2424,7 +2435,7 @@ const hardLine = (a, b) => present(a) && present(b) && dockedWith(a).includes(b)
 // Data links, kept up to date: a docked ship with its starbase connection's
 // ODN tied has a hard link to it (up whatever its relays, and Ops can't close
 // it); that ends only when the tie is cut or the ship undocks. Other links
-// drop out of subspace range or with a relay down.
+// drop when a vessel leaves the star system or a subspace relay is down.
 function linkTick() {
   for (const [k, e] of eng) {
     const b = e.docked && shipKey(e.docked), l = b && linkKey(k, b);
@@ -2451,9 +2462,9 @@ function linkTick() {
       continue;
     }
     const relayDown = !commsUp(a, 'subspace') || !commsUp(b, 'subspace');
-    if (!hardLine(a, b) && (!commsOk(a, b) || relayDown) && present(a) && present(b)) {
+    if (!hardLine(a, b) && (!subspaceOk(a, b) || relayDown) && present(a) && present(b)) {
       links.delete(l);
-      for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} lost: ${relayDown ? 'a subspace relay is down' : 'out of subspace range'}`);
+      for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} lost: ${relayDown ? 'a subspace relay is down' : 'left the star system'}`);
       refreshNetworks([a, b]);
       broadcastAllOps();
     }

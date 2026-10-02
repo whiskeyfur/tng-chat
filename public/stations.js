@@ -133,15 +133,17 @@
   }
 
   // Animated bar spectrum.
-  function spectrum(height, colors, n = 32, label) {
+  // gain(): how much activity to show (0 flattens it).
+  function spectrum(height, colors, n = 32, label, gain = () => 1) {
     const vals = Array.from({ length: n }, () => rand(0.2, 0.8));
     const c = canvas(height, (g, w, ht, t) => {
       g.clearRect(0, 0, w, ht);
       const bw = w / n;
+      const k = gain();
       vals.forEach((v, i) => {
         vals[i] = clamp(v + rand(-0.06, 0.06) + 0.02 * Math.sin(t * 2 + i / 3), 0.05, 1);
         g.fillStyle = css(colors[i % colors.length]);
-        const bh = vals[i] * (ht - 4);
+        const bh = Math.max(0.02, vals[i] * k) * (ht - 4);
         g.fillRect(i * bw + 2, ht - bh, Math.max(2, bw - 4), bh);
       });
     });
@@ -410,7 +412,9 @@
       panel('st-traffic', 'Comm traffic', 'sky', true, h('div', { 'data-traffic': '' })),
       // Data links, run from here as well as from ops (client.js fills it in).
       panel('st-links', 'Data links', 'peach', true, h('div', { 'data-links': '' })),
-      panel('st-bands', 'Subspace bands', 'peach', true, spectrum(140, ['peach', 'orange', 'gold'], 48, 'Subspace band activity')),
+      // Subspace bands follow the ship's subspace relay (powered and undamaged): dead flat without it.
+      panel('st-bands', 'Subspace bands', 'peach', true, spectrum(140, ['peach', 'orange', 'gold'], 48, 'Subspace band activity', () => (window.__subspace?.up === false ? 0 : 1)),
+        live(readout('Subspace relay', 'gold'), () => (window.__subspace ? (window.__subspace.up ? 'Online: the whole system' : `OFFLINE: ${window.__subspace.why}`) : '---'))),
       panel('st-signal', 'Carrier signal', 'sky', false, trace(110, 'sky', (t) => 0.7 * Math.sin(t * 14) * (0.7 + 0.3 * Math.sin(t * 0.7)) + rand(-0.04, 0.04), 160, 'Carrier signal'),
         live(gauge('Signal strength', 'sky'), drift(0.86, 0.7, 0.98, 0.03)),
         live(readout('Relay', 'gold'), () => 'Starbase relay 4')),
