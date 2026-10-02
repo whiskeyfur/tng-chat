@@ -177,6 +177,15 @@
     .dist-map { display: block; width: 100%; min-width: 900px; height: auto; }
     .dist-map text { font-family: var(--font); letter-spacing: 0.05em; }
     .dist-node { cursor: pointer; }
+    /* The bus ladder: the low buses side by side, their crosslink ties between, the EPS taps under. */
+    .dist-ladder { display: flex; flex-wrap: wrap; align-items: stretch; gap: 4px; margin: 0 0 8px; }
+    .dist-lbus { display: flex; flex-direction: column; justify-content: center; min-width: 96px; padding: 4px 12px; border: 0; border-radius: 16px; background: var(--lcars-tan); color: #000; font: inherit; text-transform: uppercase; cursor: pointer; text-align: left; }
+    .dist-lbus--here { background: var(--lcars-sky); }
+    .dist-lbus small { font-size: 11px; opacity: 0.8; }
+    .dist-lbus__tap--live { font-weight: 700; opacity: 1; }
+    .dist-tie { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 76px; padding: 2px 4px; border: 2px dashed #444; border-radius: 10px; background: #000; color: #888; font: inherit; font-size: 11px; text-transform: uppercase; cursor: pointer; }
+    .dist-tie--on { border: 2px solid var(--lcars-sky); color: var(--lcars-sky); }
+    .dist-tie__line { width: 60px; height: 14px; }
     /* (The way power and fuel move: dashes running along a lit line; reversed, the other way.) */
     .dist-flow { stroke-dasharray: 10 6; animation: dist-flow 1s linear infinite; }
     .dist-flow--rev { animation-direction: reverse; }

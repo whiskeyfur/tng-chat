@@ -128,9 +128,31 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     assert.deepEqual(await batteryFlow({ level: 60, supplying: 40, charging: 0, breaker: true }), ['Battery A → Bus A', 'url(#dist-arrow)'], 'discharging: battery → bus');
     assert.deepEqual(await batteryFlow({ level: 60, supplying: 0, charging: 12, breaker: true }), ['Bus A → Battery A', 'url(#dist-arrow)'], 'charging: bus → battery');
     assert.equal(await batteryFlow({ level: 60, supplying: 0, charging: 0, breaker: true }), null, 'idle: no flow drawn');
+    // The bus ladder and the crosslink: power crossing from Bus B to Bus C shows on the B–C tie
+    // (lit, B → C) and on Bus C's schematic as a source from Bus B, on Bus B's as a load to Bus C.
+    const crossing = await page.evaluate(() => {
+      const g = structuredClone(window.__nav.last.own.grid);
+      g.ties.crosslink = ['B', 'C']; g.crossflow = { BC: 12 };
+      const out = {};
+      distBus = 'C'; renderDistribution(g);
+      out.bc = document.getElementById('dist-tie-BC').textContent; out.ab = document.getElementById('dist-tie-AB').textContent;
+      out.bcLit = !!document.querySelector('#dist-tie-BC path.dist-flow');
+      out.onC = [...document.querySelectorAll('[data-distribution] .dist-node')].some((n) => /^from bus b/i.test(n.textContent));
+      distBus = 'B'; renderDistribution(g);
+      out.onB = [...document.querySelectorAll('[data-distribution] .dist-node')].some((n) => /^to bus c/i.test(n.textContent));
+      distBus = 'A'; renderDistribution(window.__nav.last.own.grid);
+      return out;
+    });
+    assert.deepEqual(crossing, { bc: 'B → C 12', ab: 'tie open', bcLit: true, onC: true, onB: true }, JSON.stringify(crossing));
+    // A tap on a tie closes (or opens) it.
+    const xlWas = await page.evaluate(() => [...window.__nav.last.own.grid.ties.crosslink]);
+    await page.click('#dist-tie-AB');
+    await page.waitForFunction((w) => JSON.stringify(window.__nav.last.own.grid.ties.crosslink) !== JSON.stringify(w), xlWas);
+    await page.click('#dist-tie-AB');
+    await page.waitForFunction((w) => JSON.stringify(window.__nav.last.own.grid.ties.crosslink) === JSON.stringify(w), xlWas);
     await page.click('[data-distribution] .dist-node[data-key="console:Helm"]');
     await page.waitForFunction((w) => window.__nav.last.own.grid.ties['console:Helm'].includes('A') === w, was);
-    step(`Distribution: the EPS schematic (Main Engineering on it); Bus A, where a tap on the Helm console untied it (standby) and another tied it back; a charged battery not feeding reads standby (${standbySeen}); a battery's line runs battery → bus discharging, bus → battery charging`);
+    step(`Distribution: the EPS schematic (Main Engineering on it); Bus A, where a tap on the Helm console untied it (standby) and another tied it back; a charged battery not feeding reads standby (${standbySeen}); a battery's line runs battery → bus discharging, bus → battery charging; the bus ladder showed power crossing B → C on its tie and on each bus's schematic, and a tap on a tie toggled it`);
     // The sidebar: two columns (ship-wide on the left, this station's screens on the right), each
     // scrolling by itself when it's taller than the screen.
     for (const col of ['.lcars-sidebar__col--right', '.lcars-sidebar__col--left']) {

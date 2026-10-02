@@ -779,7 +779,7 @@ let distBus = 'EPS';
 function renderDistribution(grid) {
   const box = document.querySelector('[data-distribution]');
   if (!box || !grid) return;
-  const sig = JSON.stringify([distBus, grid.ties, grid.cells, grid.cutOff, grid.totals, grid.stores, grid.fuel, grid.taps]);
+  const sig = JSON.stringify([distBus, grid.ties, grid.cells, grid.cutOff, grid.totals, grid.stores, grid.fuel, grid.taps, grid.crossflow]);
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig;
   const NS = 'http://www.w3.org/2000/svg';
@@ -802,6 +802,14 @@ function renderDistribution(grid) {
     if (store) left.push({ label: X === 'EPS' ? 'EPS pressure' : `Battery ${X}`, value: `${store.level}%${store.supplying ? ` · ${store.supplying} out` : store.charging ? ` · charging ${store.charging}` : ''}`, st: store.supplying > 0 ? 'live' : store.breaker === false ? 'open' : 'dead', ...(store.supplying > 0 ? {} : { word: store.level > 0 ? 'standby' : 'dead' }),
       // (Out to the bus while it supplies; in from it while it charges.)
       flow: store.supplying > 0 ? 1 : store.charging > 0 ? -1 : 0, amount: store.supplying || store.charging || 0 });
+    // The low buses' crosslink (power crossing from another bus: a source; to one: a load) and the EPS tap.
+    const across = (Y) => { const k = [X, Y].sort().join(''), v = grid.crossflow?.[k] || 0; return Y < X ? v : -v; }; // + : from Y into X
+    const LOW = ['A', 'B', 'C'];
+    if (LOW.includes(X)) {
+      const tapIn = Math.max(0, grid.cells?.taps?.[X] || 0), tapMax = grid.taps?.[X] || 0;
+      left.push({ label: 'EPS tap', value: `${Math.round(tapIn)} of ${tapMax} MW`, st: tapIn > 0.5 ? 'live' : tapMax ? 'dead' : 'open', ...(tapIn > 0.5 ? {} : { word: tapMax ? 'standby' : 'closed' }), amount: tapIn, crosslink: true });
+      for (const Y of LOW.filter((y) => y !== X)) { const v = across(Y); if (v > 0.5) left.push({ label: `From Bus ${Y}`, value: `+${Math.round(v)} MW`, st: 'live', amount: v, crosslink: true }); }
+    }
     const t = grid.totals?.[X] || {};
     mid = { label: busName, value: `${Math.round(t.used || 0)} of ${Math.round(t.available || 0)} MW`, st: (t.available || 0) > 0 ? 'live' : 'dead',
       notes: X === 'EPS' ? [] : [`crosslink: TIE ${grid.ties.crosslink.includes(X) ? 'CLOSED' : 'OPEN'}`, `EPS tap: ${grid.taps?.[X] ? `up to ${grid.taps[X]}` : 'closed'}`] };
@@ -811,6 +819,8 @@ function renderDistribution(grid) {
     const placeOf = (key) => key.startsWith('console:') ? places.find((p) => p.stations.includes(key.slice(8)))
       : places.find((p) => (p.rows || []).includes(parentOf[key.slice(7)] || key)) || fallback;
     const loads = Object.keys(grid.ties).filter((k) => /^(console|system|sub):/.test(k) && !k.startsWith('place:') && grid.tieNodes[k]?.includes(X) && (grid.conduits || []).indexOf(k) < 0 || k === 'system:lifeSupport' && grid.tieNodes[k]?.includes(X));
+    if (LOW.includes(X)) for (const Y of LOW.filter((y) => y !== X)) { const v = across(Y); if (v < -0.5) right.push({ label: `To Bus ${Y}`, value: `−${Math.round(-v)} MW`, st: 'live', amount: -v, kind: 'place' }); }
+    if (X === 'EPS') for (const Y of LOW) { const v = Math.max(0, grid.cells?.taps?.[Y] || 0); if (v > 0.5) right.push({ label: `EPS tap to Bus ${Y}`, value: `${Math.round(v)} of ${grid.taps?.[Y] || 0} MW`, st: 'live', amount: v, kind: 'place' }); }
     for (const p of places) {
       const pk = `place:${p.name}`, mine = loads.filter((k) => placeOf(k) === p);
       if (!grid.tieNodes[pk] || (!mine.length && !grid.ties[pk]?.includes(X))) continue;
@@ -867,8 +877,37 @@ function renderDistribution(grid) {
   }
   // The buses, as a right-capped cluster (situational: this panel's own choice).
   const tap = (b) => { const t = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: { Deu: 'Deu.', AM: 'AM' }[b] || (b === 'EPS' ? 'EPS' : `Bus ${b}`) }); t.dataset.bus = b; t.setAttribute('aria-pressed', String(b === X)); t.onclick = () => { distBus = b; box.dataset.sig = ''; renderDistribution(lastNav?.own?.grid); }; return t; };
+  // The bus ladder: Bus A ═ Bus B ═ Bus C, each tie lit while closed with the way power crosses
+  // it and how much; under each, the EPS tap into it. Tap a tie to close or open it, a bus to view it.
+  const ladder = (() => {
+    const xl = grid.ties.crosslink || [];
+    const flowAB = (a, b) => { const v = grid.crossflow?.[[a, b].sort().join('')] || 0; return a < b ? v : -v; }; // + : a → b
+    const mini = (dir, amount) => { const s = svgEl('svg', { class: 'dist-tie__line', viewBox: '0 0 60 14', 'aria-hidden': 'true' }); s.append(svgEl('path', { d: 'M4,7 H56', fill: 'none', stroke: dir ? 'var(--lcars-sky)' : '#555', 'stroke-width': dir ? Math.min(5, 2 + amount / 60).toFixed(1) : 2, ...(dir ? { class: `dist-flow${dir < 0 ? ' dist-flow--rev' : ''}`, [dir < 0 ? 'marker-start' : 'marker-end']: 'url(#dist-arrow)' } : {}) })); return s; };
+    const tie = (a, b) => {
+      const on = xl.includes(a) && xl.includes(b), v = flowAB(a, b), amt = Math.abs(v), dir = on && amt > 0.5 ? Math.sign(v) : 0;
+      const b2 = el('button', { type: 'button', className: `dist-tie${on ? ' dist-tie--on' : ''}`, id: `dist-tie-${a}${b}` }, mini(dir, amt),
+        el('span', { className: 'dist-tie__text', textContent: !on ? 'tie open' : dir ? `${dir > 0 ? a : b} → ${dir > 0 ? b : a} ${Math.round(amt)}` : 'tie closed' }));
+      b2.title = `Bus ${a} – Bus ${b} crosslink: tap to ${on ? 'open' : 'close'} it`;
+      b2.onclick = () => {
+        // (Opening A–B drops A; opening B–C drops C; a lone bus is no crosslink at all.)
+        const next = ['A', 'B', 'C'].filter((n) => (on ? xl.includes(n) && n !== (a === 'B' ? b : a) : xl.includes(n) || n === a || n === b));
+        send({ type: 'grid', ties: { crosslink: next.length < 2 ? [] : next } });
+      };
+      return b2;
+    };
+    const bus = (Y) => {
+      const tapIn = Math.round(Math.max(0, grid.cells?.taps?.[Y] || 0)), tapMax = grid.taps?.[Y] || 0;
+      const b2 = el('button', { type: 'button', className: `dist-lbus${Y === X ? ' dist-lbus--here' : ''}`, id: `dist-lbus-${Y}` }, el('b', { textContent: `Bus ${Y}` }),
+        el('small', { className: tapIn ? 'dist-lbus__tap--live' : '', textContent: tapMax ? `EPS tap ↓ ${tapIn} of ${tapMax}` : 'EPS tap closed' }));
+      b2.setAttribute('aria-pressed', String(Y === X));
+      b2.onclick = () => { distBus = Y; box.dataset.sig = ''; renderDistribution(lastNav?.own?.grid); };
+      return b2;
+    };
+    return el('div', { className: 'dist-ladder', id: 'dist-ladder', role: 'group', ariaLabel: 'the low buses, their crosslink and EPS taps' }, bus('A'), tie('A', 'B'), bus('B'), tie('B', 'C'), bus('C'));
+  })();
   box.replaceChildren(
     el('div', { className: 'place-bar dist-buses' }, el('span', { className: 'place-label', textContent: 'Bus' }), ...['A', 'B', 'C', 'EPS', 'Deu', 'AM'].map(tap), el('span', { className: 'place-cap place-cap--r' })),
+    ladder,
     el('div', { className: 'dist-wrap' }, svg),
     el('p', { className: 'ops-hint', textContent: 'Power runs source → bus → place → system → subsystem: a load gets this bus\'s power only while everything above it is tied to it (CUT OFF otherwise). Tap a pill to tie it to this bus or untie it.' }));
 }
