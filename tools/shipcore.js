@@ -23,7 +23,7 @@ const TID_LEN = 12;
 const CHUNK = 64 * 1024;
 
 function parseArgs(argv) {
-  const opts = { relay: process.env.RELAY || 'ws://localhost:8080', data: process.env.SHIPCORE_DATA || path.resolve('shipcore-data'), key: process.env.OPERATOR_KEY || '', ships: [] };
+  const opts = { relay: process.env.RELAY || 'ws://localhost:8085', data: process.env.SHIPCORE_DATA || path.resolve('shipcore-data'), key: process.env.OPERATOR_KEY || '', ships: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--relay') opts.relay = argv[++i];

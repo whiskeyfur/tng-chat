@@ -807,6 +807,20 @@ function renderCombat() {
         ties(`thrusters${d[0].toUpperCase()}${d.slice(1)}`, 'Maneuvering thrusters', `thrusters${d[0].toUpperCase()}${d.slice(1)}`, { level: 2, note: dr.thrusters ? 'tied in: the drive\'s unused thrust feeds the EPS' : 'untied: thrust only, nothing to the EPS' }),
       ];
     };
+    // The computer cores: a parent row, then each core with its Boot / Shut down tap and boot stage.
+    const computerRows = () => {
+      const cs = grid.computers || [];
+      return [
+        parentRow('ties-computer-parent', 'Computer cores', 1, `${cs.filter((x) => x.state === 'online').length} of ${cs.length} online${cs.some((x) => x.state === 'online') ? '' : ' · EPS taps need one'}`),
+        ...cs.map((x, i) => {
+          const n = i + 1;
+          const note = x.state === 'booting' ? `booting: ${x.stage} (${x.t} of ${grid.computerBootSecs} s)` : x.state === 'crashed' ? 'CRASHED: power lost, boot again' : x.state;
+          const row = subRow(`computer${n}`, 2, note);
+          row.querySelector('th span').after(x.state === 'online' || x.state === 'booting' ? small('Shut down', `computer-${n}-stop`, () => send({ type: 'grid', computer: { n, on: false } }), true) : small('Boot', `computer-${n}-boot`, () => send({ type: 'grid', computer: { n, on: true } })));
+          return row;
+        }),
+      ];
+    };
     // A row with a control across the bus columns (EPS taps' light bars).
     const spanRow = (id, label, level, control, note = '') => {
       const tr = el('tr', { id }, el('th', { scope: 'row', className: `grid-indent grid-indent--${level}` }, el('span', { textContent: label }), ...(note ? [el('small', { className: 'grid-note', textContent: note })] : [])));
@@ -839,6 +853,7 @@ function renderCombat() {
       ] : []),
       ...driveRows('port'), ...driveRows('starboard'),
       ...tapRows(),
+      ...computerRows(),
     ];
     // Power sources from outside (dock power, the ships docked with us, solar) and the batteries.
     const sourceRows = () => [
@@ -949,6 +964,8 @@ function renderCombat() {
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
           { title: 'Engineering console', rows: engNoReactors, state: () => (grid.ties['console:Engineering'].length ? (grid.consoleOk.Engineering ? 'Online' : 'Startup') : 'Cold'),
             on: () => (busOn ? '' : 'the Engineering console needs Bus A, B or C energized'), off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
+          { title: 'Computer cores', rows: computerRows, state: () => { const cs = grid.computers || []; return cs.length && cs.every((x) => x.state === 'online') ? 'Online' : cs.some((x) => x.state === 'booting' || x.state === 'online') ? 'Startup' : 'Cold'; },
+            on: () => (busOn ? '' : 'the computer cores need Bus A, B or C energized') },
           { title: 'Antimatter containment', rows: () => containment, extra: antimatterButton, state: () => (!grid.antimatter ? 'Cold' : grid.ties.containment.length && grid.containmentOk ? 'Online' : 'Startup'),
             on: () => (grid.core === 'ejected' ? 'no warp core aboard' : busOn ? '' : 'containment needs Bus A, B or C energized'), off: () => (grid.antimatter ? 'containment can\'t be cut with antimatter aboard: offload it at a starbase' : '') },
           { title: 'Impulse drives', rows: driveRowsAll, extra: fuelButton('deuterium'), state: () => (drives.every((d) => d.state === 'running') ? 'Online' : drives.some((d) => d.state !== 'off') ? 'Startup' : 'Cold'),
@@ -1393,6 +1410,7 @@ async function onMessage(msg) {
       break;
     case 'nav':
       lastNav = msg;
+      comms.setTextBlocked(msg.own?.grid?.computers && !msg.own.grid.computers.some((x) => x.state === 'online') ? 'Computer core offline: no text messages' : '');
       navPanel?.update(msg);
       stationView?.setNav(msg.own);
       renderShipState();

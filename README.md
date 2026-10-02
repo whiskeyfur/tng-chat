@@ -6,7 +6,7 @@ Starship comms in the browser, on LCARS consoles. A small Node server, the comm 
 
 ```sh
 npm install
-npm start                                  # the relay (http://localhost:8080; PORT, RELAY_NAME to change) and a ship's computer for every ship saved in shipcore-data/
+npm start                                  # the relay (http://localhost:8085; PORT, RELAY_NAME to change) and a ship's computer for every ship saved in shipcore-data/
 npm start -- Enterprise "K'Vatch"          # ... or for just these ships
 npm run relay                              # the relay alone
 npm run shipcore -- Enterprise "K'Vatch"   # a ship's computer on its own: no ship's computer, no ship
@@ -14,7 +14,7 @@ npm run shipcore -- Enterprise "K'Vatch"   # a ship's computer on its own: no sh
 
 `npm start` runs `tools/supervisor.js`, which also restarts everything when the code changes: 5 seconds after the last change to `server.js`, `tools/*.js` or `data/*.json`, every console is told to reload, the relay and the ship's computers restart, and each console signs back in as who and where it was (calls aren't resumed: call or join again). A change to `public/*` only reloads the consoles. Ship state comes through in each ship's `.nav.json`. (With `npm start` running the ship's computers, there's no need to start them by hand as well.)
 
-Everyone uses the same page, http://localhost:8080:
+Everyone uses the same page, http://localhost:8085:
 
 1. **Start a ship's computer** for each ship (above). A ship exists only while a ship's computer runs it; the ship list on the sign-in screen shows exactly those ships, for everyone, ops included.
 2. **Take the ops station:** enter your name, pick the ship, pick **Operations** as the station.
@@ -32,9 +32,9 @@ The pages in `public/` are static, so they can be hosted anywhere, for example G
 node tools/export-pages.js ../whiskeyfur.github.io/stchat wss://relay.example.com
 ```
 
-That copies `public/` into the folder and writes `config.js` with the relay address. Without one, people enter it in the **Comm relay** field on the sign-in screen (remembered per browser), or open the page with `?relay=wss://relay.example.com`. Pages served over `https://` (like github.io) need a `wss://` relay, for example the server behind a TLS reverse proxy or `ngrok http 8080`; a relay on `localhost` also works for local testing. The library endpoints allow cross-origin requests, authenticated by the session token.
+That copies `public/` into the folder and writes `config.js` with the relay address. Without one, people enter it in the **Comm relay** field on the sign-in screen (remembered per browser), or open the page with `?relay=wss://relay.example.com`. Pages served over `https://` (like github.io) need a `wss://` relay, for example the server behind a TLS reverse proxy or `ngrok http 8085`; a relay on `localhost` also works for local testing. The library endpoints allow cross-origin requests, authenticated by the session token.
 
-Browsers only allow the microphone on `https://` or `localhost`. To try it across machines, put the server behind HTTPS (for example a reverse proxy, or a tunnel such as `ngrok http 8080`); the pages switch to `wss://` automatically.
+Browsers only allow the microphone on `https://` or `localhost`. To try it across machines, put the server behind HTTPS (for example a reverse proxy, or a tunnel such as `ngrok http 8085`); the pages switch to `wss://` automatically.
 
 ## Crew consoles
 
@@ -132,6 +132,8 @@ Sources are drawn on in this order: a docked ship's power, solar, dock power, th
 - **Hull fields:** the **structural integrity field** (35) and **inertial dampers** (22), on the EPS under Engineering. The dampers need the SIF at 50%; the warp core needs the SIF at 50% to start (so a cold start powers the EPS from an impulse drive first); impulse needs SIF 60% and dampers 80%; warp needs both at 90%.
 - **Sensors:** the **long-range sensors** (22, EPS) set sensor and subspace range; the **lateral arrays** (10, low bus) see a quarter as far on their own and set transporter range. The **navigational deflector** (80, EPS, under Helm) needs the long-range sensors, and warp needs it at 90%.
 - **Life support** is a parent row with three systems of its own under it, each with its own ties and light bar: **atmospheric processors** (10 at 100%), **thermal regulation** (8) and **gravity generators** (20), and **emergency lighting** (1). Solar alone (25) runs the first two with a little over to charge batteries, not gravity as well. Life support's level (the crew warnings) is the lower of atmosphere and thermal. Older saves' one life support setting and ties go to all three.
+- **Computer cores:** three, under Engineering (a parent row, each core a low-bus subsystem drawing 2, on A, B and C by default) with a **Boot** / **Shut down** tap. A core boots in stages (POST, LCARS kernel, ODN handshake, isolinear verification, subprocessor sync: about 14 s) and crashes if its power fails (boot it again). The EPS taps (the flow regulators) need at least one online; text messages need one online at each end (greyed out with the reason otherwise). Startup's step 5.
+- **Comms by power:** calls aboard need Local RF; calls over a data link the subspace relays; calls by radio both radios. A call in progress drops if its carrier loses power at either end.
 - **Every column balances:** a source's cell shows all it gave, battery charging included; the **EPS taps** row shows what flows down each tap (− in the EPS column, + in the bus's), so sources + taps = loads + charging in each column (a crosslinked pool balances as a whole).
 - **Two classes:** everything ties to the low-power buses or to the EPS alone, never both. Low-power loads (consoles, life support, sensors, replicators, recreation, transporter, containment, the subsystems) and sources (solar, dock power, docked-ship power, batteries) may tie to any combination of A, B and C: a load is split evenly between them, a source's output shared evenly (batteries charge from and drain into each). Engines, shields, weapons and the tractor beam draw on the EPS alone, so they need the warp core or an impulse drive.
 - **EPS taps:** one light bar per low bus sets how much EPS power may flow down into it (default A 300, B 300, C 0; a cold ship starts at 0).

@@ -138,6 +138,7 @@
           msgBtn.dataset.user = u.id;
           msgBtn.setAttribute('aria-pressed', String(recipients.has(u.id)));
           msgBtn.onclick = () => { if (recipients.has(u.id)) recipients.delete(u.id); else recipients.add(u.id); renderDirectory(); renderCompose(); };
+          if (textBlocked) { msgBtn.disabled = true; msgBtn.title = textBlocked; }
           li.append(name, btn, msgBtn);
           ul.append(li);
         }
@@ -147,8 +148,8 @@
     function renderCompose() {
       for (const id of [...recipients]) if (!users.some((u) => u.id === id)) recipients.delete(id); // gone
       const names = [...recipients].map((id) => users.find((u) => u.id === id)?.name).filter(Boolean);
-      $('msg-to').textContent = names.length ? `To ${names.join(', ')}` : 'Tap Msg by names to pick who to write to';
-      $('msg-send').disabled = !names.length;
+      $('msg-to').textContent = textBlocked || (names.length ? `To ${names.join(', ')}` : 'Tap Msg by names to pick who to write to');
+      $('msg-send').disabled = !names.length || !!textBlocked;
     }
     function renderMessages() {
       const ol = $('messages');
@@ -176,6 +177,14 @@
       opts.send({ type: 'text', to: [...recipients], text });
       $('msg-text').value = '';
     };
+
+    // Text messages need a computer core online aboard: otherwise greyed, with the reason.
+    let textBlocked = '';
+    function setTextBlocked(reason) {
+      if ((reason || '') === textBlocked) return;
+      textBlocked = reason || '';
+      renderDirectory(); renderCompose();
+    }
 
     function setOps(online) {
       $('ops-status').textContent = online ? '' : 'Ops offline: no new off-ship communications. Calls in progress continue.';
@@ -216,6 +225,7 @@
       voice,
       radio,
       setOps,
+      setTextBlocked,
       get users() { return users; },
       get messages() { return messages.map((m) => ({ from: m.from.name, to: m.to.map((t) => t.name), text: m.text })); },
       get isOpen() { return dialog.open; },

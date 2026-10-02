@@ -1220,7 +1220,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     for (const r of await geordi.$$eval('#ties-crosslink .xflow-bar', (bs) => bs.map((x) => ({ flow: x.dataset.flow, label: x.textContent })))) assert.match(r.label, /\d/, JSON.stringify(r));
     // The stores (each bus's battery, the EPS pressure) sit under the headings.
     assert.match(await geordi.textContent('#grid-table thead #grid-stores'), /Battery \d+%.*Battery \d+%.*Battery \d+%.*Pressure \d+%/);
-    const STEPS = ['Dock power, Solar', 'Bus batteries and EPS pressure', 'Bus crosslink', 'Engineering console', 'Antimatter containment', 'Impulse drives', 'EPS taps', 'Warp core', 'Consoles and systems'];
+    const STEPS = ['Dock power, Solar', 'Bus batteries and EPS pressure', 'Bus crosslink', 'Engineering console', 'Computer cores', 'Antimatter containment', 'Impulse drives', 'EPS taps', 'Warp core', 'Consoles and systems'];
     await geordi.click('#grid-order-startup');
     assert.deepEqual(await geordi.$$eval('#grid-table tr[data-step]', (rs) => rs.map((r) => r.dataset.step)), STEPS);
     assert.equal(await geordi.textContent('#grid-table tr[data-step="Warp core"] .grid-chip'), 'Online');
@@ -1392,7 +1392,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     await screen(op, 'status');
     await op.waitForSelector('#console-dark:not([hidden])', { state: 'attached' });
     // (Cold iron: nothing tied in, consoles, sensors and comms included.)
-    laforge.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'], 'console:Operations': ['A'], 'console:Engineering': ['A'], 'system:lateral': ['A'], 'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'] } });
+    laforge.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'], 'console:Operations': ['A'], 'console:Engineering': ['A'], 'system:lateral': ['A'], 'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'sub:computer1': ['A'] } });
+    laforge.send({ type: 'grid', computer: { n: 1, on: true } }); // (texts need a computer core: it boots while we go on)
     await op.waitForSelector('#console-dark', { state: 'hidden' });
     step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt cold iron (nothing tied in, no fuel) docked at ${reborn.base}; tied to dock power, the ops console came back`);
     laforge.close();
@@ -1531,7 +1532,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', ties: {
       'console:Engineering': ['A'], 'console:Tactical': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'system:gravity': ['A'], 'system:lighting': ['A'], 'system:lateral': ['A'],
       'system:replicators': ['B'], 'system:recreation': ['B'], 'system:transporter': ['B'], 'sub:constriction': ['A'], 'sub:corePump': ['A'], 'sub:injector': ['A'], 'sub:portPump': ['B'], 'sub:starboardPump': ['B'],
-      'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'sub:forcefields': ['B'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'],
+      'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'sub:forcefields': ['B'], 'sub:computer1': ['A'], 'sub:computer2': ['B'], 'sub:computer3': ['C'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'],
       ...Object.fromEntries(['sensors', 'sif', 'idf', 'engines', 'injectors', 'shields', 'weapons', 'deflector', 'tractor'].map((x) => [`system:${x}`, ['EPS']])) } });
     await waitFor(() => barclay.nav()?.own.grid.ties['system:sif'].join() === 'EPS'); assert.ok(Object.values(cold.drives).every((d) => d.state === 'off') && Object.values(cold.taps).every((t) => t === 0), 'drives off and taps closed');
     // A source tied to two buses splits evenly, but what one bus can't use goes to the other:
@@ -1557,8 +1558,17 @@ const audioBytes = (page) => page.evaluate(async () => {
     step('life support as three systems: solar alone on Bus C ran the atmospheric processors (10) and thermal regulation (8), and gravity (20) on top needed Battery C to cover the shortfall');
     ro.send({ type: 'lock', ship: 'Enterprise' });
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /console offline/.test(m.text)));
+    // No computer core online: no text messages.
+    ro.send({ type: 'text', to: [id('barclay', 'Excelsior')], text: 'testing' });
+    await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /computer core offline/.test(m.text)));
     barclay.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'] } }); // dock power on Bus A, shared with B
     await waitFor(() => barclay.nav()?.own.grid.consoleOk.Tactical && barclay.nav().own.power.lifeSupport === 100);
+    // The computer cores boot in stages (about 14 s); one on an unpowered bus can't.
+    barclay.send({ type: 'grid', computer: { n: 3, on: true } }); // Bus C: nothing on it
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /computer core 3 needs 2 to boot/.test(m.text)));
+    barclay.send({ type: 'grid', computer: { n: 1, on: true } });
+    await waitFor(() => barclay.nav()?.own.grid.computers[0].state === 'booting' && barclay.nav().own.grid.computers[0].stage);
+    step(`no computer core online: no text messages; core 3 (on an unpowered Bus C) refused to boot; core 1 booting (${barclay.nav().own.grid.computers[0].stage})`);
     assert.ok(barclay.nav().own.grid.crossflow.AB > 0, `Bus B drew on Bus A's dock power across the crosslink (${JSON.stringify(barclay.nav().own.grid.crossflow)})`);
     // The crosslink is a chain, A–B–C: A and C only link through B.
     barclay.send({ type: 'grid', ties: { crosslink: ['A', 'C'] } });
@@ -1608,6 +1618,9 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', ties: { thrustersPort: ['EPS'] }, impulse: { drive: 'port', on: false } });
     // #2: a battery on Bus A charges from Bus A's surplus even while Bus B and
     // the EPS are short (Bus A is served, and its batteries charged, first).
+    await waitFor(() => barclay.nav()?.own.grid.computers[0].state === 'online', 20000); // (the EPS taps need a computer core)
+    ro.send({ type: 'text', to: [id('barclay', 'Excelsior')], text: 'core online' });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'text' && m.text === 'core online'));
     barclay.send({ type: 'grid', ties: { dock: [], crosslink: [], core: [] }, tap: { bus: 'A', amount: 0 }, breaker: { bus: 'A', on: true } }); // Bus A on its battery alone: drain it a little
     await waitFor(() => barclay.nav()?.own.grid.stores.A.level <= 97, 15000);
     // Systems draw what they use: load the EPS for real, shields up and phasers charging, overdriven.

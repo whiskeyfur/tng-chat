@@ -9,14 +9,14 @@
 //   node tools/supervisor.js                 (npm start: a computer per folder in shipcore-data/)
 //   node tools/supervisor.js Enterprise Cole (just these ships)
 //
-// Environment: PORT (8080), SHIPCORE_DATA (./shipcore-data), OPERATOR_KEY (passed on),
+// Environment: PORT (8085), SHIPCORE_DATA (./shipcore-data), OPERATOR_KEY (passed on),
 // SUPERVISE_DELAY (ms, 5000), SUPERVISE_WATCH (paths to watch instead of the defaults).
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
-const PORT = process.env.PORT || '8080';
+const PORT = process.env.PORT || '8085';
 const DATA = path.resolve(process.env.SHIPCORE_DATA || 'shipcore-data');
 const DELAY = Number(process.env.SUPERVISE_DELAY) || 5000;
 const WATCH = process.env.SUPERVISE_WATCH ? process.env.SUPERVISE_WATCH.split(path.delimiter) : ['server.js', 'tools', 'data', 'public'].map((p) => path.join(ROOT, p));

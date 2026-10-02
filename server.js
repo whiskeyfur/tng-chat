@@ -40,7 +40,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8085;
 const OPERATOR_KEY = process.env.OPERATOR_KEY || '';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const RELAY_NAME = process.env.RELAY_NAME || 'Subspace Relay Station 47';
@@ -1321,6 +1321,13 @@ const SOURCES = ['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'co
 // shortfall (last, when nothing else will) and charges from its surplus.
 const STORES = { batteryA: 'A', batteryB: 'B', batteryC: 'C', pressure: 'EPS' };
 const isStore = (name) => name in STORES;
+// The computer cores: three, each on a low bus (2), booting in stages (about
+// 14 s) and crashing if their power fails (boot them again). The EPS flow
+// regulators (the taps) need at least one online; text messages need one at
+// each end; the warp core's dilithium auto-trim needs all three.
+const COMPUTERS = ['computer1', 'computer2', 'computer3'];
+const COMPUTER = { draw: 2, bootSecs: 14, stages: ['POST', 'LCARS kernel', 'ODN handshake', 'isolinear verification', 'subprocessor sync'] };
+const coresOnline = (k) => (isBase(k) || !eng.has(k) ? COMPUTERS.length : engOf(k).computers.filter((c) => c.state === 'online').length);
 // The crosslink is a chain, A–B–C: it joins A+B, B+C or all three (A and C only through B).
 const chainOk = (list) => list.length < 2 || list.includes('B');
 const storeOf = (node) => (node === 'EPS' ? 'pressure' : `battery${node}`);
@@ -1358,6 +1365,9 @@ const SUBSYSTEMS = {
   portPump: { parent: 'impulsePort', ties: ['B'], name: 'deuterium pump' },
   starboardPump: { parent: 'impulseStarboard', ties: ['B'], name: 'deuterium pump' },
   forcefields: { parent: 'Security', ties: ['B'], name: 'force field emitters' },
+  computer1: { parent: 'computer', ties: ['A'], name: 'computer core 1' },
+  computer2: { parent: 'computer', ties: ['B'], name: 'computer core 2' },
+  computer3: { parent: 'computer', ties: ['C'], name: 'computer core 3' },
   rf: { parent: 'Communications', ties: ['B'], name: 'local RF (calls aboard)' },
   radio: { parent: 'Communications', ties: ['B'], name: 'radio (hails, ship-to-ship calls)' },
   subspace: { parent: 'Communications', ties: ['B'], name: 'subspace relay (data links)' },
@@ -1432,7 +1442,7 @@ const DEFAULT_TIES = { solar: ['A'], dock: ['A'], ship: [], impulsePort: ['EPS']
 // and systems keep their wiring), taps closed, no antimatter or deuterium.
 // Engineering brings them up on dock power.
 // Cold iron: nothing tied in anywhere, sources or loads (the drives feed the EPS only through their thrusters' ties).
-const COLD = { ties: { ...Object.fromEntries([...Object.keys(DEFAULT_TIES), ...Object.keys(DEFAULT_LOAD_TIES)].map((k) => [k, []])), impulsePort: ['EPS'], impulseStarboard: ['EPS'] }, taps: { A: 0, B: 0, C: 0 }, breakers: { A: false, B: false, C: false }, core: 'offline', drives: { port: 'off', starboard: 'off' }, antimatter: 0, deuterium: 0 };
+const COLD = { ties: { ...Object.fromEntries([...Object.keys(DEFAULT_TIES), ...Object.keys(DEFAULT_LOAD_TIES)].map((k) => [k, []])), impulsePort: ['EPS'], impulseStarboard: ['EPS'] }, taps: { A: 0, B: 0, C: 0 }, breakers: { A: false, B: false, C: false }, computers: ['off', 'off', 'off'], core: 'offline', drives: { port: 'off', starboard: 'off' }, antimatter: 0, deuterium: 0 };
 function freshEng(saved, { cold = false } = {}) {
   const s = saved && typeof saved === 'object' ? saved : cold ? COLD : {};
   // Ties: a list of nodes (older saves had one bus, or null for off), only those allowed.
@@ -1459,6 +1469,8 @@ function freshEng(saved, { cold = false } = {}) {
   return {
     core, antimatter, deuterium, start: 0, // a startup in progress starts over
     drives: Object.fromEntries(DRIVES.map((d) => [d, { state: (s.drives?.[d] ?? 'running') === 'running' && deuterium > 0 ? 'running' : 'off', start: 0 }])),
+    // Computer cores (older saves: online; a boot in progress starts over).
+    computers: COMPUTERS.map((x, i) => ({ state: (s.computers?.[i] ?? 'online') === 'online' ? 'online' : 'off', t: 0 })),
     // EPS taps: how much EPS power may flow down into each low bus (older saves: open/closed).
     taps: Object.fromEntries(BUSES.map((X) => { const t = s.taps?.[X]; return [X, typeof t === 'number' ? Math.max(0, Math.min(BUS_MAX[X], t)) : t === false ? 0 : t === true || X !== 'C' ? BUS_MAX[X] : 0]; })), ties,
 
@@ -1502,7 +1514,7 @@ const savedEng = (k) => {
   const e = engOf(k);
   return {
     core: e.core === 'starting' ? 'offline' : e.core, drives: Object.fromEntries(DRIVES.map((d) => [d, e.drives[d].state === 'running' ? 'running' : 'off'])),
-    antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, docked: e.docked,
+    antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     dockedPort: e.dockedPort, autoRefuel: e.autoRefuel,
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
   };
@@ -1570,13 +1582,16 @@ function flow(k) {
   // A node never carries more than its BUS_MAX.
   // Crosslinked buses are one pool: each draws on what's tied to the others,
   // through their taps too, and they share one max (the sum of theirs).
+  // The EPS taps are worked by the flow regulators: no computer core online, no taps.
+  const coresUp = e.computers.some((x) => x.state === 'online');
+  const taps = Object.fromEntries(BUSES.map((X) => [X, coresUp ? e.taps[X] : 0]));
   const poolOf = Object.fromEntries(BUSES.map((X) => [X, new Set([X])]));
   if (e.ties.crosslink.length >= 2) { const m = new Set(e.ties.crosslink); for (const y of m) poolOf[y] = m; }
   const pool = (X) => [...poolOf[X]];
   // A damaged bus carries less: its max scales with its condition.
   const maxOf = (X) => BUS_MAX[X] * Math.max(0, 1 - (c.damage[`bus${X}`] || 0) / 100);
   const busRoom = (node) => pool(node).reduce((n, X) => n + maxOf(X) - buses[X].have, 0);
-  const tapRoom = (node) => pool(node).reduce((n, X) => n + Math.max(0, e.taps[X] - buses[X].tapUsed), 0);
+  const tapRoom = (node) => pool(node).reduce((n, X) => n + Math.max(0, taps[X] - buses[X].tapUsed), 0);
   // Power moving between crosslinked buses, per pair: 'AB' > 0 is A to B, < 0 is B to A.
   const crossflow = {};
   const xflow = (from, to, t) => {
@@ -1597,7 +1612,7 @@ function flow(k) {
       cells[s.name][eps ? 'EPS' : side] += t;
       if (eps) viaEps += t;
       if (bus && !eps) xflow(side, node, t); // from a crosslinked bus's source
-      if (bus && eps) { let rest = t; for (const X of [node, ...pool(node).filter((y) => y !== node)]) { const u = Math.min(rest, Math.max(0, e.taps[X] - buses[X].tapUsed)); buses[X].tapUsed += u; rest -= u; xflow(X, node, u); } }
+      if (bus && eps) { let rest = t; for (const X of [node, ...pool(node).filter((y) => y !== node)]) { const u = Math.min(rest, Math.max(0, taps[X] - buses[X].tapUsed)); buses[X].tapUsed += u; rest -= u; xflow(X, node, u); } }
       if (bus) bus.src[s.name] = (bus.src[s.name] || 0) + t;
     };
     const sides = bus ? pool(node) : [node];
@@ -1654,6 +1669,7 @@ function flow(k) {
     ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => u.station === st).length * GRID.console]),
     ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
     ['sub:forcefields', e.forcefields.length * GRID.forcefield],
+    ...COMPUTERS.map((x, i) => [`sub:${x}`, ['booting', 'online'].includes(e.computers[i].state) ? COMPUTER.draw : 0]),
     ...PORTS.map((p) => [`feed:${p}`, Math.max(0, conns.find((cn) => cn.p === p)?.net || 0)]),
     ...SYSTEM_PRIORITY.map((sys) => [`system:${sys}`, sys === 'tractor' ? (e.towing ? TRACTOR.draw : 0) : (demand[sys] * ratingOf(sys)) / 100]),
   ];
@@ -1680,7 +1696,7 @@ function flow(k) {
       if (direct && x.share) x.share[via] -= t;
       buses[X].need += t; buses[X].have += t;
       if (direct) xflow(via, X, t);
-      if (!direct) { viaEps += t; let rest = t; for (const y of sides) { const u = Math.min(rest, Math.max(0, e.taps[y] - buses[y].tapUsed)); buses[y].tapUsed += u; rest -= u; xflow(y, X, u); } }
+      if (!direct) { viaEps += t; let rest = t; for (const y of sides) { const u = Math.min(rest, Math.max(0, taps[y] - buses[y].tapUsed)); buses[y].tapUsed += u; rest -= u; xflow(y, X, u); } }
       cells[store][X] -= t; // shown as a draw on the store's row
       cells[x.name][direct ? via : 'EPS'] += t; // and as what the source gave
     }
@@ -1821,6 +1837,7 @@ function gridView(k) {
     cells: Object.fromEntries(Object.entries(f.cells).map(([n, c]) => [n, r(c)])), totals: f.totals,
     coreUsed: Math.round(f.coreUsed), impulseUsed: Math.round(f.impulseUsed), coreSubsOk: f.coreSubsOk, subOk: f.subOk,
     start: e.start, startSecs: GRID.coreStartSecs, coreOutput: GRID.core,
+    computers: e.computers.map((cc) => ({ state: cc.state, stage: cc.state === 'booting' ? COMPUTER.stages[Math.min(COMPUTER.stages.length - 1, Math.floor((cc.t * COMPUTER.stages.length) / COMPUTER.bootSecs))] : null, t: cc.t })), computerBootSecs: COMPUTER.bootSecs,
     crossflow: Object.fromEntries(Object.entries(f.crossflow).map(([x, v]) => [x, Math.round(v)]).filter(([, v]) => v)), taps: e.taps, ties: e.ties, tripped: Object.keys(e.tripped || {}), containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
     breach: e.breach ? GRID.breachSecs - e.breach : null,
     // Each store: how full (%), charging, covering a shortfall.
@@ -1873,6 +1890,15 @@ function gridCommand(ws, msg) {
     said.push('warp core shut down');
   }
   // Impulse drives: start (on bus power for their pumps) or stop; thrusters in or out.
+  // A computer core: boot it ({ computer: { n, on: true } }) or shut it down.
+  if (msg.computer && Number.isInteger(msg.computer.n) && COMPUTERS[msg.computer.n - 1]) {
+    const i = msg.computer.n - 1, cc = e.computers[i];
+    if (msg.computer.on && cc.state !== 'online' && cc.state !== 'booting') {
+      cc.state = 'booting'; cc.t = 0; flowCache.delete(key);
+      if (!flow(key).subOk[COMPUTERS[i]]) { cc.state = 'off'; flowCache.delete(key); return note(`computer core ${i + 1} needs ${COMPUTER.draw} to boot: tie it to a bus that has power`); }
+      said.push(`computer core ${i + 1} booting`);
+    } else if (!msg.computer.on && cc.state !== 'off') { cc.state = 'off'; cc.t = 0; said.push(`computer core ${i + 1} shut down`); }
+  }
   if (msg.impulse && DRIVES.includes(msg.impulse.drive)) {
     const d = e.drives[msg.impulse.drive], side = msg.impulse.drive;
     if (msg.impulse.on && d.state === 'off') {
@@ -2142,6 +2168,25 @@ function relinkCalls() {
   }
 }
 
+// A call in progress needs its carrier's power the whole way: local RF for a
+// call aboard, the subspace relays for one over a data link (relinkCalls drops
+// a lost link to radio), both radios for one by radio. Without it, it drops.
+function dropPowerlessCalls() {
+  const byCid = new Map();
+  for (const u of users.values()) if (u.cid && u.state !== 'idle') { if (!byCid.has(u.cid)) byCid.set(u.cid, []); byCid.get(u.cid).push(u); }
+  for (const [cid, members] of byCid) {
+    const ships = [...new Set(members.map((u) => u.shipKey))];
+    const via = ships.length < 2 ? 'local' : carriers.get(cid) || 'link';
+    const sub = { local: 'rf', link: 'subspace', radio: 'radio' }[via];
+    const down = ships.find((k) => !commsUp(k, sub));
+    if (!down) continue;
+    carriers.delete(cid);
+    const what = { rf: 'local RF', subspace: 'subspace relay', radio: 'radio' }[sub];
+    for (const u of members) send(u, { type: 'force-hangup', reason: `the ${shipName(down)}'s ${what} lost power` });
+    scheduleTraffic();
+  }
+}
+
 // Towed ships follow just behind the ship towing them.
 function tow() {
   for (const [k, e] of eng) {
@@ -2391,6 +2436,7 @@ let combatTick = 0;
 setInterval(() => {
   combatTick++;
   checkTransporterLocks();
+  dropPowerlessCalls();
   const now = Date.now();
   let changed = false;
   for (const k of [...cores.keys()]) {
@@ -2425,6 +2471,12 @@ setInterval(() => {
       c.damage[sys] = Math.min(100, c.damage[sys] + (f.delivered[sys] - 100) * OVERDRIVE_DAMAGE);
       if (Math.floor(was / 10) !== Math.floor(c.damage[sys] / 10)) tellStations(k, ['Engineering'], `Engineering: ${SYSTEM_NAMES[sys]} overdriven (${Math.round(f.delivered[sys])}%), damage ${Math.ceil(c.damage[sys])}%`);
     }
+    // Computer cores: boot in stages; lose power and they crash.
+    e.computers.forEach((cc, i) => {
+      if (cc.state !== 'booting' && cc.state !== 'online') return;
+      if (!f.subOk[COMPUTERS[i]]) { cc.state = 'crashed'; cc.t = 0; e.dirty = true; opLog(k, `computer core ${i + 1} crashed: power lost`); tellStations(k, ['Engineering'], `Engineering: computer core ${i + 1} crashed (power lost): boot it again`); return; }
+      if (cc.state === 'booting' && ++cc.t >= COMPUTER.bootSecs) { cc.state = 'online'; cc.t = 0; e.dirty = true; opLog(k, `computer core ${i + 1} online`); tellStations(k, ['Engineering'], `Engineering: computer core ${i + 1} online`); }
+    });
     // Impulse drives: starting on bus power for their pumps, then self-sustaining.
     for (const d of DRIVES) {
       const dr = e.drives[d];
@@ -3090,11 +3142,13 @@ wss.on('connection', (ws) => {
       const text = clean(msg.text).slice(0, 500);
       const to = [...new Set(Array.isArray(msg.to) ? msg.to : [])].map((id) => typeof id === 'string' && users.get(id)).filter((u) => u && u !== ws);
       if (!text || !to.length) return;
-      const reach = to.filter((u) => sameNetwork(ws.shipKey, u.shipKey));
+      // Messages are handled by the computer cores: at least one online at each end.
+      if (!coresOnline(ws.shipKey)) return send(ws, { type: 'notice', text: 'Communications: no message: computer core offline' });
+      const reach = to.filter((u) => sameNetwork(ws.shipKey, u.shipKey) && coresOnline(u.shipKey));
       const down = (u) => (u.shipKey === ws.shipKey ? !commsUp(ws.shipKey, 'rf') : !commsUp(ws.shipKey, 'radio') || !commsUp(u.shipKey, 'radio'));
       const sent = reach.filter((u) => !down(u));
       const failed = to.filter((u) => !sent.includes(u));
-      if (failed.length) send(ws, { type: 'notice', text: `Communications: no message to ${failed.map((u) => u.name).join(', ')} (${failed.some((u) => !reach.includes(u)) ? 'not on our comm net' : 'no power to local RF or radio'})` });
+      if (failed.length) send(ws, { type: 'notice', text: `Communications: no message to ${failed.map((u) => u.name).join(', ')} (${failed.some((u) => !sameNetwork(ws.shipKey, u.shipKey)) ? 'not on our comm net' : failed.some((u) => !coresOnline(u.shipKey)) ? `the ${shipName(failed.find((u) => !coresOnline(u.shipKey)).shipKey)}'s computer core is offline` : 'no power to local RF or radio'})` });
       if (!sent.length) return;
       const m = { type: 'text', from: info(ws), to: sent.map(info), text, at: Date.now() };
       for (const u of [ws, ...sent]) send(u, m);
