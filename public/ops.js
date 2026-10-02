@@ -59,6 +59,7 @@
           remoteBlock = !!msg.remoteBlock;
           renderDrydock(msg.drydock, msg.berths);
           renderPrefix(msg.prefix);
+          renderAutomation(msg.automation);
           render();
           return true;
         case 'op-ok':
@@ -79,6 +80,22 @@
         }
       }
       return false;
+    }
+
+    // Automation: per panel, on or off (Engineering: Startup or Shutdown), and what it's doing.
+    function renderAutomation(list) {
+      const ul = document.getElementById('automation-list');
+      if (!ul || !list) return;
+      const tap = (text, on, msg) => { const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: text, onclick: () => send({ type: 'automation', ...msg }) }); b.setAttribute('aria-pressed', String(!!on)); return b; };
+      ul.replaceChildren(...list.map((a) => {
+        const taps = a.panel === 'engineering'
+          ? [tap('Off', !a.on, { panel: a.panel, mode: null }), tap('Startup', a.on === 'startup', { panel: a.panel, mode: 'startup' }), tap('Shutdown', a.on === 'shutdown', { panel: a.panel, mode: 'shutdown' })]
+          : [tap(a.on ? 'Auto: on' : 'Auto: off', a.on, { panel: a.panel, on: !a.on })];
+        if (!a.built) for (const t of taps) { t.disabled = true; t.title = 'coming next'; }
+        const li = el('li', { className: 'ops-hail' }, el('span', { className: 'ops-hail__text', textContent: `${a.name} (${a.station})${!a.built ? ' · coming next' : a.on ? ` · ${a.status || 'running'}` : a.status ? ` · ${a.status}` : ''}` }), ...taps);
+        li.dataset.panel = a.panel;
+        return li;
+      }));
     }
 
     // The command prefix: masked (tap Show to see it), set on a keypad.

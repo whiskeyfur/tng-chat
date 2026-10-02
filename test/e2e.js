@@ -1208,6 +1208,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     // The Defiant raises shields: a torpedo drains them, the hull holds.
     kira.send({ type: 'shields', up: true });
     await carol.waitForSelector('#weapons-lock-state:has-text("shields up")');
+    // (Off the Defiant's shield frequency, so its shields take the torpedo: frequencies start random.)
+    const off = (kira.nav().own.combat.freq.shields % 10) + 1;
+    await carol.click(`#freq-weapons button[data-value="${off}"]`);
+    await carol.waitForSelector(`#freq-weapons button[data-value="${off}"][aria-pressed="true"]`);
     // A torpedo (yield 5) is loaded with antimatter at launch; a shielded target takes a tenth of it.
     // (The bay tops itself up from the antimatter bus, so its level after launch isn't checked here.)
     assert.ok((await carol.evaluate(() => window.__nav.last.own.combat.torpedo.bay)) >= 10, 'the torpedo bay has antimatter for a yield-5 torpedo');
@@ -1688,6 +1692,46 @@ const audioBytes = (page) => page.evaluate(async () => {
       pilot.close();
       await stopComputer(gc);
       step('the shuttle bay: hangar control opened the doors; the Galileo landed (a connection with nothing tied; Helm held), its pilot walked into the bay and back, and it took off');
+    }
+
+    // Automation: Ops sets Engineering to Startup on a cold ship (one computer core booted by hand: the
+    // lists need one); a tap by hand hands it back; then it runs it to Ready for departure, and Shutdown
+    // brings it back to cold iron, offloading its fuel to the starbase.
+    {
+      const lc = startComputer('lx', 'Lexington', { cold: true });
+      await waitFor(() => [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.some((x) => x.name === 'Lexington'), 15000);
+      const scotty3 = await crewWs('scotty3', 'Lexington', 'Engineering');
+      await waitFor(() => scotty3.nav()?.own?.grid);
+      scotty3.send({ type: 'grid', conn: { with: 'station', res: 'power', imp: true }, ties: { dock: ['B'], 'sub:computer2': ['B'] } });
+      await waitFor(() => scotty3.nav()?.own.grid.computers[1].state === 'online', 30000);
+      const lops = new (require('ws'))(`ws://localhost:${process.env.PORT}`);
+      const lopsMsgs = [];
+      lops.on('message', (m) => lopsMsgs.push(JSON.parse(m)));
+      await new Promise((r) => lops.on('open', r));
+      lops.send(JSON.stringify({ type: 'operator', name: 'lexops', ship: 'Lexington' }));
+      await waitFor(() => lopsMsgs.some((m) => m.type === 'roster' && m.automation?.some((x) => x.panel === 'engineering')));
+      lops.send(JSON.stringify({ type: 'automation', panel: 'engineering', mode: 'startup' }));
+      await waitFor(() => scotty3.nav()?.own.automation?.engineering?.mode === 'startup');
+      scotty3.send({ type: 'grid', breaker: { bus: 'C', on: true } }); // (a tap by hand)
+      await waitFor(() => scotty3.msgs.some((m) => m.type === 'notice' && /Automation: Engineering off \(scotty3 took over\)/.test(m.text)));
+      lops.send(JSON.stringify({ type: 'automation', panel: 'engineering', mode: 'startup' }));
+      await waitFor(() => scotty3.msgs.some((m) => m.type === 'notice' && /Engineering \(automation\): Ready for departure/.test(m.text)), 180000);
+      await waitFor(() => !scotty3.nav()?.own.grid.ties.dock.length); // (the last step's effect, in the next update)
+      const up = scotty3.nav().own.grid;
+      assert.equal(up.core, 'online', 'Startup left the warp core offline');
+      assert.deepEqual(up.ties.dock, [], 'Startup left the ship on dock power');
+      step('automation: Ops set Engineering to Startup on the cold Lexington; a tap by hand handed it back; set again, it brought the ship to Ready for departure (warp core online, off dock power)');
+      lops.send(JSON.stringify({ type: 'automation', panel: 'engineering', mode: 'shutdown' }));
+      await waitFor(() => scotty3.msgs.some((m) => m.type === 'notice' && /Engineering \(automation\): Cold ship/.test(m.text)), 180000);
+      await waitFor(() => !scotty3.nav()?.own.grid.ties.dock.length); // (the last step's effect, in the next update)
+      const down = scotty3.nav().own.grid;
+      assert.equal(down.antimatter + down.deuterium, 0, 'Shutdown left fuel aboard');
+      assert.deepEqual([down.core, down.ties.containment, down.ties.dock, down.ties['console:Engineering']], ['offline', [], [], []]);
+      step('automation: Shutdown brought the Lexington back to cold iron, its antimatter and deuterium offloaded to the starbase');
+      // (Ops' own console lists the panels it can automate: never Ops itself.)
+      assert.deepEqual(await op.$$eval('#automation-list li[data-panel]', (ls) => ls.map((l) => l.dataset.panel)), ['engineering', 'lifeSupport', 'tactical', 'science', 'transporter', 'comms', 'hangar']);
+      lops.close(); scotty3.close();
+      await stopComputer(lc);
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;

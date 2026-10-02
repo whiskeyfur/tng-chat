@@ -415,6 +415,9 @@
                 <button type="button" class="lcars-button lcars-button--pill" id="remote-block" aria-pressed="false">Remote control: allowed</button>
                 <span class="ops-hint">Other vessels on a data link may run our unmanned stations; block it here.</span>
               </div>
+              <!-- Automation: which panels run themselves (Ops itself never does). -->
+              <div id="automation-box"><h3 class="ops-subhead">Automation</h3><ul class="ops-hails" id="automation-list"></ul>
+                <span class="ops-hint">An automated panel works through its list while a computer core is online and its console is on the ODN; a tap on it by hand hands it back. It never repairs anything, and can't be run by remote control.</span></div>
               <!-- The command prefix: needed by other vessels to take over our stations by remote control. -->
               <div id="prefix-box" hidden><h3 class="ops-subhead">Command prefix</h3>
                 <div class="ops-form"><span class="lcars-readout__value" id="prefix-show">•••••</span><button type="button" class="lcars-button lcars-button--pill" id="prefix-reveal">Show</button></div>

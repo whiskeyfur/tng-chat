@@ -1911,6 +1911,9 @@ async function onMessage(msg) {
     }
     case 'nav':
       lastNav = msg;
+      // An automated panel at this station: a bar says so (a tap here by hand takes it back).
+      { const mine = Object.values(msg.own?.automation || {}).filter((a) => a.station === me?.station);
+        bc.setAlert('automation', mine.length ? `Automation (Ops): ${mine.map((a) => `${a.name}${typeof a.mode === 'string' ? ` ${a.mode}` : ''}: ${a.status || 'running'}`).join(' · ')}. A tap here by hand takes it over.` : null, { level: 'yellow' }); }
       // Department readiness (Captain, First Officer): redraw when the answers change.
       if (JSON.stringify(msg.own?.readiness) !== JSON.stringify(window.__readiness)) { window.__readiness = msg.own?.readiness; stationView?.setCrew?.(comms.users); }
       // The Communications console's subspace bands follow the subspace relay.

@@ -51,7 +51,7 @@ const OPS_STATION = 'Operations';   // operators only
 const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay'];
 // Operator commands (everything else from an operator is handled as crew).
 const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-hail', 'cancel-hail', 'transfer',
-  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock', 'prefix']);
+  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock', 'prefix', 'automation']);
 // Message types one user may send to another; the server adds `from` and forwards.
 const RELAYED = new Set(['call', 'accept', 'decline', 'hangup', 'signal']);
 const STATES = new Set(['idle', 'calling', 'ringing', 'in-call']);
@@ -202,6 +202,7 @@ function broadcastOps(key) {
     linkOutgoing: requests.filter((r) => r.from === key).map(({ id, toShip }) => ({ id, toShip })),
     graph: networkGraph(),
     remoteBlock: !!engOf(key).remoteBlock,
+    automation: AUTO_PANELS.map((p) => ({ panel: p, name: AUTO_NAMES[p], station: AUTO_STATION[p], on: engOf(key).auto?.[p] || false, status: engOf(key).autoStatus?.[p] || '', built: AUTO_BUILT.has(p) })),
     // The shipyard's drydock: the ships in it, any release under way, and holds.
     ...(isShipyard(shipName(key)) ? { drydock: drydocked().filter((o) => shipKey(engOf(o).docked || '') === key).map((o) => ({ ship: shipName(o), hold: !!engOf(o).hold, release: engOf(o).release ? Math.max(0, Math.ceil((engOf(o).release - Date.now()) / 1000)) : null, repair: combatOf(o).repair || null })), berths: DRYDOCK.berths } : {}),
     broadcasts: [...broadcasts.values()].filter((b) => b.ships.has(key) || users.get(b.speaker)?.shipKey === key)
@@ -459,6 +460,14 @@ function operatorMessage(op, msg) {
       opLog(other, msg.type === 'link-decline' ? `the ${shipName(op.shipKey)} declined the data link` : `the ${shipName(op.shipKey)} withdrew its data link request`);
       broadcastAllOps();
       return ok(msg.type === 'link-decline' ? `declined the data link from the ${shipName(other)}` : `withdrew the data link request to the ${shipName(other)}`);
+    }
+    case 'automation': {
+      // Ops picks which panels run themselves: { panel, on } (Engineering: { panel, mode: 'startup' | 'shutdown' | null }).
+      if (!AUTO_PANELS.includes(msg.panel)) return fail('no such panel to automate (Ops itself never is)');
+      if (!AUTO_BUILT.has(msg.panel)) return fail(`${AUTO_NAMES[msg.panel]} automation isn't built yet`);
+      const v = msg.panel === 'engineering' ? (['startup', 'shutdown'].includes(msg.mode) ? msg.mode : null) : !!msg.on;
+      setAuto(op.shipKey, msg.panel, v);
+      return ok(`${AUTO_NAMES[msg.panel]} automation ${v ? `on${typeof v === 'string' ? ` (${v})` : ''}` : 'off'}`);
     }
     case 'prefix': {
       // Ops sets the vessel's command prefix (5 digits, tapped in on a keypad).
@@ -931,7 +940,8 @@ function navMessage(key) {
   return {
     type: 'nav',
     own: own ? { name: shipName(key), ...own, class: isBase(key) ? null : classOf(key).name, power: powerOf(key), capacity: Object.fromEntries(Object.entries(capacityOf(key)).map(([x, v]) => [x, Math.floor(v)])), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
-      autopilot: autopilots.get(key)?.target || null, transporter: transporterView(key), readiness: readinessView(key), orders: engOf(key).orderLog,
+      autopilot: autopilots.get(key)?.target || null, transporter: transporterView(key), readiness: readinessView(key),
+      automation: Object.fromEntries(AUTO_PANELS.filter((p) => engOf(key).auto?.[p]).map((p) => [p, { mode: engOf(key).auto[p], station: AUTO_STATION[p], name: AUTO_NAMES[p], status: engOf(key).autoStatus?.[p] || '' }])), orders: engOf(key).orderLog,
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
     bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
@@ -1945,6 +1955,8 @@ function freshEng(saved, { cold = false } = {}) {
     bayOpen: !!s.bayOpen, landed: typeof s.landed === 'string' && s.landed ? shipKey(s.landed) : null,
     remoteBlock: !!s.remoteBlock, // ops refuse remote control by other vessels
     prefix: /^\d{5}$/.test(s.prefix) ? s.prefix : PREFIX.factory, // the command prefix (kept in .nav.json)
+    // Per-panel automation (Ops picks the panels): Engineering's mode ('startup' or 'shutdown'), the others on or off.
+    auto: Object.fromEntries(AUTO_PANELS.map((p) => [p, p === 'engineering' ? (['startup', 'shutdown'].includes(s.auto?.[p]) ? s.auto[p] : null) : !!s.auto?.[p]])), autoStatus: {},
     // The orders given aboard (newest first, the last ORDER_LOG): text, when, by whom, to whom, who has acknowledged.
     orderLog: Array.isArray(s.orderLog) ? s.orderLog.slice(0, ORDER_LOG).filter((o) => o && typeof o.text === 'string') : [],
     forcefields: Array.isArray(s.forcefields) ? s.forcefields.filter((st) => STATIONS.includes(st)) : [], // stations Security has isolated
@@ -2037,7 +2049,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, prefix: e.prefix, orderLog: e.orderLog,
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
@@ -3409,6 +3421,7 @@ setInterval(() => {
   combatTick++;
   checkTransporterLocks();
   scienceTick();
+  automationTick();
   dropPowerlessCalls();
   const now = Date.now();
   let changed = false;
@@ -3601,8 +3614,155 @@ setInterval(() => {
 
 
 // Station commands, from a console (or a console remote-controlling another vessel).
+// --- per-panel automation ----------------------------------------------------------
+//
+// Ops picks which panels run themselves (never Ops itself). An automated panel
+// works through its list, a step a second, while a computer core is online and
+// its console is on the ODN; it never repairs anything, can't be run by remote
+// control, and any tap on it by hand hands it back (Auto off). Each step goes
+// through the same commands a crewman's taps do, so the same rules hold.
+const AUTO_PANELS = ['engineering', 'lifeSupport', 'tactical', 'science', 'transporter', 'comms', 'hangar'];
+const AUTO_STATION = { engineering: 'Engineering', lifeSupport: 'Engineering', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Shuttle Bay' };
+const AUTO_BUILT = new Set(['engineering']); // (the others' lists come next)
+const AUTO_NAMES = { engineering: 'Engineering', lifeSupport: 'Life support', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Hangar control' };
+// The panel a crewman's command works (to hand it back when they tap it).
+function panelOfCommand(station, msg) {
+  const t = msg.type;
+  if (station === 'Engineering' && t === 'grid') return msg.ls ? 'lifeSupport' : 'engineering';
+  if (station === 'Tactical' && ['shields', 'lock', 'aim', 'yield', 'frequency', 'fire', 'arm', 'tractor'].includes(t)) return 'tactical';
+  if (station === 'Science' && ['scan', 'sci-lock', 'plot-course'].includes(t)) return 'science';
+  if (station === 'Transporter' && ['transporter-lock', 'beam', 'transporter-diagnostic'].includes(t)) return 'transporter';
+  if (station === 'Communications' && /^link-/.test(t)) return 'comms';
+  if (station === 'Shuttle Bay' && t === 'bay-doors') return 'hangar';
+  return null;
+}
+const autoOn = (k, p) => !!engOf(k).auto?.[p];
+function setAuto(k, p, v, why) {
+  const e = engOf(k);
+  if (!!e.auto[p] === !!v && e.auto[p] === v) return;
+  e.auto[p] = p === 'engineering' ? v || null : !!v;
+  e.autoStatus[p] = v ? 'starting' : '';
+  (e.autoStep ||= {})[p] = 0;
+  e.dirty = true;
+  opLog(k, `automation: ${AUTO_NAMES[p]}${p === 'engineering' && v ? ` (${v})` : ''} ${v ? 'on' : `off${why ? `: ${why}` : ''}`}`);
+  if (!v) tellStations(k, [AUTO_STATION[p]], `Automation: ${AUTO_NAMES[p]} off${why ? ` (${why})` : ''}`);
+  broadcastOps(k); scheduleNav();
+}
+// A stand-in for a console, for an automated panel: its commands go the usual way.
+function automaton(k, station) {
+  const a = { shipKey: k, ship: shipName(k), station, name: 'Automation', automaton: true, readyState: 1, OPEN: 1, last: '' };
+  a.send = (data) => { try { const m = JSON.parse(data); if (m.type === 'notice') a.last = m.text; } catch {} };
+  return a;
+}
+// Engineering's lists: a step is { what, done(), act() } (act may only wait).
+function engineeringSteps(k, mode) {
+  const e = engOf(k), a = automaton(k, 'Engineering'), g = (m) => gridCommand(a, m);
+  const docked = !!e.docked, tied = (key) => (e.ties[key] || []).length > 0;
+  const defaults = { ...DEFAULT_LOAD_TIES, ...(CLASS_TIES[classId(k)] || {}) };
+  // (What this vessel has: its class's systems and stations; a starbase's own.)
+  const has = (x) => {
+    if (x.startsWith('console:')) return hasStation(k, x.slice(8));
+    if (!x.startsWith('system:')) return true;
+    const sys = x.slice(7);
+    if (isBase(k)) return !WARP_DRIVE.includes(sys);
+    return (!BASE_ONLY.includes(sys) || (sys === 'phaser2' && arraysOf(k) >= 2)) && (sys !== 'transporter' || classOf(k).transporter) && (!WARP_DRIVE.includes(sys) || classOf(k).maxWarp);
+  };
+  const loadKeys = Object.keys(DEFAULT_LOAD_TIES).filter((x) => x !== 'console:Engineering' && !/^sub:computer/.test(x) && (defaults[x] || []).length && has(x));
+  const startup = [
+    { what: 'dock power on Bus B, imported', done: () => !docked || e.core === 'online' || (e.ties.dock.includes('B') && connOf(e, 'station').power.imp), /* (with the warp core running, the ship doesn't need it) */ act: () => g({ ties: { dock: ['B'] }, conn: { with: 'station', res: 'power', imp: true } }) },
+    { what: "the batteries' breakers closed", done: () => BUSES.every((X) => e.breakers[X]), act: () => g({ breaker: { bus: BUSES.find((X) => !e.breakers[X]), on: true } }) },
+    { what: 'the A-B crosslink', done: () => ['A', 'B'].every((X) => e.ties.crosslink.includes(X)), act: () => g({ ties: { crosslink: [...new Set([...e.ties.crosslink, 'A', 'B'])] } }) },
+    { what: 'the Engineering console and the computer cores tied in', done: () => tied('console:Engineering') && COMPUTERS.every((x) => tied(`sub:${x}`)), act: () => g({ ties: { 'console:Engineering': ['A'], 'sub:computer1': ['A'], 'sub:computer2': ['B'], 'sub:computer3': ['C'] } }) },
+    { what: 'antimatter containment fed', done: () => tied('containment'), act: () => g({ ties: { containment: ['A'] } }) },
+    { what: 'the fuel buses up, and supplies coming aboard', done: () => tied('sub:deuTransfer') && tied('sub:amTransfer') && tied('system:amBus') && Object.values(AM_CONTAIN).every((x) => tied(x)) && Object.entries(e.tankCfg).every(([n, c]) => c.tied && (n.endsWith(':main') ? c.drain : c.fill)) && (!docked || (e.connTies.deu && e.connTies.am && connOf(e, 'station').deu.imp && connOf(e, 'station').am.imp)),
+      act: () => {
+        // (The antimatter bus's containment works once the EPS is energized; each antimatter tank keeps its own.)
+        g({ ties: { 'sub:deuTransfer': ['B'], 'sub:amTransfer': ['B'], 'system:amBus': ['EPS'], ...Object.fromEntries(Object.values(AM_CONTAIN).map((x) => [x, ['A']])) } });
+        for (const n of Object.keys(e.tankCfg)) { const [bus, name] = n.split(':'); g({ tank: { bus, name, tied: true, ...(name === 'main' ? { drain: true } : { fill: true }) } }); }
+        if (docked) { g({ connTie: { res: 'deu', on: true } }); g({ connTie: { res: 'am', on: true } }); g({ conn: { with: 'station', res: 'deu', imp: true } }); g({ conn: { with: 'station', res: 'am', imp: true } }); }
+      } },
+    ...DRIVES.map((d) => ({ what: `the ${d} impulse drive running, feeding the EPS`, done: () => e.drives[d].state === 'running' && tied(driveSource(d)) && tied(`thrusters${d[0].toUpperCase()}${d.slice(1)}`), act: () => {
+      if (!tied(`sub:${d}Chamber`)) return g({ ties: { [`sub:${d}Chamber`]: ['B'] } });
+      // (Its output reaches the EPS through its maneuvering thrusters' tie.)
+      if (!tied(driveSource(d)) || !tied(`thrusters${d[0].toUpperCase()}${d.slice(1)}`)) return g({ ties: { [driveSource(d)]: ['EPS'], [`thrusters${d[0].toUpperCase()}${d.slice(1)}`]: ['EPS'] } });
+      if (e.drives[d].state === 'off' && tankPct(e, 'deu', d) >= FUELBUS.light) g({ reactor: { name: d, on: true } });
+      else if (e.drives[d].state === 'off') a.last = `waiting for its deuterium tank (${Math.round(tankPct(e, 'deu', d))}%)`;
+    } })),
+    { what: 'the EPS energized', done: () => e.epsLive, act: () => { a.last = 'waiting for the manifold to pressurize'; } },
+    ...AUX.map((x, i) => ({ what: `aux fusion reactor ${i + 1} running`, done: () => e.aux[x].state === 'running' && tied(x), act: () => {
+      if (!tied(`sub:${x}Chamber`)) return g({ ties: { [`sub:${x}Chamber`]: [i ? 'B' : 'A'] } });
+      if (!tied(x)) return g({ ties: { [x]: ['EPS'] } }); // (its output to the EPS)
+      if (e.aux[x].state === 'off' && tankPct(e, 'deu', x) >= FUELBUS.light) g({ reactor: { name: x, on: true } });
+      else if (e.aux[x].state === 'off') a.last = `waiting for its deuterium tank (${Math.round(tankPct(e, 'deu', x))}%)`;
+    } })),
+    { what: 'the EPS taps open', done: () => BUSES.filter((X) => X !== 'C').every((X) => e.taps[X] >= busMaxOf(k)[X]), act: () => { const X = BUSES.filter((x) => x !== 'C').find((x) => e.taps[x] < busMaxOf(k)[x]); g({ tap: { bus: X, amount: busMaxOf(k)[X] } }); } },
+    { what: 'the consoles and systems tied in (the warp core needs the structural integrity field)', done: () => loadKeys.every((x) => tied(x)), act: () => g({ ties: Object.fromEntries(loadKeys.filter((x) => !tied(x)).map((x) => [x, defaults[x]])) }) },
+    { what: 'the warp core online', done: () => e.core === 'online' || e.core === 'ejected' || !classOf(k).warpCore, act: () => {
+      if (['constriction', 'injector', 'amConduit'].some((x) => !tied(`sub:${x}`))) return g({ ties: { 'sub:constriction': ['A'], 'sub:injector': ['A'], 'sub:amConduit': ['A'] } });
+      if (e.core !== 'offline') return;
+      if (tankPct(e, 'am', 'core') < FUELBUS.light || tankPct(e, 'deu', 'core') < FUELBUS.light) { a.last = `waiting for its tanks (antimatter ${Math.round(tankPct(e, 'am', 'core'))}%, deuterium ${Math.round(tankPct(e, 'deu', 'core'))}%)`; return; }
+      g({ core: 'start' });
+    } },
+    { what: 'off dock power', done: () => !docked || e.core !== 'online' || (!e.ties.dock.length && !connOf(e, 'station').power.imp), act: () => g({ ties: { dock: [] }, conn: { with: 'station', res: 'power', imp: false } }) },
+  ];
+  const systemTanks = Object.keys(e.tankCfg).filter((n) => !n.endsWith(':main'));
+  const shutdown = [
+    // (Dock power on the buses and the EPS first: it keeps the fuel buses working while everything else comes down.)
+    { what: 'dock power on Bus B and the EPS, imported', done: () => !docked || (e.ties.dock.includes('B') && e.ties.dockEps.includes('EPS') && connOf(e, 'station').power.imp && connOf(e, 'station').eps.imp),
+      act: () => g({ ties: { dock: ['B'], dockEps: ['EPS'] }, conn: { with: 'station', res: 'power', imp: true } }) || g({ conn: { with: 'station', res: 'eps', imp: true } }) },
+    { what: 'the warp core shut down', done: () => e.core !== 'online' && e.core !== 'starting', act: () => g({ core: 'stop' }) },
+    ...[...AUX, ...DRIVES].map((x) => ({ what: `the ${reactorLabel(x)} shut down`, done: () => (DRIVES.includes(x) ? e.drives[x] : e.aux[x]).state === 'off', act: () => g({ reactor: { name: x, on: false } }) })),
+    // (Every tank drains into the main storage, which is offloaded to the starbase as it fills.)
+    { what: 'antimatter and deuterium offloaded to the starbase', done: () => amAboard(e) <= 0 && e.deuterium <= 0 && systemTanks.every((n) => { const [bus, name] = n.split(':'); return bus !== 'deu' || tankLevel(e, bus, name) <= 0; }), act: () => {
+      if (!docked) { a.last = 'dock at a starbase to offload the antimatter and deuterium'; return; }
+      for (const n of Object.keys(e.tankCfg)) { const [bus, name] = n.split(':'), c = e.tankCfg[n]; if (!c.tied || (name === 'main' ? !c.fill : !c.drain)) g({ tank: { bus, name, tied: true, ...(name === 'main' ? { fill: true } : { drain: true }) } }); }
+      if (!e.connTies.deu || !e.connTies.am) { g({ connTie: { res: 'deu', on: true } }); g({ connTie: { res: 'am', on: true } }); }
+      if (!connOf(e, 'station').deu.exp || !connOf(e, 'station').am.exp) { g({ conn: { with: 'station', res: 'deu', imp: false, exp: true } }); g({ conn: { with: 'station', res: 'am', imp: false, exp: true } }); }
+      a.last = `offloading (antimatter ${Math.round(amAboard(e))}, deuterium ${Math.round(e.deuterium + systemTanks.filter((n) => n.startsWith('deu:')).reduce((t, n) => t + tankLevel(e, 'deu', n.slice(4)), 0))})`;
+    } },
+    { what: 'the EPS taps closed', done: () => BUSES.every((X) => !e.taps[X]), act: () => g({ tap: { bus: BUSES.find((X) => e.taps[X]), amount: 0 } }) },
+    { what: 'the consoles and systems untied', done: () => loadKeys.every((x) => !tied(x)), act: () => g({ ties: Object.fromEntries(loadKeys.filter((x) => tied(x)).map((x) => [x, []])) }) },
+    { what: 'containment off (no antimatter aboard)', done: () => !tied('containment'), act: () => { if (amAboard(e) > 0) { a.last = 'antimatter still aboard'; return; } g({ ties: { containment: [] } }); } },
+    { what: "the batteries' breakers open, crosslink off", done: () => BUSES.every((X) => !e.breakers[X]) && !e.ties.crosslink.length, act: () => { const X = BUSES.find((x) => e.breakers[x]); if (X) g({ breaker: { bus: X, on: false } }); else g({ ties: { crosslink: [] } }); } },
+    // (Last, dock power off: cold iron, nothing tied but the ODN. The computer cores go down with it, and with them this list.)
+    { what: 'dock power off: cold iron', done: () => !e.ties.dock.length && !e.ties.dockEps.length && !connOf(e, 'station').power.imp && !connOf(e, 'station').eps.imp,
+      act: () => { g({ ties: { 'console:Engineering': [], 'sub:computer1': [], 'sub:computer2': [], 'sub:computer3': [], dock: [], dockEps: [] }, conn: { with: 'station', res: 'power', imp: false } }); g({ conn: { with: 'station', res: 'eps', imp: false } }); for (const r of ['deu', 'am']) g({ conn: { with: 'station', res: r, imp: false, exp: false } }); } },
+  ];
+  return { steps: mode === 'shutdown' ? shutdown : startup, a };
+}
+// Once a second: every automated panel takes its next step.
+function automationTick() {
+  for (const [k, e] of eng) {
+    if (!e.auto || !present(k) || !navState.has(k)) continue;
+    for (const p of AUTO_PANELS) {
+      if (!e.auto[p]) continue;
+      const station = AUTO_STATION[p];
+      // (A list that's all done ends, cores or no cores: Shutdown ends with them down.)
+      const finish = () => { const doneMsg = e.auto.engineering === 'startup' ? 'Ready for departure' : 'Cold ship'; setAuto(k, p, null, doneMsg); e.autoStatus[p] = doneMsg; tellStations(k, ['Engineering', 'Captain'], `Engineering (automation): ${doneMsg}`); };
+      // (A list goes forward: a step it has passed isn't gone back to. Shutdown undoes its first step at the end.)
+      const from = e.autoStep?.[p] || 0;
+      const next = p === 'engineering' ? engineeringSteps(k, e.auto.engineering).steps.slice(from).find((st) => !st.done()) : null;
+      if (p === 'engineering' && !next) { finish(); continue; }
+      if (!coresOnline(k)) { e.autoStatus[p] = `waiting: no computer core online${next ? ` (next: ${next.what})` : ''}`; continue; }
+      if (!odnLinked(k, station)) { e.autoStatus[p] = `waiting: the ${station} console is off the ODN`; continue; }
+      if (p === 'engineering') {
+        flowCache.delete(k);
+        const { steps, a } = engineeringSteps(k, e.auto.engineering);
+        const i = steps.findIndex((st, n) => n >= from && !st.done());
+        if (i < 0) { finish(); continue; }
+        (e.autoStep ||= {})[p] = i;
+        steps[i].act();
+        if (steps.slice(i).every((st) => st.done())) { finish(); continue; }
+        e.autoStatus[p] = `step ${i + 1} of ${steps.length}: ${steps[i].what}${a.last ? ` (${a.last.replace(/^Engineering: /, '')})` : ''}`;
+      }
+    }
+  }
+}
+
 function stationCommand(ws, msg) {
   const t = msg.type;
+  // A tap by hand on an automated panel hands it back.
+  { const p = !ws.automaton && panelOfCommand(ws.station, msg); if (p && autoOn(ws.shipKey, p)) setAuto(ws.shipKey, p, null, `${ws.name} took over`); }
   // Off the ODN, the station's controls do nothing (answering an order needs no console).
   const odnOff = !odnLinked(ws.shipKey, ws.operator ? OPS_STATION : ws.station) && !['order-ack', 'order-decline'].includes(t);
   if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'bay-doors', 'readiness', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
@@ -3639,6 +3799,7 @@ function remoteOk(ws, t) {
   if (!t || t === ws.shipKey || !present(t) || !links.has(linkKey(ws.shipKey, t))) return false;
   if (ws.station === 'Crew') return false;
   if ([...users.values()].some((u) => u !== ws && u.controlling === t && u.station === ws.station)) return false; // someone else has it
+  if (AUTO_PANELS.some((p) => AUTO_STATION[p] === ws.station && autoOn(t, p))) return false; // (an automated station runs itself)
   // Blocked by that vessel's ops; a starbase's block holds even with nobody at its ops.
   return !(engOf(t).remoteBlock && (opsOf(t).length || isBase(t)));
 }
