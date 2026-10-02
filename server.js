@@ -776,7 +776,13 @@ function coreSignOff(ws) {
 
 // Ranges at full sensor power; sensor power scales all three (Engineering).
 const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
-const SYSTEMS = ['engines', 'injectors', 'deflector', 'bussard', 'amBus', 'shields', 'sensors', 'lateral', 'transporter', 'weapons', 'sif', 'idf', 'atmosphere', 'thermal', 'gravity', 'lights', 'lighting', 'replicators', 'recreation'];
+const SYSTEMS = ['engines', 'injectors', 'deflector', 'bussard', 'amBus', 'shields', 'sensors', 'lateral', 'transporter', 'weapons', 'sif', 'idf', 'atmosphere', 'thermal', 'gravity', 'lights', 'lighting', 'replicators', 'recreation', 'drydock1', 'drydock2', 'drydock3', 'industrial'];
+// Starbases only (EPS loads under Engineering): three drydock connections (one
+// per berth: the shipyard's drydocked ships need theirs powered for work to go
+// on) and the industrial replicators. Ships never draw them; starbases have no
+// warp drive (engines, plasma injectors, Bussard collectors, plasma conduits).
+const BASE_ONLY = ['drydock1', 'drydock2', 'drydock3', 'industrial'];
+const WARP_DRIVE = ['engines', 'injectors', 'bussard'];
 // Sensors: the long-range sensors (EPS) set sensor and radio range; the
 // lateral arrays (a low bus) see close in and give the transporter its range.
 // The navigational deflector (EPS) needs the long-range sensors; warp needs it.
@@ -800,7 +806,7 @@ const lsShare = (k, sys) => { const ls = engOf(k).ls; return LOCATIONS.filter((l
 // The Bussard collectors (EPS, under Helm) gather interstellar deuterium at
 // warp: up to 5 a second at warp 9, less slower or with less power.
 const BUSSARD = { perSecond: 5 };
-const RATING = { amBus: 10, bussard: 20, engines: 300, atmosphere: 10, thermal: 8, gravity: 20, lights: 6, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
+const RATING = { drydock1: 50, drydock2: 50, drydock3: 50, industrial: 100, amBus: 10, bussard: 20, engines: 300, atmosphere: 10, thermal: 8, gravity: 20, lights: 6, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
 const ratingOf = (s) => RATING[s] ?? 100;
 // Each system's power setting is a limit, 0-150: past 100 (its rating) is
 // emergency overdrive, which slowly damages it, faster the further over it runs.
@@ -808,7 +814,7 @@ const POWER_MAX = 150;
 const OVERDRIVE_DAMAGE = 0.02; // damage per second for each point drawn over 100
 const REACTOR = 360; // power drawn for a full sensor signature (a warm ship idling draws a little less)
 const MIN_SHIELD_POWER = 20;
-const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lights: 100, lighting: 100, lateral: 100, deflector: 100, bussard: 100, amBus: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
+const DEFAULT_POWER = { drydock1: 100, drydock2: 100, drydock3: 100, industrial: 50, engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lights: 100, lighting: 100, lateral: 100, deflector: 100, bussard: 100, amBus: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
 // actually gets from the power grid (see "the power grid" below): damage caps
 // a system, unarmed weapons draw nothing, and a bus short of power browns out.
@@ -847,7 +853,7 @@ function speedLimits(k) {
   const eCore = eng.get(k);
   const coreF = !eCore || isBase(k) ? 1 : Math.min(1, coreOutput(eCore) / GRID.core);
   const eng9 = warpPower <= 0 ? 0 : Math.round((Math.min(warpPower / 100, coreF) * 9) * 10) / 10;
-  if (!e || isBase(k)) return { warp: eng9 >= 1 ? eng9 : 0, impulse: 0.25 };
+  if (!e) return { warp: eng9 >= 1 ? eng9 : 0, impulse: 0.25 };
   const p = powerOf(k);
   // Why not (for Helm): the hull fields and the deflector gate warp and impulse.
   const why = {
@@ -857,6 +863,7 @@ function speedLimits(k) {
     impulse: !DRIVES.some((d) => e.drives[d].state === 'running') ? 'start an impulse drive (Engineering)' : !flow(k).thrusting ? 'the impulse drives\' accelerators are at 0 (Engineering)'
       : p.sif < HULL.impulse.sif || p.idf < HULL.impulse.idf ? `impulse needs the SIF at ${HULL.impulse.sif}% and dampers at ${HULL.impulse.idf}% (SIF ${p.sif}%, dampers ${p.idf}%)` : '',
   };
+  if (isBase(k)) why.warp = 'a starbase has no warp drive';
   let warp = why.warp ? 0 : eng9;
   if (e.towing) warp = Math.min(warp, TRACTOR.maxWarp); // towing holds a ship back
   return { warp, impulse: why.impulse ? 0 : flow(k).thrusting, why };
@@ -1104,9 +1111,10 @@ function navCommand(ws, msg) {
   if (msg.type === 'helm') {
     if (ws.station !== 'Helm') return note('Only Helm can set course and speed');
     if (!msg.autopilot && autopilots.delete(key)) note('Helm: autopilot off, you have the helm');
-    const core = primaryCore.get(key);
+    // (A starbase has no ship's computer flying it: the relay does, at impulse.)
+    const core = isBase(key) ? { base: true } : primaryCore.get(key);
     if (!core) return note("No ship's computer is flying the ship");
-    if (isBase(key)) return note(`Helm: ${shipName(key)} is a starbase: it holds station`);
+    if (isBase(key) && typeof msg.warp === 'number' && msg.warp >= 1) return note(`Helm: ${shipName(key)} is a starbase: no warp drive, impulse only`);
     if (towedBy(key)) return note(`Helm: held in the ${shipName(towedBy(key))}'s tractor beam`);
     const order = { type: 'core-helm', ship: ws.ship };
     if (msg.dest) {
@@ -1133,7 +1141,7 @@ function navCommand(ws, msg) {
     }
     if (order.warp === 0) navTargets.delete(key);
     if (!(order.warp > 0 && order.warp < 1)) engOf(key).impulseWant = 0;
-    send(core, order);
+    if (core.base) baseHelm(key, order); else send(core, order);
     const what = order.warp === 0 ? 'all stop' : `${order.dest ? `course for ${order.dest.name ? `${d0(order.dest.name)}` : `${Math.round(order.dest.x)}, ${Math.round(order.dest.y)}`}` : typeof order.heading === 'number' ? `heading ${Math.round(order.heading)}` : 'speed'}${order.warp ? `, ${order.warp < 1 ? 'impulse' : `warp ${order.warp}`}` : ''}`;
     opLog(key, `Helm (${ws.name}): ${what}`);
     return;
@@ -1142,10 +1150,11 @@ function navCommand(ws, msg) {
   if (msg.type === 'power') {
     if (ws.station !== 'Engineering') return note('Only Engineering can route power');
     const core = primaryCore.get(key);
-    if (!core) return note("Engineering: no ship's computer is running the ship");
+    if (!core && !isBase(key)) return note("Engineering: no ship's computer is running the ship");
     const p = allocOf(key);
     for (const s of SYSTEMS) if (msg.power && Number.isFinite(msg.power[s])) p[s] = Math.max(0, Math.min(POWER_MAX, Math.round(msg.power[s])));
-    send(core, { type: 'core-power', ship: ws.ship, power: p });
+    // (A starbase keeps its own limiters, in the relay's starbase file.)
+    if (isBase(key)) { navState.get(key).power = p; gridChanged(key); saveBaseSettings(); } else send(core, { type: 'core-power', ship: ws.ship, power: p });
     opLog(key, `Engineering (${ws.name}): power ${SYSTEMS.map((s) => `${s} ${p[s]}%`).join(', ')}`);
     return;
   }
@@ -1560,15 +1569,50 @@ const PORTS = ['port', 'starboard']; // docking ports (starbases take any number
 // The port a ship is docked to us at (or null), and the ships docked with us (both sides agreeing).
 const portFor = (k, other) => PORTS.find((p) => engOf(k).shipDocks[p] === other) || null;
 const shipsDocked = (k) => PORTS.map((p) => [p, engOf(k).shipDocks[p]]).filter(([, o]) => o && portFor(o, k));
-const SYSTEM_BUS = { atmosphere: 'A', thermal: 'A', gravity: 'A', lights: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', bussard: 'EPS', amBus: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
+const SYSTEM_BUS = { drydock1: 'EPS', drydock2: 'EPS', drydock3: 'EPS', industrial: 'EPS', atmosphere: 'A', thermal: 'A', gravity: 'A', lights: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', bussard: 'EPS', amBus: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
 const STATION_SYSTEMS = { Helm: ['engines', 'deflector', 'bussard'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors', 'lateral'], Engineering: ['sif', 'idf', 'amBus', 'lifeSupport'] /* a parent row: its systems carry the ties */, Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
 const LOAD_NODES = {
   atmosphere: AB, thermal: AB, gravity: AB, lights: AB, lighting: AB, lateral: AB, replicators: AB, recreation: AB, // low power
   transporter: AB,
-  engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], tractor: ['EPS'], sensors: ['EPS'], deflector: ['EPS'], bussard: ['EPS'], amBus: ['EPS'], sif: ['EPS'], idf: ['EPS'], // high power: EPS only
+  engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], tractor: ['EPS'], sensors: ['EPS'], deflector: ['EPS'], bussard: ['EPS'], amBus: ['EPS'], sif: ['EPS'], idf: ['EPS'], drydock1: ['EPS'], drydock2: ['EPS'], drydock3: ['EPS'], industrial: ['EPS'], // high power: EPS only
 };
-const SYSTEM_PRIORITY = ['amBus', 'sif', 'idf', 'atmosphere', 'thermal', 'lighting', 'lights', 'gravity', 'sensors', 'lateral', 'deflector', 'bussard', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
+// Starbases are flown by the relay (they have no ship's computer): Helm's
+// orders go straight to their position, and they move at impulse each second.
+function setBasePos(k, x, y, heading) {
+  const n = navState.get(k), b = STARBASES.find((sb) => shipKey(sb.name) === k);
+  if (!n) return;
+  n.x = Math.min(1000, Math.max(0, x)); n.y = Math.min(1000, Math.max(0, y));
+  if (Number.isFinite(heading)) n.heading = heading;
+  if (b) { b.x = n.x; b.y = n.y; } // (docking and the map use the starbase list)
+}
+function baseHelm(k, order) {
+  const n = navState.get(k);
+  if (!n) return;
+  if (order.dest !== undefined) n.dest = order.dest;
+  if (typeof order.heading === 'number') { n.heading = ((order.heading % 360) + 360) % 360; n.dest = order.dest ?? null; }
+  if (typeof order.warp === 'number') n.warp = Math.max(0, Math.min(0.999, order.warp)); // impulse only
+  if (n.warp === 0) n.dest = null;
+  engOf(k).dirty = true;
+  scheduleNav();
+}
+function baseMove(k) {
+  const n = navState.get(k);
+  const step = 2 * n.warp; // impulse: as a ship's computer flies it (0.25: 0.5 a second)
+  if (n.dest) {
+    const dx = n.dest.x - n.x, dy = n.dest.y - n.y, d = Math.hypot(dx, dy);
+    n.heading = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
+    if (d <= step) { setBasePos(k, n.dest.x, n.dest.y); opLog(k, `Helm: arrived at ${Math.round(n.x)}, ${Math.round(n.y)}`); n.warp = 0; n.dest = null; engOf(k).impulseWant = 0; return; }
+    setBasePos(k, n.x + (dx / d) * step, n.y + (dy / d) * step);
+  } else {
+    const a = (n.heading * Math.PI) / 180;
+    setBasePos(k, n.x + Math.sin(a) * step, n.y - Math.cos(a) * step);
+  }
+  engOf(k).dirty = true;
+}
+// What each console's grid rows list: a starbase has no warp drive, and has its drydock connections and industrial replicators.
+const stationSystemsOf = (k) => (isBase(k) ? { ...STATION_SYSTEMS, Helm: STATION_SYSTEMS.Helm.filter((x) => !WARP_DRIVE.includes(x)), Engineering: [...STATION_SYSTEMS.Engineering, ...BASE_ONLY] } : STATION_SYSTEMS);
+const SYSTEM_PRIORITY = ['amBus', 'sif', 'idf', 'atmosphere', 'thermal', 'lighting', 'lights', 'gravity', 'sensors', 'lateral', 'deflector', 'bussard', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'drydock1', 'drydock2', 'drydock3', 'transporter', 'replicators', 'recreation', 'industrial'];
 // Systems shown under another system in the grid table (Helm > Engines > Plasma injectors).
 const SYSTEM_CHILDREN = { engines: ['injectors'], lifeSupport: LIFE_SUPPORT };
 // Rows with no ties of their own, only their systems' (Engineering > Life support > ...).
@@ -1759,7 +1803,7 @@ function freshEng(saved, { cold = false } = {}) {
       return [name, Math.max(0, Math.min(cap, Number(v) || 0))];
     })),
     docked: STARBASES.some((b) => b.name === s.docked) ? s.docked : null,
-    drydock: !!s.drydock && isShipyard(s.docked), release: null, hold: false, // in the shipyard's drydock (kept across restarts)
+    drydock: !!s.drydock && isShipyard(s.docked), berth: [1, 2, 3].includes(s.berth) ? s.berth : 1, release: null, hold: false, // in the shipyard's drydock (kept across restarts)
     breach: 0, selfDestruct: null, towing: null, dirty: false,
     // The warp core's reaction (older saves: running at 70%, 15:1, aligned, conduits open, auto-trim on).
     wc: { rate: Number.isFinite(s.wc?.rate) ? s.wc.rate : 70, actual: s.core === 'online' || (s.core === undefined && !cold) ? (Number.isFinite(s.wc?.actual) ? s.wc.actual : 70) : 0, mix: Number.isFinite(s.wc?.mix) ? s.wc.mix : 15, align: Number.isFinite(s.wc?.align) ? s.wc.align : 100, crystal: Number.isFinite(s.wc?.crystal) ? s.wc.crystal : 100, temp: Number.isFinite(s.wc?.temp) ? s.wc.temp : 0, plasma: s.wc?.plasma ?? !cold, autoTrim: s.wc?.autoTrim ?? !cold, breachT: null },
@@ -1788,16 +1832,23 @@ function freshEng(saved, { cold = false } = {}) {
   return out;
 }
 const engOf = (k) => {
-  if (!eng.has(k)) eng.set(k, { ...freshEng(), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
+  if (!eng.has(k)) eng.set(k, { ...freshEng(isBase(k) ? baseSettings[shipName(k)]?.eng : undefined), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
   return eng.get(k);
 };
 // Starbases have no ship's computer to keep their settings: the relay keeps
 // them (remote control starts blocked at a starbase).
-const BASE_SETTINGS_FILE = path.join(__dirname, 'data', 'starbases.json');
+const BASE_SETTINGS_FILE = process.env.STARBASES_FILE || path.join(__dirname, 'data', 'starbases.json');
 let baseSettings = {};
 try { baseSettings = JSON.parse(fs.readFileSync(BASE_SETTINGS_FILE, 'utf8')); } catch {}
+// Where each starbase was left (it can move: impulse, or a tow), and its limiters.
+for (const b of STARBASES) {
+  const sv = baseSettings[b.name], k = shipKey(b.name);
+  if (Number.isFinite(sv?.nav?.x) && Number.isFinite(sv?.nav?.y)) setBasePos(k, sv.nav.x, sv.nav.y, sv.nav.heading);
+  if (sv?.power && typeof sv.power === 'object') navState.get(k).power = { ...sv.power };
+}
 function saveBaseSettings() {
-  for (const k of BASE_KEYS) baseSettings[shipName(k)] = { remoteBlock: !!engOf(k).remoteBlock };
+  // Each starbase: its settings, its grid, its condition, where it is and its limiters.
+  for (const k of BASE_KEYS) { const n = navState.get(k); baseSettings[shipName(k)] = { remoteBlock: !!engOf(k).remoteBlock, eng: savedEng(k), combat: savedCombat(k), nav: n ? { x: n.x, y: n.y, heading: n.heading } : undefined, power: n?.power }; }
   try { fs.mkdirSync(path.dirname(BASE_SETTINGS_FILE), { recursive: true }); fs.writeFileSync(BASE_SETTINGS_FILE, JSON.stringify(baseSettings, null, 2)); } catch (err) { console.warn(`could not save starbase settings: ${err.message}`); }
 }
 const savedEng = (k) => {
@@ -1809,7 +1860,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, drydock: !!e.drydock, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, drydock: !!e.drydock, berth: e.berth, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
   };
 };
@@ -1826,7 +1877,10 @@ const SUB_FAIL_DAMAGE = 50;
 // rest (life support, hull fields, replicators, recreation) run steadily at their rating.
 function usageOf(k, s, c) {
   const w = navState.get(k)?.warp || 0;
+  if (isBase(k) ? WARP_DRIVE.includes(s) : BASE_ONLY.includes(s)) return 0;
   switch (s) {
+    case 'drydock1': case 'drydock2': case 'drydock3': return berthShip(k, Number(s.slice(7))) ? 100 : 0; // while a ship is in that berth
+    case 'industrial': return 100; // at its limiter (the light bar)
     case 'transporter': return transporterDraw(k);
     case 'weapons': return !c.armed ? 0 : c.phaserCharge < 100 ? POWER_MAX : 10;
     case 'shields': return shields.has(k) || c.shield < 100 ? POWER_MAX : 0;
@@ -1852,7 +1906,7 @@ function flow(k) {
   // A system draws what it's using right now (usageOf), capped by its limiter
   // and by damage: at 0 it draws nothing, idle it draws little or nothing.
   const capacity = {};
-  for (const s of SYSTEMS) { capacity[s] = Math.min(a[s], Math.max(0, (POWER_MAX * (100 - c.damage[s])) / 100)); demand[s] = Math.min(capacity[s], usageOf(k, s, c)); }
+  for (const s of SYSTEMS) { capacity[s] = Math.min(a[s], Math.max(0, (POWER_MAX * (100 - (c.damage[s] || 0))) / 100)); demand[s] = Math.min(capacity[s], usageOf(k, s, c)); }
   // A ship docked with us: each side offers power (feed); whoever offers more
   // sends the difference, drawn from (or, received, fed into) the docked-ship ties.
   // Each connection on its own: per port, whoever offers more sends the difference.
@@ -2192,7 +2246,7 @@ function gridView(k) {
     // The emergency batteries: charge, and a starbase can swap in a full one.
     emerg: EMERG.names.map((n) => ({ name: n, bus: EMERG.bus[n], level: Math.floor(e.emerg[n]), pct: Math.floor((100 * e.emerg[n]) / EMERG.cap), out: EMERG.out, supplying: Math.round(f.emergUsed[n] || 0) })), canReplace: !!e.docked,
     // The shipyard's drydock: whether we're docked there, in it, and any release under way.
-    drydock: { shipyard: isShipyard(e.docked), in: !!e.drydock, release: e.release ? Math.max(0, Math.ceil((e.release - Date.now()) / 1000)) : null, hold: !!e.hold },
+    drydock: { shipyard: isShipyard(e.docked), in: !!e.drydock, berth: e.drydock ? e.berth : null, powered: e.drydock ? berthPowered(k) : null, release: e.release ? Math.max(0, Math.ceil((e.release - Date.now()) / 1000)) : null, hold: !!e.hold },
     dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName),
     // What each port holds: a starbase, a ship (with its power offers), or nothing.
     ports: Object.fromEntries(PORTS.map((p) => {
@@ -2219,7 +2273,7 @@ function gridView(k) {
     towing: e.towing ? shipName(e.towing) : null, towedBy: tower ? shipName(tower) : null,
     selfDestruct: e.selfDestruct ? { seconds: Math.max(0, Math.ceil((e.selfDestruct.at - Date.now()) / 1000)), by: e.selfDestruct.by } : null,
     buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: Math.round(b.need), have: Math.round(b.have), src: r(b.src), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
-    consoleOk: f.consoleOk, systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, stationSystems: STATION_SYSTEMS, subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
+    consoleOk: f.consoleOk, systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
     tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: BUS_MAX,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
   };
@@ -2245,6 +2299,7 @@ function gridCommand(ws, msg) {
     // A new warp core and antimatter pods, from the starbase. Full pods need a
     // containment feed set to go into; without one they come empty.
     if (!e.drydock) return note(`a warp core and antimatter pods can only be replaced in drydock at the shipyard (${SHIPYARD.name})`);
+    if (!berthPowered(key)) return note(`${e.docked}'s drydock connection ${e.berth} has no power: the work waits for it`);
     if (e.core === 'online' || e.core === 'starting') return note('shut the warp core down before replacing it');
     const fill = e.ties.containment.length > 0;
     Object.assign(e, { core: 'offline', start: 0, breach: 0, antimatter: fill ? FUEL.antimatter : 0, contain: { field: 100, reserve: reserveCap() } });
@@ -2416,7 +2471,8 @@ function dockCommand(ws, msg) {
     if (!isShipyard(e.docked)) return note(`drydock is only at the shipyard (${SHIPYARD.name}): dock there first`);
     if (e.drydock) return note(`already in drydock at ${e.docked}`);
     if (drydocked().length >= DRYDOCK.berths) return note(`${e.docked}'s ${DRYDOCK.berths} drydock berths are all in use`);
-    Object.assign(e, { drydock: true, release: null, hold: false, dirty: true });
+    const yard = shipKey(e.docked), taken = drydocked().filter((o) => shipKey(engOf(o).docked || '') === yard).map((o) => engOf(o).berth);
+    Object.assign(e, { drydock: true, berth: [1, 2, 3].find((n) => !taken.includes(n)), release: null, hold: false, dirty: true });
     if (primaryCore.get(key) && nav?.warp > 0) send(primaryCore.get(key), { type: 'core-helm', ship: shipName(key), warp: 0 });
     autopilots.delete(key);
     opLog(key, `Helm (${ws.name}): entered drydock at ${e.docked}`);
@@ -2480,6 +2536,14 @@ function dockCommand(ws, msg) {
   gridChanged(key);
 }
 
+// The ship in a shipyard's berth (1-3), and whether a drydocked ship's connection has its power.
+const berthShip = (yard, n) => drydocked().find((o) => shipKey(engOf(o).docked || '') === yard && engOf(o).berth === n) || null;
+function berthPowered(k) {
+  const e = engOf(k);
+  if (!e.drydock) return false;
+  const f = flow(shipKey(e.docked)), sys = `drydock${e.berth}`;
+  return f.demand[sys] > 0 && f.delivered[sys] >= f.demand[sys] - 0.5;
+}
 function releaseDrydock(k, how) {
   const e = engOf(k);
   if (!e.drydock) return;
@@ -2589,8 +2653,7 @@ function tractorCommand(ws, msg) {
   if (!msg.ship) return e.towing ? releaseTractor(key, `released by ${ws.name}`) : undefined;
   const t = shipKey(clean(msg.ship));
   if (t === key) return note('cannot put a tractor beam on our own ship');
-  if (isBase(t)) return note(`${shipName(t)} is a starbase: it doesn't move`);
-  if (!cores.has(t) || !navState.has(t) || !sensorOk(key, t)) return note(`the ${clean(msg.ship)} is not on sensors`);
+  if (!present(t) || !navState.has(t) || !sensorOk(key, t)) return note(`the ${clean(msg.ship)} is not on sensors`);
   if (distance(key, t) > TRACTOR.range) return note(`the ${shipName(t)} is out of tractor range (${Math.round(distance(key, t))} units; get within ${TRACTOR.range})`);
   if (shields.has(t)) return note(`the ${shipName(t)} has its shields up: the tractor beam can't hold it`);
   if (engOf(t).drydock) return note(`the ${shipName(t)} is in drydock at ${engOf(t).docked}`);
@@ -2746,7 +2809,7 @@ function tow() {
   for (const [k, e] of eng) {
     const t = e.towing;
     if (!t) continue;
-    const why = !cores.has(k) || !cores.has(t) ? 'lost contact' : shields.has(t) ? `the ${shipName(t)} raised shields` : !flow(k).tractorOk ? 'not enough power on the EPS' : consoleDarkFor(k, 'Tactical') ? 'no power to Tactical' : null;
+    const why = !cores.has(k) || !present(t) ? 'lost contact' : shields.has(t) ? `the ${shipName(t)} raised shields` : !flow(k).tractorOk ? 'not enough power on the EPS' : consoleDarkFor(k, 'Tactical') ? 'no power to Tactical' : null;
     if (why) { releaseTractor(k, why); continue; }
     const n = navState.get(k), m = navState.get(t);
     if (!n || !m) continue;
@@ -2754,6 +2817,7 @@ function tow() {
     const x = Math.min(1000, Math.max(0, n.x - Math.sin(a) * TRACTOR.behind)), y = Math.min(1000, Math.max(0, n.y + Math.cos(a) * TRACTOR.behind));
     if (Math.hypot(m.x - x, m.y - y) < 0.3 && !m.warp) continue;
     Object.assign(m, { x, y, heading: n.heading, warp: 0, dest: null });
+    if (isBase(t)) setBasePos(t, x, y); // (a towed starbase: the relay keeps where it is)
     const core = primaryCore.get(t);
     if (core) send(core, { type: 'core-set', ship: shipName(t), set: { moveTo: { x, y, heading: n.heading } } });
   }
@@ -2768,6 +2832,16 @@ const commsReach = (u) => !present(u.shipKey) || isBase(u.shipKey) || !consoleDa
 // A ship is destroyed: it takes ships close by with it (some), and comes back
 // docked at a starbase picked at random, good as new.
 function destroy(k, cause) {
+  // A starbase isn't lost: its safety systems eject the core and the antimatter first.
+  if (isBase(k)) {
+    const e = engOf(k);
+    Object.assign(e, { core: 'ejected', start: 0, breach: 0, antimatter: 0, contain: { field: 100, reserve: reserveCap() }, dirty: true });
+    e.tanks.am.core = 0; e.tanks.deu.core = 0; e.wc.breachT = null; e.wc.actual = 0;
+    for (const n of Object.keys(e.tanks.am)) e.tanks.am[n] = 0;
+    opLog(k, `${cause}: the safety systems ejected the warp core and antimatter`);
+    for (const u of crewOf(k)) send(u, { type: 'notice', text: `Warning: ${cause}. The safety systems ejected the warp core and antimatter.` });
+    return;
+  }
   const c = combatOf(k);
   if (c.destroying) return;
   c.destroying = true;
@@ -2816,11 +2890,11 @@ const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 50
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
-const SYSTEM_NAMES = { engines: 'warp field coils', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', bussard: 'Bussard collectors', amBus: 'antimatter bus magnetic containment', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', lights: 'lighting', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
+const SYSTEM_NAMES = { drydock1: 'drydock connection 1', drydock2: 'drydock connection 2', drydock3: 'drydock connection 3', industrial: 'industrial replicators', engines: 'warp field coils', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', bussard: 'Bussard collectors', amBus: 'antimatter bus magnetic containment', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', lights: 'lighting', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
   injector: 'antimatter injector',
   conduits: 'power transfer conduits', rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
 // What a hit can damage: the systems, and the subsystems that fail when badly damaged.
-const DAMAGEABLE = [...SYSTEMS, 'conduits', 'injector', 'rf', 'radio', 'subspace', 'busA', 'busB', 'busC', 'busEPS'];
+const DAMAGEABLE = [...SYSTEMS.filter((x) => !BASE_ONLY.includes(x)), 'conduits', 'injector', 'rf', 'radio', 'subspace', 'busA', 'busB', 'busC', 'busEPS'];
 const combat = new Map(); // ship key -> { hull, shield, damage, torpedoes, repair, lock, armed, phaserCharge, torpedoAt, restockAt, hitAt, hitBy, dirty }
 
 function freshCombat(saved) {
@@ -2834,7 +2908,7 @@ function freshCombat(saved) {
     lock: null, armed: false, phaserCharge: 0, torpedoAt: 0, restockAt: Date.now(), hitAt: 0, hitBy: null, dirty: false,
   };
 }
-const combatOf = (k) => { if (!combat.has(k)) combat.set(k, freshCombat()); return combat.get(k); };
+const combatOf = (k) => { if (!combat.has(k)) combat.set(k, freshCombat(isBase(k) ? baseSettings[shipName(k)]?.combat : undefined)); return combat.get(k); };
 const round1 = (v) => Math.round(v * 10) / 10;
 const savedCombat = (k) => {
   const c = combatOf(k);
@@ -2998,8 +3072,8 @@ setInterval(() => {
   dropPowerlessCalls();
   const now = Date.now();
   let changed = false;
-  for (const k of [...cores.keys()]) {
-    if (!navState.has(k) || isBase(k)) continue;
+  for (const k of new Set([...cores.keys(), ...BASE_KEYS])) {
+    if (!navState.has(k)) continue;
     const c = combatOf(k), e = engOf(k);
     const state = () => JSON.stringify([c.hull, c.shield, c.damage, c.torpedoes, c.repair, Math.floor(c.phaserCharge), e.core, e.start, e.breach, Math.round(Object.values(e.stores).reduce((a, b) => a + b, 0) / 30), e.docked, e.shipDocks, Math.floor(e.antimatter), Math.floor(e.deuterium), e.transfer?.left, e.drives]);
     const before = state();
@@ -3065,7 +3139,7 @@ setInterval(() => {
       if (w.autoTrim && coresOnline(k) < COMPUTERS.length) { w.autoTrim = false; tellStations(k, ['Engineering'], 'Engineering: dilithium auto-trim off: it needs all three computer cores'); }
     }
     // Overdrive: a system drawing past its rating wears itself out.
-    for (const sys of SYSTEMS) if (f.delivered[sys] > 100) {
+    for (const sys of SYSTEMS) if (f.delivered[sys] > 100 && !BASE_ONLY.includes(sys)) {
       const was = c.damage[sys];
       c.damage[sys] = Math.min(100, c.damage[sys] + (f.delivered[sys] - 100) * OVERDRIVE_DAMAGE);
       if (Math.floor(was / 10) !== Math.floor(c.damage[sys] / 10)) tellStations(k, ['Engineering'], `Engineering: ${SYSTEM_NAMES[sys]} overdriven (${Math.round(f.delivered[sys])}%), damage ${Math.ceil(c.damage[sys])}%`);
@@ -3107,10 +3181,13 @@ setInterval(() => {
     else if (e.epsLive && e.stores.pressure - f.storeUsed.EPS + f.charging.EPS <= 0) { e.epsLive = false; e.dirty = true; opLog(k, 'EPS collapsed: manifold pressure lost'); tellStations(k, ['Engineering'], 'Engineering: EPS collapsed (manifold pressure lost): it has to be pressurized again'); }
     // Impulse builds toward what Helm asked for, at the driver coils' rate.
     { const nv = navState.get(k), want = e.impulseWant || 0, core = primaryCore.get(k);
-      if (want > 0 && nv && nv.warp < 1 && nv.warp < want - 1e-6 && core) {
+      if (want > 0 && nv && nv.warp < 1 && nv.warp < want - 1e-6 && (core || isBase(k))) {
         const lim = speedLimits(k), next = Math.min(want, lim.impulse, nv.warp + impulseRate(k));
-        if (next > nv.warp + 1e-6) send(core, { type: 'core-helm', ship: shipName(k), warp: Math.round(next * 1000) / 1000 });
-      } }
+        if (next > nv.warp + 1e-6) { if (isBase(k)) baseHelm(k, { warp: Math.round(next * 1000) / 1000 }); else send(core, { type: 'core-helm', ship: shipName(k), warp: Math.round(next * 1000) / 1000 }); }
+      }
+      // A starbase under way: the relay flies it (impulse only), and drops to all stop without impulse.
+      if (isBase(k) && nv && nv.warp > 0) { if (!speedLimits(k).impulse) baseHelm(k, { warp: 0 }); baseMove(k); }
+    }
     tripBreakers(k);
     // Batteries.
     for (const [name, node] of Object.entries(STORES)) e.stores[name] = Math.max(0, Math.min(node === 'EPS' ? GRID.epsCap : GRID.batteryCap, e.stores[name] - f.storeUsed[node] + f.charging[node]));
@@ -3144,7 +3221,7 @@ setInterval(() => {
 
     const p = powerOf(k);
     if (c.shield < 100 && p.shields > 0) c.shield = Math.min(100, c.shield + (2 * p.shields) / 100);
-    const fast = e.drydock ? REPAIR.docked : 1; // (fast repairs only in drydock)
+    const fast = e.drydock && berthPowered(k) ? REPAIR.docked : 1; // (fast repairs only in drydock, its connection powered)
     // Release from drydock: once the time's up, with no repair job under way, unless the shipyard holds it.
     if (e.drydock && e.release && now >= e.release && !e.hold && !c.repair) releaseDrydock(k, 'released');
     for (const s of DAMAGEABLE) if (c.damage[s] > 0 && !(f.delivered[s] > 100)) c.damage[s] = Math.max(0, c.damage[s] - (c.repair === s ? REPAIR.directed : REPAIR.auto) * fast);
@@ -3163,6 +3240,7 @@ setInterval(() => {
       changed = true;
     }
     if (state() !== before || e.selfDestruct) { c.dirty = true; changed = true; enforcePower(k); }
+    if ((c.dirty || e.dirty) && combatTick % 5 === 0 && isBase(k)) { c.dirty = e.dirty = false; saveBaseSettings(); }
     if ((c.dirty || e.dirty) && combatTick % 5 === 0 && primaryCore.has(k)) {
       send(primaryCore.get(k), { type: 'core-set', ship: shipName(k), set: { combat: savedCombat(k), eng: savedEng(k) } });
       c.dirty = e.dirty = false;

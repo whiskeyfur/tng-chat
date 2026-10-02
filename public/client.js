@@ -1150,7 +1150,7 @@ function renderCombat() {
         ...tankRow('deu', 'core'), ...tankRow('am', 'core'),
         subRow('injector', 2),
         ties('core', 'Power transfer conduits', 'core', { level: 2, note: c.damage.conduits >= 50 ? 'DAMAGED: no output' : 'carry the core\'s output into the EPS' }),
-        toggleRow('core-plasma', 'Plasma transfer conduits', 2, grid.warpCore?.plasma, () => send({ type: 'grid', plasma: !grid.warpCore?.plasma }), grid.warpCore?.plasma ? 'open to the nacelles: warp' : 'closed: no warp'),
+        ...(grid.starbase ? [] : [toggleRow('core-plasma', 'Plasma transfer conduits', 2, grid.warpCore?.plasma, () => send({ type: 'grid', plasma: !grid.warpCore?.plasma }), grid.warpCore?.plasma ? 'open to the nacelles: warp' : 'closed: no warp')]),
       ] : []),
       ...driveRows('port'), ...driveRows('starboard'),
       ...auxRows(),
@@ -1233,7 +1233,7 @@ function renderCombat() {
       return tr;
     };
     const table = () => {
-      const SYS = { ...Object.fromEntries(POWER), tractor: 'Tractor beam' };
+      const SYS = { ...Object.fromEntries(POWER), tractor: 'Tractor beam', drydock1: 'Drydock connection 1', drydock2: 'Drydock connection 2', drydock3: 'Drydock connection 3', industrial: 'Industrial replicators' };
       const crewAt = (st) => comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st).length;
       const consoles = Object.keys(grid.tieNodes).filter((x) => x.startsWith('console:')).map((x) => x.slice(8));
       // A console's rows: the console, its systems, and its subsystems (Engineering: the reactors too).
@@ -1258,7 +1258,10 @@ function renderCombat() {
           // (Shown rounded up: a load split over places can be fractional.)
           const up = (v) => Math.ceil(v - 1e-9);
           const want = up(sys === 'tractor' ? (grid.towing ? 30 : 0) : grid.demand[sys]), got = up(sys === 'tractor' ? want : grid.delivered[sys]);
-          rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { level, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}${got > 100 ? ' · OVERDRIVE' : ''}` : 'off' }));
+          // A starbase's industrial replicators: a light bar (taps) for how hard they run.
+          const controls = sys === 'industrial' ? [(() => { const bar = lightBar('Industrial replicators', 100, (v) => send({ type: 'power', power: { industrial: v } })); bar.id = 'industrial-bar'; bar.set(lastNav?.own?.allocated?.industrial ?? 0); return bar; })()] : [];
+          const idle = /^drydock\d$/.test(sys) ? 'no ship in this berth' : 'off';
+          rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { level, controls, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}${got > 100 ? ' · OVERDRIVE' : ''}` : idle }));
           if (sys === 'weapons') rows.push(...tankRow('am', 'torpedo', level + 1)); // the torpedo bay's antimatter
           for (const child of grid.systemChildren[sys] || []) sysRow(child, level + 1);
         };

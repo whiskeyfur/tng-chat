@@ -12,6 +12,7 @@ const WebSocket = require('ws');
 const PORT = Number(process.env.PORT || 8099) + 2;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-restart-'));
 const ROOT = path.join(__dirname, '..');
+process.env.STARBASES_FILE = path.join(DATA, 'starbases.json'); // (the starbases' state: never the live file)
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const step = (s) => console.log(`ok - ${s}`);
 const procs = new Set();

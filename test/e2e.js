@@ -14,6 +14,7 @@ const { chromium } = require('playwright');
 process.env.PORT = process.env.PORT || '8099';
 process.env.BEAM_SECS = process.env.BEAM_SECS || '2'; // the transporter energizes this long (5 s in play)
 process.env.RESERVE_SECS = process.env.RESERVE_SECS || '3';
+process.env.STARBASES_FILE = process.env.STARBASES_FILE || require('path').join(require('os').tmpdir(), `tng-chat-starbases-${process.pid}.json`); // (never the live file)
 process.env.DRYDOCK_RELEASE_SECS = process.env.DRYDOCK_RELEASE_SECS || '3'; // release from drydock (30 s in play)
 process.env.DIAG_SECS = process.env.DIAG_SECS || '2'; // the transporter's level-3 diagnostic (16 s in play) // antimatter containment's internal reserve (9 minutes in play)
 // Ship's computers keep their libraries in a scratch folder for the test.
@@ -655,7 +656,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await screen(chief, 'st-transporter');
     await chief.click(`#beam-who button[data-value="${id('wes')}"]`);
     // Out of reach, the K'Vatch is listed but greyed out, with the reason.
-    await chief.waitForSelector('#beam-ship button[data-value="K\'Vatch"][disabled]:has-text("our shields up")');
+    await chief.waitForSelector('#beam-ship button[data-value="K\'Vatch"][disabled]:has-text("our shields up")').catch(async () => { throw new Error(`K'Vatch tap: ${await chief.$$eval('#beam-ship button', (bs) => bs.map((b) => `${b.textContent}${b.disabled ? ' [off]' : ''}`).join(' | '))} shields-up attr: ${await chief.evaluate(() => document.body.hasAttribute('data-shields-up'))}`); });
     assert.equal(await chief.isDisabled('#beam-ship button[data-value="Starbase 47"]'), true, 'a far starbase is out of reach');
     assert.match(await chief.textContent('#beam-ship button[data-value="Starbase 47"]'), /out of range/);
     assert.equal(await wes.evaluate(() => window.__voice.me.ship), 'Enterprise');
@@ -1475,6 +1476,40 @@ const audioBytes = (page) => page.evaluate(async () => {
     await yard.close();
     step('Helm requested release; the shipyard\'s ops held the Enterprise past its release time, then released it (still docked)');
 
+    // Starbases run a power grid like a ship's, without a warp drive, with three drydock
+    // connections and industrial replicators; Helm flies one at impulse (no warp); shields go up.
+    {
+      const sbEng = await crewWs('rom2', 'Starbase 47', 'Engineering');
+      const sbHelm = await crewWs('morn', 'Starbase 47', 'Helm');
+      const sbTac = await crewWs('garak', 'Starbase 47', 'Tactical');
+      await waitFor(() => sbEng.nav()?.own?.grid);
+      const g = sbEng.nav().own.grid;
+      assert.ok(g.starbase && ['drydock1', 'drydock2', 'drydock3', 'industrial'].every((x) => g.stationSystems.Engineering.includes(x)), 'a starbase lists its drydock connections and industrial replicators');
+      assert.ok(!g.stationSystems.Helm.includes('engines') && !g.stationSystems.Helm.includes('bussard'), 'a starbase has no warp drive');
+      sbEng.send({ type: 'power', power: { industrial: 30 } });
+      await waitFor(() => sbEng.nav()?.own.allocated.industrial === 30 && sbEng.nav().own.grid.demand.industrial === 30);
+      // The shipyard's connections draw only for a ship in their berth (the Enterprise's was released).
+      const home = { x: sbHelm.nav().own.x, y: sbHelm.nav().own.y };
+      sbHelm.send({ type: 'helm', dest: { x: home.x + 3, y: home.y }, warp: 5 });
+      await waitFor(() => sbHelm.msgs.some((m) => m.type === 'notice' && /no warp drive, impulse only/.test(m.text)));
+      sbHelm.send({ type: 'helm', dest: { x: home.x + 3, y: home.y }, warp: 0.25 });
+      await waitFor(() => sbHelm.nav()?.own.x > home.x + 1, 20000);
+      sbHelm.send({ type: 'helm', dest: { x: home.x, y: home.y }, warp: 0.25 }); // (and back where it was)
+      await waitFor(() => Math.abs(sbHelm.nav()?.own.x - home.x) < 0.01 && sbHelm.nav().own.warp === 0, 20000);
+      sbTac.send({ type: 'shields', up: true });
+      await waitFor(() => sbTac.nav()?.own.combat.shieldsUp || sbTac.msgs.some((m) => m.type === 'ships' && m.ships.find((x) => x.name === 'Starbase 47')?.shields));
+      sbTac.send({ type: 'shields', up: false });
+      // Starbase to starbase: a data link across the system (Starbase 74 accepts by itself).
+      const sbComms = await crewWs('odo', 'Starbase 47', 'Communications');
+      await waitFor(() => sbComms.msgs.some((m) => m.type === 'comm-links' && m.ships.includes('Starbase 74')));
+      sbComms.send({ type: 'link-request', ship: 'Starbase 74' });
+      await waitFor(() => [...sbComms.msgs].reverse().find((m) => m.type === 'comm-links')?.links.includes('Starbase 74'), 15000);
+      sbComms.send({ type: 'link-close', ship: 'Starbase 74' });
+      sbComms.close();
+      sbEng.close(); sbHelm.close(); sbTac.close();
+      step('Starbase 47 ran its own power grid (no warp drive; drydock connections and industrial replicators, set by a light bar), moved at impulse under its Helm (warp refused) and back, raised shields, and opened a data link with Starbase 74');
+    }
+
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;
     // the pods stay contained (their own ties). The deuterium bus: nothing moves without its transfer power.
     laforge.send({ type: 'grid', ties: { 'system:amBus': [] } });
@@ -1947,7 +1982,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', ties: { 'sub:rf': [] } });
     await waitFor(() => barclay.nav()?.own.grid.subOk.rf === false).catch(() => { const g = barclay.nav()?.own.grid; throw new Error(`local RF still up: ${JSON.stringify({ rf: g?.subOk.rf, ties: g?.ties['sub:rf'], navs: barclay.msgs.filter((m) => m.type === 'nav').length, last: barclay.msgs.slice(-3).map((m) => m.type + (m.text ? `: ${m.text}` : '')) })}`); });
     barclay.send({ type: 'call', to: id('ro', 'Excelsior'), cid: 'x1' });
-    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /local RF has no power/.test(m.text)));
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /local RF has no power|no console power or local RF/.test(m.text))).catch(() => { throw new Error(`call not refused: ${JSON.stringify(barclay.msgs.slice(-6).map((m) => m.type + (m.text ? `: ${m.text}` : m.reason ? `: ${m.reason}` : '')))}`); });
     step("with Communications' local RF untied, a call aboard the Excelsior was refused");
     barclay.close();
     ro.close();
