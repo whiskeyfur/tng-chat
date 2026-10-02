@@ -64,12 +64,22 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     assert.match(await page.textContent('#ties-system-spore'), /Spore drive/);
     assert.match(await page.textContent('#ties-system-amBus'), /AM bus magnetic containment/);
     step('every grid row on a Crossfield has a name (the AM bus magnetic containment and the spore drive too)');
-    // The sidebar menu: it scrolls too when it's taller than the screen.
-    if (await page.$eval('.lcars-sidebar', (e) => e.scrollHeight > e.clientHeight + 20)) {
-      await drag('.lcars-sidebar');
-      await page.waitForFunction(() => document.querySelector('.lcars-sidebar').scrollTop > 10);
-      step('a touch drag scrolled the sidebar');
-    } else step('the sidebar fits (nothing to scroll)');
+    // The sidebar: two columns (ship-wide on the left, this station's screens on the right), each
+    // scrolling by itself when it's taller than the screen.
+    for (const col of ['.lcars-sidebar__col--right', '.lcars-sidebar__col--left']) {
+      if (await page.$eval(col, (e) => e.scrollHeight > e.clientHeight + 20)) {
+        await drag(col);
+        await page.waitForFunction((c) => document.querySelector(c).scrollTop > 10, col);
+        step(`a touch drag scrolled the sidebar's ${col.includes('right') ? 'right (station)' : 'left (ship-wide)'} column`);
+      } else step(`the sidebar's ${col.includes('right') ? 'right' : 'left'} column fits (nothing to scroll)`);
+    }
+    // The left column's panels open beside the station screen (the pane), and close again.
+    await page.click('#reassign-tab');
+    await page.waitForFunction(() => document.body.dataset.pane === 'reassign' && !document.querySelector('[data-screen="reassign"]').hidden);
+    assert.ok(await page.evaluate(() => [...document.querySelectorAll('.lcars-content [data-screen]')].some((s) => !s.hidden && s.getBoundingClientRect().width > 200)), 'the station screen stays beside it');
+    await page.click('#reassign-tab');
+    await page.waitForFunction(() => !document.body.dataset.pane);
+    step('the Station panel slid in beside the station screen, and out again on a second tap');
     // The admin panel: its bottom (Create ship) is reachable by dragging.
     await page.click('#link', { modifiers: ['Shift'] }); // (shift-click the relay's name at the foot)
     await page.waitForSelector('.admin-dialog[open] #admin-create');

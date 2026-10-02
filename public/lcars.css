@@ -15,7 +15,7 @@
   --lcars-text: #ffcc99;
   --lcars-ink: #000;
 
-  --side: 168px;     /* sidebar and elbow width */
+  --side: 300px;     /* sidebar (two columns) and elbow width */
   --bar: 22px;       /* thickness of the horizontal bars */
   --gap: 6px;        /* black gutter between LCARS blocks */
   --fillet: 28px;    /* inner curve of the elbows */
@@ -250,7 +250,7 @@ body { font-family: var(--font); font-size: 18px; letter-spacing: 0.04em; min-he
 /* ---------- narrow screens ---------- */
 
 @media (max-width: 700px) {
-  :root { --side: 92px; --fillet: 18px; }
+  :root { --side: 184px; --fillet: 18px; }
   body { font-size: 16px; }
   .lcars-app { padding: 8px; }
   .lcars-header { height: 72px; }

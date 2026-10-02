@@ -172,7 +172,8 @@
     .place-bar .place-cap--r { border-radius: 0 16px 16px 0; }
     .place-bar .place-label { display: flex; align-items: center; padding: 0 12px; min-height: 32px; background: var(--lcars-orange); color: #000; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; }
     .place-bar .tr-tap { border-radius: 0; margin: 0; }
-    /* A bridge console's top buttons: what it runs. */
+    /* The two-column sidebar and the left pane (see console.css). */
+        /* A bridge console's top buttons: what it runs. */
     .lcars-header { position: relative; }
     .console-bar { position: absolute; top: 44px; left: calc(var(--side) + 40px); z-index: 6; display: flex; gap: 6px; align-items: center; }
     .console-bar[hidden] { display: none; }
@@ -255,12 +256,13 @@
     #link { cursor: default; }
     /* A dark room: everything black but the Station button and comms. */
     /* Header and footer (Home, Back) and every menu button but Comms and Station (#sections is display: contents, so its buttons are dimmed one by one). */
-    body[data-blackout] .lcars-app > :not(.lcars-sidebar):not(.lcars-content),
-    body[data-blackout] .lcars-sidebar > :not(#reassign-tab):not(#comms-button):not(#room-mic):not(#sections):not(#library-tab:not([data-offline])),
+    body[data-blackout] .lcars-app > :not(.lcars-sidebar):not(.lcars-content):not(.lcars-pane),
+    body[data-blackout] .lcars-sidebar__col > :not(#reassign-tab):not(#comms-button):not(#room-mic):not(#sections):not(#library-tab:not([data-offline])),
     body[data-blackout="all"] #sections > *,
     body[data-blackout="engineering"] #sections > :not([data-screen-tab="st-grid"]),
-    body[data-blackout="all"] .lcars-content:not(:has([data-screen="reassign"]:not([hidden]), [data-screen="library"]:not([hidden]))),
-    body[data-blackout="engineering"] .lcars-content:not(:has([data-screen="reassign"]:not([hidden]), [data-screen="st-grid"]:not([hidden]))) { filter: brightness(0.06); pointer-events: none; }
+    body[data-blackout="all"] .lcars-content,
+    body[data-blackout="engineering"] .lcars-content:not(:has([data-screen="st-grid"]:not([hidden]))),
+    body[data-blackout] #left-pane:has([data-screen="log"]:not([hidden])) { filter: brightness(0.06); pointer-events: none; }
     body[data-blackout] .lcars-content { background: #000; }
     .ls-table .ls-tap[data-short] { background: var(--lcars-red); }
     .profile-taps { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; }
@@ -378,22 +380,66 @@
     </header>
 
     <nav class="lcars-sidebar" aria-label="Console">
-      <div id="sections" style="display: contents"></div>
-      <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="status" style="--accent: var(--lcars-gold)" hidden><span>Status</span></button>
-      <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="hail" style="--accent: var(--lcars-red)" hidden><span>Hail</span></button>
-      <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="link" style="--accent: var(--lcars-sky)" hidden><span>Data link</span></button>
-      <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="intercom" style="--accent: var(--lcars-peach)" hidden><span>Intercom</span></button>
-      <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="roster" style="--accent: var(--lcars-blue)" hidden><span>Crew roster</span></button>
-      <div class="lcars-sidebar__fill"></div>
-      <!-- On every console: at the bottom, Library, then Station at the very bottom. -->
-      <!-- Comms: always there (dark rooms too), just above the console log. -->
-      <!-- The room mic: everyone in the room hears you (the bridge is one room). -->
-      <button type="button" class="lcars-nav-button" id="room-mic" aria-pressed="false" style="--accent: var(--lcars-tan)" hidden><span>Room mic</span></button>
-      <button type="button" class="lcars-nav-button comms-button" id="comms-button" style="--accent: var(--lcars-orange)" hidden><span>Comms</span></button>
-      <button type="button" class="lcars-nav-button" data-screen-tab="log" id="log-tab" style="--accent: var(--lcars-lilac)" hidden><span>Console log</span></button>
-      <button type="button" class="lcars-nav-button" data-screen-tab="library" id="library-tab" style="--accent: var(--lcars-violet)" hidden><span>Library</span></button>
-      <button type="button" class="lcars-nav-button" data-screen-tab="reassign" id="reassign-tab" style="--accent: var(--lcars-peach)" hidden><span>Station</span></button>
+      <!-- Left column (a left bracket): ship-wide, the panels that slide in to the left of the
+           station screen. Right column (a right bracket): this station's own screens. -->
+      <div class="lcars-sidebar__col lcars-sidebar__col--left" aria-label="Ship-wide">
+        <!-- The room mic: everyone in the room hears you (the bridge is one room); its panel shows who's live. -->
+        <button type="button" class="lcars-nav-button" id="room-mic" aria-pressed="false" style="--accent: var(--lcars-tan)" hidden><span>Room mic</span></button>
+        <!-- Comms: always there (dark rooms too). -->
+        <button type="button" class="lcars-nav-button comms-button" id="comms-button" style="--accent: var(--lcars-orange)" hidden><span>Comms</span></button>
+        <button type="button" class="lcars-nav-button" data-screen-tab="log" id="log-tab" style="--accent: var(--lcars-lilac)" hidden><span>Console log</span></button>
+        <button type="button" class="lcars-nav-button" data-screen-tab="library" id="library-tab" style="--accent: var(--lcars-violet)" hidden><span>Library</span></button>
+        <div class="lcars-sidebar__fill"></div>
+        <button type="button" class="lcars-nav-button" data-screen-tab="reassign" id="reassign-tab" style="--accent: var(--lcars-peach)" hidden><span>Station</span></button>
+      </div>
+      <div class="lcars-sidebar__col lcars-sidebar__col--right" aria-label="This station">
+        <div id="sections" style="display: contents"></div>
+        <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="status" style="--accent: var(--lcars-gold)" hidden><span>Status</span></button>
+        <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="hail" style="--accent: var(--lcars-red)" hidden><span>Hail</span></button>
+        <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="link" style="--accent: var(--lcars-sky)" hidden><span>Data link</span></button>
+        <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="intercom" style="--accent: var(--lcars-peach)" hidden><span>Intercom</span></button>
+        <button type="button" class="lcars-nav-button ops-tab" data-screen-tab="roster" style="--accent: var(--lcars-blue)" hidden><span>Crew roster</span></button>
+        <div class="lcars-sidebar__fill"></div>
+      </div>
     </nav>
+
+    <!-- The left pane: the left column's panels (Room mic, Comms, Console log, Library, Station)
+         slide in here, beside the station screen. -->
+    <aside class="lcars-pane" id="left-pane" aria-label="Ship-wide panel">
+      <div class="screen" data-screen="room" hidden>
+        <section class="lcars-panel lcars-panel--auto" id="room-panel" style="--accent: var(--lcars-tan)">
+          <h2 class="lcars-panel__title"><span>Room mic</span></h2>
+          <div class="lcars-panel__body" id="room-view"></div>
+        </section>
+      </div>
+        <div class="screen" data-screen="library" id="library-view" hidden></div>
+      <div class="screen" data-screen="reassign" hidden>
+        <section class="lcars-panel lcars-panel--auto" style="--accent: var(--lcars-tan)">
+          <h2 class="lcars-panel__title"><span>Duty assignment</span></h2>
+          <div class="lcars-panel__body">
+            <p class="ops-network" id="assignment"></p>
+            <div class="tr-taps" id="station-taps" role="group" aria-label="stations aboard"></div>
+            <h3 class="profile-head">You</h3>
+            <div class="profile-taps" id="station-profile" data-profile-taps></div>
+            <form class="ops-form" id="reassign-form" hidden>
+              <input class="ops-input" id="reassign-key" type="password" placeholder="Authorization code" autocomplete="off" aria-label="operator authorization code">
+              <button class="lcars-button lcars-button--pill" id="reassign-ops">Take the ops station</button>
+            </form>
+            <div id="dock-stations"></div>
+            <p class="lcars-note" id="reassign-error"></p>
+            <p class="ops-hint">Tap a station to move there, Operations included; calls in progress carry on. Docked with a starbase or another ship, you can also walk across to a station aboard it (that ends your call). Otherwise, ask the transporter room.</p>
+          </div>
+        </section>
+      </div>
+
+      <div class="screen" data-screen="log" hidden>
+        <section class="lcars-panel" id="log-panel" style="--accent: var(--lcars-lilac)">
+          <h2 class="lcars-panel__title"><span>Console log</span></h2>
+          <div class="lcars-panel__body"><ol class="lcars-log" id="log"></ol></div>
+        </section>
+      </div>
+
+    </aside>
 
     <main class="lcars-content" tabindex="-1">
       <div class="screen" id="register-screen" data-screen="register">
@@ -574,34 +620,8 @@
         </div>
 
         </div>
-        <div class="screen" data-screen="library" id="library-view" hidden></div>
       </div>
 
-      <div class="screen" data-screen="reassign" hidden>
-        <section class="lcars-panel lcars-panel--auto" style="--accent: var(--lcars-tan)">
-          <h2 class="lcars-panel__title"><span>Duty assignment</span></h2>
-          <div class="lcars-panel__body">
-            <p class="ops-network" id="assignment"></p>
-            <div class="tr-taps" id="station-taps" role="group" aria-label="stations aboard"></div>
-            <h3 class="profile-head">You</h3>
-            <div class="profile-taps" id="station-profile" data-profile-taps></div>
-            <form class="ops-form" id="reassign-form" hidden>
-              <input class="ops-input" id="reassign-key" type="password" placeholder="Authorization code" autocomplete="off" aria-label="operator authorization code">
-              <button class="lcars-button lcars-button--pill" id="reassign-ops">Take the ops station</button>
-            </form>
-            <div id="dock-stations"></div>
-            <p class="lcars-note" id="reassign-error"></p>
-            <p class="ops-hint">Tap a station to move there, Operations included; calls in progress carry on. Docked with a starbase or another ship, you can also walk across to a station aboard it (that ends your call). Otherwise, ask the transporter room.</p>
-          </div>
-        </section>
-      </div>
-
-      <div class="screen" data-screen="log" hidden>
-        <section class="lcars-panel" id="log-panel" style="--accent: var(--lcars-lilac)">
-          <h2 class="lcars-panel__title"><span>Console log</span></h2>
-          <div class="lcars-panel__body"><ol class="lcars-log" id="log"></ol></div>
-        </section>
-      </div>
     </main>
 
     <footer class="lcars-footer">

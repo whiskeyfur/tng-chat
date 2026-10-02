@@ -1122,6 +1122,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await picard.waitForSelector('#st-dept li[data-dept="Medical"][data-ready="ready"]', { state: 'attached' });
     // Laid out one row per department (label, state, Check): nothing overlaps or runs off the side, even narrow.
     const vp = picard.viewportSize();
+    await picard.evaluate(() => showScreen('st-dept')); // (on its screen: a left panel open would take a narrow screen)
     await picard.setViewportSize({ width: 480, height: 800 });
     const rows = await picard.$$eval('#st-dept li[data-dept]', (lis) => lis.map((li) => [...li.children].map((c) => { const r = c.getBoundingClientRect(); return [r.left, r.right, c.scrollWidth <= c.clientWidth + 1 || c.classList.contains('st-dept-count')]; })));
     for (const r of rows) for (let i = 1; i < r.length; i++) assert.ok(r[i][0] >= r[i - 1][1] - 1, `department readiness cells overlap: ${JSON.stringify(r)}`);

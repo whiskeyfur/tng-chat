@@ -44,7 +44,9 @@
     dialog.id = 'comms';
     dialog.setAttribute('aria-label', 'Comms');
     dialog.innerHTML = MODAL;
-    document.body.append(dialog);
+    // (In the left pane, beside the station screen, where the page has one; else a modal.)
+    const paneHost = document.getElementById('left-pane');
+    if (paneHost) { dialog.classList.add('lcars-modal--pane'); paneHost.append(dialog); } else document.body.append(dialog);
     const $ = (id) => dialog.querySelector(`#${id}`);
     if (opts.extras) $('comms-extras').append(opts.extras);
 
@@ -79,15 +81,18 @@
     const radio = window.createRadio ? createRadio($('radio'), { voice, log: opts.log, send: opts.send, canShipRadio: opts.canShipRadio }) : null;
 
     function open() {
-      if (!dialog.open) dialog.showModal();
+      if (paneHost) { window.openPane?.('comms'); if (!dialog.open) dialog.show(); }
+      else if (!dialog.open) dialog.showModal();
       unread = 0;
       renderButton();
     }
     function close() {
       if (dialog.open) dialog.close();
+      if (paneHost && document.body.dataset.pane === 'comms') window.closePane?.();
     }
     $('comms-close').onclick = close;
-    if (opts.button) opts.button.onclick = (e) => { e.preventDefault(); open(); };
+    // (The Comms button again, with Comms open in the pane: closes it.)
+    if (opts.button) opts.button.onclick = (e) => { e.preventDefault(); if (paneHost && dialog.open && document.body.dataset.pane === 'comms') close(); else open(); };
 
     function renderButton() {
       if (!opts.button) return;

@@ -56,7 +56,27 @@ function renderRoomMic() {
   b.querySelector('span').textContent = room.mic ? 'Room mic: live' : 'Room mic';
   b.style.setProperty('--accent', room.mic ? 'var(--lcars-red)' : 'var(--lcars-tan)');
 }
-$('room-mic').onclick = () => { room.setMic(!room.mic); renderRoomMic(); log(room.mic ? 'room mic live: everyone in the room hears you' : 'room mic off'); };
+$('room-mic').onclick = () => {
+  room.setMic(!room.mic); renderRoomMic(); renderRoomPanel();
+  log(room.mic ? 'room mic live: everyone in the room hears you' : 'room mic off');
+  if (document.body.dataset.pane !== 'room') window.openPane('room');
+};
+// The room mic's panel: your mic, who you hear in the room, who hears you.
+function renderRoomPanel() {
+  const box = $('room-view');
+  if (!box || document.body.dataset.pane !== 'room') return;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const hearing = room.listening, sending = room.speaking.length;
+  const sig = JSON.stringify([room.mic, hearing.map((l) => [l.from, l.connected]), sending]);
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  box.replaceChildren(
+    el('p', { className: 'st-state', id: 'room-state', textContent: room.mic ? `Your mic is live: ${sending} in the room hear${sending === 1 ? 's' : ''} you` : 'Your mic is off: tap Room mic to talk' }),
+    el('h3', { className: 'ops-subhead', textContent: 'Live in the room' }),
+    el('ul', { className: 'st-list', id: 'room-live' }, ...(hearing.length ? hearing.map((l) => el('li', {}, l.from, el('span', { textContent: l.connected ? 'live' : 'connecting' }))) : [el('li', { className: 'empty', textContent: 'Nobody else has their mic on' })])));
+}
+setInterval(renderRoomPanel, 1000);
+window.addEventListener('screenchange', renderRoomPanel);
 const library = createLibrary($('library-view'), { token: () => token, base: relay.http, log, canDelete: (s) => s.own && (!!ops || me?.station === 'Communications') });
 
 function setLink(status, text) {

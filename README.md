@@ -40,7 +40,7 @@ Browsers only allow the microphone on `https://` or `localhost`. To try it acros
 
 ## Crew consoles
 
-Each crew member gets an LCARS console for their station, styled with `public/lcars.css` (copied from `../lcars-base`). The displays suit the post, with simulated telemetry:
+Each crew member gets an LCARS console for their station, styled with `public/lcars.css` (copied from `../lcars-base`). The sidebar is two columns: the **left** (a left bracket: ship-wide) has **Room mic**, **Comms**, **Console log**, **Library** and **Station**, whose panels slide in beside the station screen (the frame makes room; on a narrow screen the panel takes it all) and slide out with the same tap again or any station screen; the **right** (a right bracket) has this station's own screens. Each column scrolls by itself. The room mic's panel shows your mic and who's live in the room. The displays suit the post, with simulated telemetry:
 
 | Station | Displays |
 | --- | --- |

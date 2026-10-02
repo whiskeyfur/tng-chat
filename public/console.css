@@ -232,3 +232,34 @@ body[data-alert='black'] .lcars-elbow, body[data-alert='black'] .lcars-bar__seg,
 .nav-map canvas, .st-canvas-wrap canvas { touch-action: none; }
 /* (Sidebar buttons keep their height: the sidebar scrolls rather than squeezing them.) */
 .lcars-sidebar .lcars-nav-button { flex-shrink: 0; min-height: 52px; }
+
+/* ---------- The two-column sidebar and the left pane ---------- */
+/* Left column (a left bracket): ship-wide panels that slide in beside the station screen.
+   Right column (a right bracket): this station's own screens. Each column scrolls by itself. */
+.lcars-sidebar { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); overflow: hidden; }
+.lcars-sidebar__col { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+.lcars-sidebar__col .lcars-nav-button { flex-shrink: 0; min-height: 52px; }
+.lcars-sidebar__col--left .lcars-nav-button { justify-content: flex-start; text-align: left; }
+/* The left pane: closed, nothing; open, it takes its share beside the station screen (all of it on a narrow screen). */
+.lcars-app { grid-template-columns: var(--side) 0 minmax(0, 1fr); }
+/* (The slide only while the pane opens or closes: a resize doesn't animate.) */
+body.pane-moving .lcars-app { transition: grid-template-columns 0.25s ease; }
+.lcars-header, .lcars-footer { grid-column: 1 / -1; }
+.lcars-pane { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 18px; padding-top: 4px; border-right: 0 solid var(--lcars-tan); }
+body[data-pane] .lcars-app { grid-template-columns: var(--side) min(560px, 44vw) minmax(0, 1fr); }
+body[data-pane] .lcars-pane { overflow-y: auto; border-right-width: 8px; border-radius: 0 24px 24px 0; padding-right: 12px; }
+.lcars-pane .screen { flex: 1 1 auto; }
+.lcars-modal.lcars-modal--pane { position: static; width: auto; max-width: none; max-height: none; margin: 0; flex: 1 1 auto; min-height: 0; }
+.lcars-modal.lcars-modal--pane:not([open]) { display: none; }
+.lcars-modal--pane .lcars-modal__frame { max-height: 100%; }
+@media (max-width: 900px) {
+  body[data-pane] .lcars-app { grid-template-columns: var(--side) minmax(0, 1fr) 0; }
+  body[data-pane] .lcars-content { visibility: hidden; }
+}
+/* (A phone-narrow screen: the two columns stack in one narrow sidebar, ship-wide first.) */
+@media (max-width: 600px) {
+  :root { --side: 92px; }
+  .lcars-sidebar { display: flex; flex-direction: column; overflow-y: auto; }
+  .lcars-sidebar__col { overflow: visible; flex: 0 0 auto; }
+  .lcars-sidebar__col .lcars-sidebar__fill { display: none; }
+}

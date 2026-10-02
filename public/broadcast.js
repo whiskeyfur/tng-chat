@@ -17,7 +17,7 @@
     // An open modal (Comms) makes the rest of the page inert, so the bar moves
     // into it while it's open, to stay usable (End broadcast, Mute).
     const place = () => {
-      const host = document.querySelector('dialog[open]') || document.body;
+      const host = [...document.querySelectorAll('dialog[open]')].find((d) => d.matches(':modal')) || document.body;
       // (In a dialog it goes first, at its top, in the flow: it never covers the dialog's own controls.)
       if (bar.parentElement !== host) { if (host === document.body) host.append(bar); else host.prepend(bar); }
     };
