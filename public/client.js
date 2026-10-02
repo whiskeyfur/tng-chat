@@ -40,6 +40,15 @@ const comms = createComms({
   onChange: () => ops?.render(),
 });
 const bc = createBroadcast({ send, me: () => me, log });
+// The room you're in (the bridge, or your station): proximity chat, by seat on the bridge.
+const room = createRoomVoice({ send, log, placeOf: (id) => { const u = comms.users.find((x) => x.id === id); return u ? u.console || u.station : null; }, myPlace: () => myPlace() });
+function renderRoomMic() {
+  const b = $('room-mic');
+  b.setAttribute('aria-pressed', String(room.mic));
+  b.querySelector('span').textContent = room.mic ? 'Room mic: live' : 'Room mic';
+  b.style.setProperty('--accent', room.mic ? 'var(--lcars-red)' : 'var(--lcars-tan)');
+}
+$('room-mic').onclick = () => { room.setMic(!room.mic); renderRoomMic(); log(room.mic ? 'room mic live: everyone in the room hears you' : 'room mic off'); };
 const library = createLibrary($('library-view'), { token: () => token, base: relay.http, log, canDelete: (s) => s.own && (!!ops || me?.station === 'Communications') });
 
 function setLink(status, text) {
@@ -334,6 +343,8 @@ function signedOut(reason) {
   for (const t of document.querySelectorAll('.ops-tab')) t.hidden = true;
   $('home').hidden = true;
   $('comms-button').hidden = true;
+  room.reset(); renderRoomMic();
+  $('room-mic').hidden = true;
   $('log-tab').hidden = true;
   $('reassign-tab').hidden = true;
   $('library-tab').hidden = true;
@@ -1868,6 +1879,7 @@ async function onMessage(msg) {
   if (msg.type === 'users') queueMicrotask(() => ops?.render()); // transfer targets
   if (ops?.handle(msg)) return;
   if (await bc.handle(msg)) return;
+  if (await room.handle(msg)) return;
   if (msg.type === 'notice' && /^(Helm|Sensors|Science|Course plotted|No ship's computer is flying)/.test(msg.text)) navPanel?.status(msg.text);
   // Engineering's event log (on the master systems display), coloured by what happened.
   if (msg.type === 'notice' && /^Engineering/.test(msg.text)) {
@@ -1907,6 +1919,7 @@ async function onMessage(msg) {
       document.title = `LCARS: ${me.console ? `${me.console} · ` : ''}${me.station} · ${me.ship}`;
       $('home').hidden = false;
       $('comms-button').hidden = false;
+      $('room-mic').hidden = false;
       $('log-tab').hidden = false;
       $('reassign-tab').hidden = false;
       $('library-tab').hidden = false;
@@ -1925,6 +1938,7 @@ async function onMessage(msg) {
       renderConsoleBar();
       $('home').hidden = false;
       $('comms-button').hidden = false;
+      $('room-mic').hidden = false;
       $('log-tab').hidden = false;
       $('library-tab').hidden = false;
       log(`${me.name} took the ops station aboard the ${me.ship}`);

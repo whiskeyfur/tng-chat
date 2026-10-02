@@ -1867,6 +1867,27 @@ const audioBytes = (page) => page.evaluate(async () => {
       step('the bridge consoles: Bridge 1 ran Science, its top buttons switched it to Engineering (saru stayed at Bridge 1 and ran its life support); untied from Bus A it went dark; Bridge 4 ran Security and held saru in a force field on the bridge until it dropped it');
     }
 
+    // The room mic: troi at Bridge 1 speaks; crusher at Helm (on the bridge, ahead and to her right)
+    // hears her on the left and fainter; ogawa in sickbay (Medical) doesn't; crusher walking off the
+    // bridge to Engineering stops hearing her.
+    {
+      const troi = await openAs(browser, 'troi', 'troi', 'Enterprise', 'Bridge 1');
+      const crusher = await openAs(browser, 'crusher', 'crusher', 'Enterprise', 'Helm');
+      const ogawa = await openAs(browser, 'ogawa', 'ogawa', 'Enterprise', 'Medical');
+      await troi.click('#room-mic');
+      await troi.waitForSelector('#room-mic[aria-pressed="true"]:has-text("live")');
+      await crusher.waitForFunction(() => window.__room.listening.some((l) => l.from === 'troi' && l.connected && l.pan < -0.3 && l.gain < 1), null, { timeout: 20000 });
+      await troi.waitForFunction(() => window.__room.speaking.length >= 1);
+      await new Promise((r) => setTimeout(r, 1000));
+      assert.ok(!(await ogawa.evaluate(() => window.__room.listening.some((l) => l.from === 'troi'))), 'sickbay is another room');
+      await crusher.evaluate(() => window.__send({ type: 'change-station', station: 'Engineering' }));
+      await crusher.waitForFunction(() => !window.__room.listening.some((l) => l.from === 'troi'), null, { timeout: 15000 });
+      await troi.click('#room-mic');
+      await troi.waitForSelector('#room-mic[aria-pressed="false"]');
+      for (const page of [troi, crusher, ogawa]) await page.close();
+      step('the room mic: troi at Bridge 1 spoke and crusher at Helm heard her, panned left and fainter (seats on the bridge); ogawa in sickbay did not; crusher walking off the bridge stopped hearing her');
+    }
+
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;
     // the pods stay contained (their own ties). The deuterium bus: nothing moves without its transfer power.
     laforge.send({ type: 'grid', ties: { 'system:amBus': [] } });

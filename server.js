@@ -162,6 +162,7 @@ const sameNetwork = (a, b) => network(a).has(b);
 // Crew see everyone aboard ships on their data network (just their own ship
 // when unlinked). `ops` says whether their own ship has ops on duty.
 function broadcastCrew(key) {
+  syncRooms();
   scheduleTraffic();
   scheduleNav();
   const net = network(key);
@@ -564,6 +565,7 @@ function dropHails(test, reason) {
 function signOut(ws) {
   users.delete(ws.id);
   leaveBroadcasts(ws);
+  leaveRoom(ws);
   dropHails((h) => h.caller === ws.id, `${ws.name} left the comm net`);
   for (const u of users.values()) send(u, { type: 'gone', id: ws.id });
   broadcastCrew(ws.shipKey);
@@ -4353,6 +4355,7 @@ async function libraryRequest(req, res, urlPath) {
 function joinOps(ws) {
   ws.operator = true;
   ws.station = OPS_STATION; ws.console = null;
+  syncRooms();
   operators.add(ws);
   send(ws, { type: 'operator-ok', ...info(ws), token: ws.token });
   broadcastAllOps();          // other ships now see this one
@@ -4490,6 +4493,41 @@ function leaveBroadcasts(u, oldId = u.id) {
     if (b.speaker === oldId) endBroadcast(b, `${u.name} left`);
     else b.audience.delete(oldId);
   }
+}
+
+// --- the room you're in: proximity chat ----------------------------------------------
+
+// The bridge is one room (its stations and consoles); every other place is its
+// own. Someone with their room mic on sends it to everyone else in the room
+// over one-way connections, as for all hands; the relay keeps who hears whom
+// as people come and go, and relays the setup.
+const roomOf = (u) => (BRIDGE.includes(placeOf(u)) ? 'Bridge' : placeOf(u));
+const inRoom = (a, b) => a !== b && a.shipKey === b.shipKey && roomOf(a) === roomOf(b);
+function syncRooms() {
+  for (const sp of users.values()) {
+    const aud = (sp.roomAudience ||= new Map()); // listener id -> listener
+    for (const [id, u] of aud) {
+      if (sp.roomMic && users.get(id) === u && inRoom(sp, u)) continue;
+      aud.delete(id);
+      send(u, { type: 'room-drop', from: sp.id });
+      send(sp, { type: 'room-drop', listener: id });
+    }
+    if (!sp.roomMic) continue;
+    for (const u of users.values()) {
+      if (!inRoom(sp, u) || aud.has(u.id)) continue;
+      aud.set(u.id, u);
+      // Listener first, so it's ready before the speaker's offer arrives.
+      send(u, { type: 'room-listen', from: info(sp) });
+      send(sp, { type: 'room-add', listener: info(u) });
+    }
+  }
+}
+// Someone leaves the comm net (signs out, beams away): nobody hears them, nor they anyone, until they're back.
+function leaveRoom(ws) {
+  for (const [, u] of ws.roomAudience || []) send(u, { type: 'room-drop', from: ws.id });
+  ws.roomAudience = new Map();
+  for (const sp of users.values()) if (sp.roomAudience?.get(ws.id) === ws) { sp.roomAudience.delete(ws.id); send(sp, { type: 'room-drop', listener: ws.id }); }
+  send(ws, { type: 'room-reset' });
 }
 
 // --- ship's radio ----------------------------------------------------------------
@@ -4653,6 +4691,20 @@ wss.on('connection', (ws) => {
       broadcastCrew(ws.shipKey);
       broadcastTraffic();
       opLog(ws.shipKey, `${ws.name}: ${ws.console} set to ${msg.mode}`);
+      return;
+    }
+
+    // The room mic, and the setup between a speaker and each listener in the room.
+    if (msg.type === 'room-mic' && ws.id) {
+      ws.roomMic = !!msg.on;
+      syncRooms();
+      return;
+    }
+    if (msg.type === 'rsignal' && ws.id) {
+      const to = typeof msg.to === 'string' && users.get(msg.to);
+      if (!to) return;
+      const ok = msg.dir === 'listener' ? ws.roomAudience?.get(to.id) === to : to.roomAudience?.get(ws.id) === ws;
+      if (ok) send(to, { type: 'rsignal', from: ws.id, dir: msg.dir === 'listener' ? 'listener' : 'speaker', data: msg.data });
       return;
     }
 

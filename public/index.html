@@ -239,7 +239,7 @@
     /* A dark room: everything black but the Station button and comms. */
     /* Header and footer (Home, Back) and every menu button but Comms and Station (#sections is display: contents, so its buttons are dimmed one by one). */
     body[data-blackout] .lcars-app > :not(.lcars-sidebar):not(.lcars-content),
-    body[data-blackout] .lcars-sidebar > :not(#reassign-tab):not(#comms-button):not(#sections):not(#library-tab:not([data-offline])),
+    body[data-blackout] .lcars-sidebar > :not(#reassign-tab):not(#comms-button):not(#room-mic):not(#sections):not(#library-tab:not([data-offline])),
     body[data-blackout="all"] #sections > *,
     body[data-blackout="engineering"] #sections > :not([data-screen-tab="st-grid"]),
     body[data-blackout="all"] .lcars-content:not(:has([data-screen="reassign"]:not([hidden]), [data-screen="library"]:not([hidden]))),
@@ -370,6 +370,8 @@
       <div class="lcars-sidebar__fill"></div>
       <!-- On every console: at the bottom, Library, then Station at the very bottom. -->
       <!-- Comms: always there (dark rooms too), just above the console log. -->
+      <!-- The room mic: everyone in the room hears you (the bridge is one room). -->
+      <button type="button" class="lcars-nav-button" id="room-mic" aria-pressed="false" style="--accent: var(--lcars-tan)" hidden><span>Room mic</span></button>
       <button type="button" class="lcars-nav-button comms-button" id="comms-button" style="--accent: var(--lcars-orange)" hidden><span>Comms</span></button>
       <button type="button" class="lcars-nav-button" data-screen-tab="log" id="log-tab" style="--accent: var(--lcars-lilac)" hidden><span>Console log</span></button>
       <button type="button" class="lcars-nav-button" data-screen-tab="library" id="library-tab" style="--accent: var(--lcars-violet)" hidden><span>Library</span></button>
@@ -606,6 +608,7 @@
   <script src="library.js"></script>
   <script src="voice.js"></script>
   <script src="broadcast.js"></script>
+  <script src="room.js"></script>
   <script src="radio.js"></script>
   <script src="comms.js"></script>
   <script src="stations.js"></script>
