@@ -1291,6 +1291,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await geordi.locator('#conn-Starbase-12-power input[data-node="EPS"]').count(), 0, 'the Power row ties to Bus B only');
     assert.equal(await geordi.locator('#conn-Starbase-12-eps input[data-node="EPS"]').count(), 1, 'the EPS row ties to the EPS');
     assert.equal(await geordi.locator('#conn-Starbase-12-eps input[data-node="B"]').count(), 0, 'the EPS row ties to the EPS only');
+    // The starbase connection's ties: Deu. on the Deuterium row, AM on the Antimatter row, the ODN on the starbase's own row.
+    for (const [row, tie] of [['conn-Starbase-12-deu', 'deu'], ['conn-Starbase-12-am', 'am'], ['conn-Starbase-12', 'odn']]) assert.equal(await geordi.locator(`#${row} #conn-tie-${tie}`).count(), 1, `${tie} tie on ${row}`);
     // The master systems display: the ship profile, the power budget, a tile per system (tap one to open it).
     await screen(geordi, 'st-msd');
     await geordi.waitForSelector('.msd-tile[data-system="warp"] .msd-pill[data-state="ok"]:has-text("Running")');

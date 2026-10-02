@@ -1169,16 +1169,17 @@ function renderCombat() {
       const eps = ties(`${src}Eps`, 'EPS', `${src}Eps`, { level: 2, controls: io('eps', x.eps), note: `${x.eps.imp && x.eps.exp ? 'holding the manifold full · ' : ''}${moving(x.epsIn)}` });
       eps.id = `conn-${slug}-eps`;
       const parent = parentRow(`conn-${slug}`, x.kind === 'station' ? `${x.name} (${x.port} dock)` : `The ${x.name} (${x.port} dock)`, 1, x.kind === 'station' ? `a starbase: it always has fuel to give and room to take${x.hardLink ? ' · hard link: docking port' : ''}` : '');
-      // The starbase connection ties to the Deu. and AM buses (its Import / Export need them) and the ODN (a hard data link).
-      if (x.kind === 'station' && x.ties) for (const [res, col] of [['deu', 'Deu'], ['am', 'AM'], ['odn', 'ODN']]) {
+      // The starbase connection's ties: the ODN (a hard data link) on its own row; the Deu. and
+      // AM buses (its Import / Export need them) on the Deuterium and Antimatter rows.
+      const deu = fuelRow('deu', 'Deuterium', grid.deuterium, grid.fuelCaps.deuterium), am = fuelRow('am', 'Antimatter', grid.antimatter, grid.fuelCaps.antimatter);
+      if (x.kind === 'station' && x.ties) for (const [res, col, row] of [['deu', 'Deu', deu], ['am', 'AM', am], ['odn', 'ODN', parent]]) {
         const box = el('input', { type: 'checkbox', checked: !!x.ties[res], ariaLabel: `${x.name} connection: ${NODE_NAMES[col]}` });
         box.id = `conn-tie-${res}`;
         box.onchange = () => send({ type: 'grid', connTie: { res, on: box.checked } });
-        const cell = colAt(parent, col);
+        const cell = colAt(row, col);
         cell.className = ''; cell.replaceChildren(el('label', { className: 'grid-tie' }, box));
       }
-      return [parent,
-        fuelRow('deu', 'Deuterium', grid.deuterium, grid.fuelCaps.deuterium), fuelRow('am', 'Antimatter', grid.antimatter, grid.fuelCaps.antimatter), power, eps];
+      return [parent, deu, am, power, eps];
     });
     // The stores, one per column under the headings: each bus's battery and
     // the EPS manifold's pressure, how full, and charging (−) or covering a shortfall (+).
