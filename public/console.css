@@ -215,3 +215,20 @@ body[data-alert='black'] .lcars-elbow, body[data-alert='black'] .lcars-bar__seg,
 .nav-scan-power li { display: flex; justify-content: space-between; gap: 1rem; }
 .nav-scan-sub { margin: 0.5rem 0 0; color: var(--lcars-orange, #f90); font-size: 0.95em; }
 .bcast--black { --accent: #6a3fa0; animation: none; }
+
+/* ---------- Touch (tablets): anything that can overflow scrolls with a drag ---------- */
+/* (The frame is the window: the sidebar, each screen and panel, the modals and the
+   logs scroll inside themselves; a nested scroller keeps its scroll to itself.
+   A drag that starts on a tap scrolls rather than taps: taps act on click.) */
+.lcars-sidebar, .screen, .screen .lcars-panel__body, .lcars-modal__frame, .lcars-modal.admin-dialog, .admin-dialog .admin-log,
+.lcars-log, .v-chatlog, .comms-msgs, .msd-log, .nav-side, .ls-table, #ops-view .screen, dialog {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+}
+.lcars-sidebar { overflow-y: auto; }
+.screen { overflow-y: auto; }
+/* (What drags or taps for itself keeps the gesture: the maps.) */
+.nav-map canvas, .st-canvas-wrap canvas { touch-action: none; }
+/* (Sidebar buttons keep their height: the sidebar scrolls rather than squeezing them.) */
+.lcars-sidebar .lcars-nav-button { flex-shrink: 0; min-height: 52px; }

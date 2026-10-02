@@ -168,111 +168,14 @@
       }
     }
 
-    // The data network map: every ship around a circle (ours at the top),
-    // solid lines for data links, dashed for pending requests. Clicking a
-    // ship picks it in the "request a data link" form.
+    // The data network map (netmap.js: d3-force), with the details of a tapped vessel or link.
+    let netMap = null;
     function renderMap() {
-      const svg = $('net-map');
-      if (!svg) return;
-      const NS = 'http://www.w3.org/2000/svg';
-      const node = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; };
-      const color = (n) => `var(--lcars-${n})`;
-      const own = ship.toLowerCase();
-      const onNet = new Set([own, ...network.map((n) => n.toLowerCase())]);
-      const list = [...graph.ships].sort((a, b) => (b.name.toLowerCase() === own) - (a.name.toLowerCase() === own) || a.name.localeCompare(b.name));
-      const W = 600, H = 400, cx = W / 2, cy = H / 2, NH = 52;
-      const widthOf = (sh) => Math.max(120, sh.name.length * 11 + 36);
-      // A force-directed layout: our own ship pinned at the centre; every vessel
-      // pushes the others away (so labels never overlap), open data links pull
-      // their two ends together; unlinked vessels drift outward but stay inside.
-      // Positions are kept between refreshes, so the picture settles and stays put.
-      const keys = list.map((sh) => sh.name.toLowerCase());
-      for (const k of [...layout.keys()]) if (!keys.includes(k)) layout.delete(k);
-      list.forEach((sh, i) => {
-        const k = sh.name.toLowerCase();
-        if (!layout.has(k)) { const a = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(1, list.length); layout.set(k, { x: cx + 160 * Math.cos(a), y: cy + 120 * Math.sin(a) }); }
-        layout.get(k).w = widthOf(sh);
-      });
-      if (layout.has(own)) Object.assign(layout.get(own), { x: cx, y: cy });
-      const linked = graph.links.map(([a, b]) => [a.toLowerCase(), b.toLowerCase()]).filter(([a, b]) => layout.has(a) && layout.has(b));
-      const nodes = [...layout.entries()];
-      for (let it = 0, n = settled ? 40 : 300; it < n; it++) {
-        const f = new Map(nodes.map(([k]) => [k, { x: 0, y: 0 }]));
-        for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
-          const [ka, p] = nodes[i], [kb, q] = nodes[j];
-          let dx = p.x - q.x, dy = p.y - q.y;
-          if (!dx && !dy) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; }
-          const d = Math.hypot(dx, dy), want = (p.w + q.w) / 2 + 30, rep = (want * want) / Math.max(d, 1) * 0.05;
-          f.get(ka).x += (dx / d) * rep; f.get(ka).y += (dy / d) * rep * 1.6;
-          f.get(kb).x -= (dx / d) * rep; f.get(kb).y -= (dy / d) * rep * 1.6;
-        }
-        for (const [a, b] of linked) {
-          const p = layout.get(a), q = layout.get(b), dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1, pull = (d - 170) * 0.05;
-          f.get(a).x += (dx / d) * pull; f.get(a).y += (dy / d) * pull; f.get(b).x -= (dx / d) * pull; f.get(b).y -= (dy / d) * pull;
-        }
-        for (const [k, p] of nodes) {
-          if (k === own) continue;
-          const v = f.get(k), step = Math.min(12, Math.hypot(v.x, v.y)), m = Math.hypot(v.x, v.y) || 1;
-          p.x = Math.max(p.w / 2 + 4, Math.min(W - p.w / 2 - 4, p.x + (v.x / m) * step));
-          p.y = Math.max(NH / 2 + 4, Math.min(H - NH / 2 - 4, p.y + (v.y / m) * step));
-        }
-      }
-      // (Then any labels still touching, pushed apart: no overlaps.)
-      for (let pass = 0; pass < 60; pass++) {
-        let moved = false;
-        for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
-          const [ka, p] = nodes[i], [kb, q] = nodes[j], ox = (p.w + q.w) / 2 + 6 - Math.abs(p.x - q.x), oy = NH + 6 - Math.abs(p.y - q.y);
-          if (ox <= 0 || oy <= 0) continue;
-          const d = (oy / 2 + 1) * (p.y <= q.y ? -1 : 1);
-          if (ka !== own) p.y = Math.max(NH / 2, Math.min(H - NH / 2, p.y + d));
-          if (kb !== own) q.y = Math.max(NH / 2, Math.min(H - NH / 2, q.y - d));
-          moved = true;
-        }
-        if (!moved) break;
-      }
-      settled = true;
-      const pos = layout;
-      svg.replaceChildren();
-      // Links: subspace in sky blue; a docking port's hard link thicker, in orange; requests dashed gold.
-      const hardSet = new Set((graph.hard || []).map(([a, b]) => [a, b].map((x) => x.toLowerCase()).sort().join('|')));
-      const edge = ([a, b], pending) => {
-        const p = pos.get(a.toLowerCase()), q = pos.get(b.toLowerCase());
-        if (!p || !q) return;
-        const hard = !pending && hardSet.has([a, b].map((x) => x.toLowerCase()).sort().join('|'));
-        const line = node('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: color(pending ? 'gold' : hard ? 'orange' : 'sky'), 'stroke-width': pending ? 3 : hard ? 9 : 5,
-          'stroke-dasharray': pending ? '10 8' : 'none', 'stroke-linecap': 'round', opacity: pending ? 0.8 : 1 });
-        if (hard) line.setAttribute('data-hard', '');
-        svg.append(line);
-      };
-      graph.links.forEach((l) => edge(l, false));
-      graph.requests.forEach((l) => edge(l, true));
-      for (const sh of list) {
-        const key = sh.name.toLowerCase();
-        const { x, y } = pos.get(key);
-        // (Each node keeps the label width the layout spaced it by.)
-        const fill = key === own ? 'gold' : !sh.ops ? 'tan' : onNet.has(key) ? 'sky' : 'lilac';
-        const label = sh.name.toUpperCase();
-        const w = Math.max(120, label.length * 11 + 36), h = 52;
-        const g = node('g', { class: 'net-node', transform: `translate(${x - w / 2} ${y - h / 2})`, tabindex: 0, role: 'button', 'aria-label': `The ${sh.name}` });
-        g.append(
-          node('rect', { width: w, height: h, rx: h / 2, fill: color(fill), opacity: sh.ops ? 1 : 0.6 }),
-          node('text', { x: w / 2, y: 22, 'text-anchor': 'middle', 'font-size': 18, fill: '#000' }, label),
-          node('text', { x: w / 2, y: 40, 'text-anchor': 'middle', 'font-size': 12, fill: '#000' },
-            `${sh.crew} aboard${sh.shields ? ' · shields up' : ''}${sh.ops ? '' : ' · no ops'}`));
-        if (sh.shields) g.append(node('rect', { x: -5, y: -5, width: w + 10, height: h + 10, rx: h / 2 + 5, fill: 'none', stroke: color('red'), 'stroke-width': 2 }));
-        if (key !== own) {
-          const pick = () => document.querySelector(`#link-taps button[data-ship="${CSS.escape(sh.name)}"]`)?.focus();
-          g.addEventListener('click', pick);
-          g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
-        }
-        svg.append(g);
-      }
-      if (!list.length) svg.append(node('text', { x: cx, y: cy, 'text-anchor': 'middle', fill: color('tan'), 'font-size': 18 }, 'No ships'));
+      if (!$('net-map') || !window.createNetMap) return;
+      netMap ||= createNetMap({ svg: $('net-map'), details: $('net-details'), send, own: () => ship });
+      netMap.update({ graph, links, hardLinks, linkShips, linkIncoming, linkOutgoing, network });
     }
 
-    // The map's layout, kept between refreshes (vessel key -> { x, y, w }).
-    const layout = new Map();
-    let settled = false;
     function render() {
       renderRemoteBlock();
       renderMap();
@@ -455,6 +358,7 @@
       get network() { return network; },
       get linkIncoming() { return linkIncoming; },
       get graph() { return graph; },
+      get netMap() { return netMap; },
     };
   };
 })();

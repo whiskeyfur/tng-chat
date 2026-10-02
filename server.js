@@ -85,6 +85,16 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  // d3 for the network map, served from node_modules (no CDN: it works offline and on the LAN).
+  const VENDOR = { 'd3-dispatch.js': 'd3-dispatch', 'd3-quadtree.js': 'd3-quadtree', 'd3-timer.js': 'd3-timer', 'd3-force.js': 'd3-force', 'd3-selection.js': 'd3-selection', 'd3-drag.js': 'd3-drag' };
+  if (urlPath.startsWith('/vendor/') && VENDOR[urlPath.slice(8)]) {
+    const mod = VENDOR[urlPath.slice(8)];
+    fs.readFile(path.join(__dirname, 'node_modules', mod, 'dist', `${mod}.min.js`), (err, data) => {
+      if (err) return res.writeHead(404).end('Not found');
+      res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-cache' }).end(data);
+    });
+    return;
+  }
   const file = path.normalize(path.join(PUBLIC_DIR, urlPath === '/' ? 'index.html' : urlPath));
   if (!file.startsWith(PUBLIC_DIR)) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, data) => {
@@ -104,6 +114,8 @@ const sockets = new Set();   // every connection, for the ship list
 const shields = new Set();   // ship keys with shields up
 const hails = new Map();     // hail id -> { id, fromShip, toShip, caller (user id) }
 const links = new Set();     // data links: "shipKeyA|shipKeyB", sorted
+const linkSince = new Map(); // link -> when it was made (for the network map)
+const addLink = (l) => { if (!links.has(l)) linkSince.set(l, Date.now()); links.add(l); };
 const hardLinks = new Set(); // those that are a docked ship's hard link to its starbase (ODN tied through the docking port)
 const pendingLinks = new Map(); // link key -> when it was saved: links waiting to be restored after a relay restart
 const LINK_WAIT_MS = 60000;
@@ -228,7 +240,7 @@ function broadcastOps(key) {
   // An ops console remote-controlling this vessel's ops gets its picture too.
   for (const u of users.values()) if (u.operator && u.controlling === key) send(u, msg);
   // Communications runs data links too: it gets the link picture.
-  const links = { type: 'comm-links', ships: linkShips, links: msg.links, hardLinks: msg.hardLinks, network: msg.network, linkIncoming: msg.linkIncoming, linkOutgoing: msg.linkOutgoing };
+  const links = { type: 'comm-links', ships: linkShips, links: msg.links, hardLinks: msg.hardLinks, network: msg.network, linkIncoming: msg.linkIncoming, linkOutgoing: msg.linkOutgoing, graph: msg.graph };
   for (const u of comms) send(u, links);
 }
 
@@ -236,7 +248,9 @@ function broadcastOps(key) {
 // shields, every open data link and every pending link request.
 function networkGraph() {
   return {
-    ships: shipList().filter((sh) => sh.active).map((sh) => ({ ...sh, crew: crewOf(shipKey(sh.name)).length })),
+    // (Each with what the map's details show: where it is, remote control, crewless.)
+    ships: shipList().filter((sh) => sh.active).map((sh) => { const k = shipKey(sh.name), n = navState.get(k); return { ...sh, crew: crewOf(k).length, ...(n ? { x: Math.round(n.x), y: Math.round(n.y) } : {}), remoteBlock: !!engOf(k).remoteBlock, automated: isBase(k) || !crewOf(k).length }; }),
+    since: Object.fromEntries([...links].map((l) => [l.split('|').map((k) => shipName(k).toLowerCase()).sort().join('|'), linkSince.get(l) || null])),
     links: [...links].map((l) => l.split('|').map(shipName)),
     hard: [...hardLinks].filter((l) => links.has(l)).map((l) => l.split('|').map(shipName)), // (docking-port hard links)
     requests: [...linkRequests.values()].map((r) => [shipName(r.fromShip), shipName(r.toShip)]),
@@ -438,7 +452,7 @@ function operatorMessage(op, msg) {
       if (links.has(linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already open`);
       if ([...linkRequests.values()].some((r) => linkKey(r.fromShip, r.toShip) === linkKey(op.shipKey, target))) return fail(`a data link with the ${shipName(target)} is already being negotiated`);
       if (crewless && !answers) {
-        links.add(linkKey(op.shipKey, target));
+        addLink(linkKey(op.shipKey, target));
         opLog(target, `the ${shipName(op.shipKey)} forced a data link (nobody aboard)`);
         opLog(op.shipKey, `data link with the ${shipName(target)} forced: nobody aboard to refuse it`);
         refreshNetworks([op.shipKey]);
@@ -466,7 +480,7 @@ function operatorMessage(op, msg) {
         if (!opsOf(other).length && !crewOf(other).some((u) => u.station === 'Communications')) { broadcastOps(op.shipKey); return fail(`no ops or Communications on duty aboard the ${shipName(other)}`); }
         if (!hardLine(op.shipKey, other) && !subspaceOk(op.shipKey, other)) { broadcastOps(op.shipKey); return fail(`the ${shipName(other)} is not in this star system`); }
         if (!hardLine(op.shipKey, other) && (!commsUp(op.shipKey, 'subspace') || !commsUp(other, 'subspace'))) { broadcastOps(op.shipKey); return fail('a subspace relay is down: no data link'); }
-        links.add(linkKey(req.fromShip, req.toShip));
+        addLink(linkKey(req.fromShip, req.toShip));
         opLog(other, `the ${shipName(op.shipKey)} accepted: data link open`);
         refreshNetworks([op.shipKey]);
         broadcastAllOps();
@@ -1954,7 +1968,7 @@ function autoAcceptLink(id) {
   linkRequests.delete(id);
   const base = shipName(req.toShip);
   if ((!opsOf(req.fromShip).length && !crewOf(req.fromShip).some((u) => u.station === 'Communications')) || !linkReach(req.fromShip, req.toShip)) { opLog(req.fromShip, `${base} could not open the data link`); broadcastAllOps(); return; }
-  links.add(linkKey(req.fromShip, req.toShip));
+  addLink(linkKey(req.fromShip, req.toShip));
   opLog(req.fromShip, `${base} (automated) accepted: data link open`);
   opLog(req.toShip, `data link with the ${shipName(req.fromShip)} open (automated)`);
   refreshNetworks([req.fromShip]);
@@ -2941,7 +2955,7 @@ function linkTick() {
     }
     pendingLinks.delete(l);
     if (linkReach(a, b)) {
-      links.add(l);
+      addLink(l);
       for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} restored`);
       refreshNetworks([a, b]); broadcastAllOps();
     } else {
@@ -2955,7 +2969,7 @@ function linkTick() {
     if (!b || !hardLine(k, b) || hardLinks.has(l)) continue;
     hardLinks.add(l);
     if (!links.has(l)) {
-      links.add(l);
+      addLink(l);
       for (const x of [k, b]) opLog(x, `data link with the ${shipName(x === k ? b : k)} open: hard link: docking port`);
       refreshNetworks([k, b]);
     }
@@ -3928,7 +3942,7 @@ function panelRoutine(k, p) {
     if (req) {
       linkRequests.delete(req.id);
       if (linkReach(k, req.fromShip)) {
-        links.add(linkKey(req.fromShip, k));
+        addLink(linkKey(req.fromShip, k));
         opLog(req.fromShip, `the ${shipName(k)} accepted: data link open`);
         opLog(k, `Communications (automation): accepted the data link from the ${shipName(req.fromShip)}`);
         refreshNetworks([k]); broadcastAllOps();

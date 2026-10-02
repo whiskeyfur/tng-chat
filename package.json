@@ -6,12 +6,18 @@
   "main": "server.js",
   "scripts": {
     "start": "node tools/supervisor.js",
-    "test": "node test/e2e.js && node test/restart.js",
+    "test": "node test/e2e.js && node test/restart.js && node test/touch.js && node test/netmap.js",
     "export-pages": "node tools/export-pages.js",
     "shipcore": "node tools/shipcore.js",
     "relay": "node server.js"
   },
   "dependencies": {
+    "d3-dispatch": "^3.0.1",
+    "d3-drag": "^3.0.0",
+    "d3-force": "^3.0.0",
+    "d3-quadtree": "^3.0.1",
+    "d3-selection": "^3.0.0",
+    "d3-timer": "^3.0.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {

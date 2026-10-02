@@ -411,7 +411,7 @@
     Communications: (ship) => ({ code: 'COM 09', color: 'peach', panels: [
       panel('st-traffic', 'Comm traffic', 'sky', true, h('div', { 'data-traffic': '' })),
       // Data links, run from here as well as from ops (client.js fills it in).
-      panel('st-links', 'Data links', 'peach', true, h('div', { 'data-links': '' })),
+      panel('st-links', 'Data links', 'peach', true, h('div', { class: 'net-map-wrap', 'data-netmap': '' }), h('div', { class: 'net-details', 'data-netmap-details': '' }), h('div', { 'data-links': '' })),
       // Subspace bands follow the ship's subspace relay (powered and undamaged): dead flat without it.
       panel('st-bands', 'Subspace bands', 'peach', true, spectrum(140, ['peach', 'orange', 'gold'], 48, 'Subspace band activity', () => (window.__subspace?.up === false ? 0 : 1)),
         live(readout('Subspace relay', 'gold'), () => (window.__subspace ? (window.__subspace.up ? 'Online: the whole system' : `OFFLINE: ${window.__subspace.why}`) : '---'))),

@@ -486,9 +486,22 @@ function fillReassign() {
 // Communications runs data links too: request one with a ship in range,
 // answer requests, close open links.
 let commLinks = null;
+// (With the data network map, as Ops has: netmap.js.)
+let commMap = null;
 function renderCommLinks() {
   const box = document.querySelector('[data-links]');
   if (!box || !commLinks) return;
+  const wrap = document.querySelector('[data-netmap]');
+  if (wrap && window.createNetMap && commLinks.graph) {
+    if (!wrap.firstChild) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'net-map'); svg.id = 'comm-net-map'; svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Ships and the data links between them');
+      wrap.append(svg);
+      commMap = createNetMap({ svg, details: document.querySelector('[data-netmap-details]'), send, own: () => me.ship });
+    }
+    commMap.update({ graph: commLinks.graph, links: commLinks.links, hardLinks: commLinks.hardLinks, linkShips: commLinks.ships, linkIncoming: commLinks.linkIncoming, linkOutgoing: commLinks.linkOutgoing, network: commLinks.network });
+    window.__commMap = commMap;
+  }
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   const btn = (text, onclick, alert) => el('button', { type: 'button', className: `lcars-button lcars-button--pill tr-tap${alert ? ' lcars-button--alert' : ''}`, textContent: text, onclick });
   const status = box.querySelector('#links-status')?.textContent || '';
@@ -1460,7 +1473,9 @@ function renderCombat() {
       return tr;
     };
     const table = () => {
-      const SYS = { ...Object.fromEntries(POWER), tractor: 'Tractor beam', drydock1: 'Drydock connection 1', drydock2: 'Drydock connection 2', drydock3: 'Drydock connection 3', industrial: 'Industrial replicators', phaser1: 'Phaser array 1', phaser2: 'Phaser array 2', phaser3: 'Phaser array 3', phaser4: 'Phaser array 4' };
+      const SYS = { ...Object.fromEntries(POWER), amBus: 'AM bus magnetic containment', spore: 'Spore drive', tractor: 'Tractor beam', drydock1: 'Drydock connection 1', drydock2: 'Drydock connection 2', drydock3: 'Drydock connection 3', industrial: 'Industrial replicators', phaser1: 'Phaser array 1', phaser2: 'Phaser array 2', phaser3: 'Phaser array 3', phaser4: 'Phaser array 4' };
+      // (Every row named: a system without a name here shows its id, and says so.)
+      const sysName = (sys) => SYS[sys] || (console.warn(`grid: no display name for the ${sys} system`), sys);
       const crewAt = (st) => comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st).length;
       const consoles = Object.keys(grid.tieNodes).filter((x) => x.startsWith('console:')).map((x) => x.slice(8));
       // A console's rows: the console, its systems, and its subsystems (Engineering: the reactors too).
@@ -1487,9 +1502,9 @@ function renderCombat() {
           const want = up(sys === 'tractor' ? (grid.towing ? 30 : 0) : grid.demand[sys]), got = up(sys === 'tractor' ? want : grid.delivered[sys]);
           // A starbase's industrial replicators: a light bar (taps) for how hard they run.
           // (And each phaser array's, ten taps for the power it may draw.)
-          const controls = sys === 'industrial' || /^phaser\d$/.test(sys) ? [(() => { const bar = lightBar(SYS[sys], 100, (v) => send({ type: 'power', power: { [sys]: v } })); bar.id = `${sys}-bar`; bar.set(lastNav?.own?.allocated?.[sys] ?? 0); return bar; })()] : [];
+          const controls = sys === 'industrial' || /^phaser\d$/.test(sys) ? [(() => { const bar = lightBar(sysName(sys), 100, (v) => send({ type: 'power', power: { [sys]: v } })); bar.id = `${sys}-bar`; bar.set(lastNav?.own?.allocated?.[sys] ?? 0); return bar; })()] : [];
           const idle = /^drydock\d$/.test(sys) ? 'no ship in this berth' : 'off';
-          rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { level, controls, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}${got > 100 ? ' · OVERDRIVE' : ''}` : idle }));
+          rows.push(ties(`system:${sys}`, sysName(sys), `system:${sys}`, { level, controls, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}${got > 100 ? ' · OVERDRIVE' : ''}` : idle }));
           if (sys === 'weapons') rows.push(...tankRow('am', 'torpedo', level + 1)); // the torpedo bay's antimatter
           for (const child of grid.systemChildren[sys] || []) sysRow(child, level + 1);
         };

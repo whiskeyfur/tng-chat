@@ -70,7 +70,12 @@
     .ops-hail--incoming .ops-hail__text { animation: lcars-blink 1.2s steps(2) infinite; }
     .ops-hails .empty { color: var(--lcars-tan); font-size: 16px; text-transform: uppercase; }
     .net-map { display: block; flex: 1 1 0; min-height: 160px; width: 100%; }
-    .net-map .net-node { cursor: pointer; }
+    .net-map .net-node { cursor: grab; }
+    .net-map .net-link { cursor: pointer; }
+    .net-details { margin-bottom: 12px; }
+    .net-facts li { display: flex; justify-content: space-between; gap: 12px; }
+    .net-map-wrap { display: flex; flex-direction: column; min-height: 260px; }
+    .net-map-wrap .net-map { min-height: 260px; }
     .net-map .net-node:hover rect { filter: brightness(1.25); }
     .net-map text { font-family: var(--font); text-transform: uppercase; letter-spacing: 0.06em; }
     .net-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; text-transform: uppercase; color: var(--lcars-tan); }
@@ -495,6 +500,8 @@
             <section class="lcars-panel" id="link-panel" style="--accent: var(--lcars-sky)">
               <h2 class="lcars-panel__title"><span>Data link</span></h2>
               <div class="lcars-panel__body">
+                <!-- A tapped vessel's or link's details (netmap.js). -->
+                <div class="net-details" id="net-details"></div>
                 <p class="ops-network" id="network">Not linked</p>
                 <!-- Tap a vessel to request a data link (greyed, with the reason, when it can't be linked). -->
                 <h3 class="ops-subhead">Request a data link with</h3>
@@ -620,6 +627,14 @@
   <script src="library.js"></script>
   <script src="voice.js"></script>
   <script src="broadcast.js"></script>
+  <!-- d3 (from node_modules, served by the relay) for the data network map. -->
+  <script src="vendor/d3-dispatch.js"></script>
+  <script src="vendor/d3-quadtree.js"></script>
+  <script src="vendor/d3-timer.js"></script>
+  <script src="vendor/d3-force.js"></script>
+  <script src="vendor/d3-selection.js"></script>
+  <script src="vendor/d3-drag.js"></script>
+  <script src="netmap.js"></script>
   <script src="room.js"></script>
   <script src="radio.js"></script>
   <script src="comms.js"></script>

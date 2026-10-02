@@ -26,6 +26,11 @@ fs.mkdirSync(dest, { recursive: true });
 for (const name of fs.readdirSync(src)) {
   fs.copyFileSync(path.join(src, name), path.join(dest, name));
 }
+// (d3 for the data network map: the relay serves it from node_modules as vendor/*.js.)
+fs.mkdirSync(path.join(dest, 'vendor'), { recursive: true });
+for (const mod of ['d3-dispatch', 'd3-quadtree', 'd3-timer', 'd3-force', 'd3-selection', 'd3-drag']) {
+  fs.copyFileSync(path.join(__dirname, '..', 'node_modules', mod, 'dist', `${mod}.min.js`), path.join(dest, 'vendor', `${mod}.js`));
+}
 fs.writeFileSync(path.join(dest, 'config.js'),
   `// Written by tools/export-pages.js: the comm relay these pages connect to.\nwindow.STCHAT_RELAY = ${JSON.stringify(relay)};\n`);
 console.log(`Exported ${fs.readdirSync(src).length} files to ${dest}${relay ? ` (relay: ${relay})` : ' (no relay set; enter one on the sign-in screen)'}`);
