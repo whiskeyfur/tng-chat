@@ -797,16 +797,52 @@ function renderCombat() {
     };
     const small = (text, id, onclick, alert) => { const b = button(text, id, onclick, alert ? 'lcars-button--alert' : ''); b.classList.add('grid-mini'); return b; };
     const subRow = (name, level, note) => ties(`sub:${name}`, grid.subsystems[name].name, `sub:${name}`, { level, note: note ?? (grid.subOk[name] === false ? 'NO POWER' : '') });
-    const driveRows = (d) => {
-      const dr = grid.drives[d], src = d === 'port' ? 'impulsePort' : 'impulseStarboard';
-      const state = dr.state === 'starting' ? `starting ${dr.start} of ${grid.impulseStartSecs} s` : dr.state;
-      return [
-        parentRow(`ties-${src}`, `${d[0].toUpperCase()}${d.slice(1)} impulse drive`, 1, `${state}${dr.state === 'running' ? ` · ${grid.cells[src].EPS || 0} of ${grid.impulseOutput} to the EPS, the rest to thrust` : ''}`,
-          [dr.state === 'off' ? small('Start', `drive-${d}-start`, () => send({ type: 'grid', impulse: { drive: d, on: true } })) : small('Stop', `drive-${d}-stop`, () => send({ type: 'grid', impulse: { drive: d, on: false } }), true)]),
-        subRow(`${d}Pump`, 2, dr.state === 'starting' ? (grid.subOk[`${d}Pump`] ? 'powering startup' : 'NO POWER') : dr.state === 'running' ? 'self-powered' : ''),
-        ties(`thrusters${d[0].toUpperCase()}${d.slice(1)}`, 'Maneuvering thrusters', `thrusters${d[0].toUpperCase()}${d.slice(1)}`, { level: 2, note: dr.thrusters ? 'tied in: the drive\'s unused thrust feeds the EPS' : 'untied: thrust only, nothing to the EPS' }),
-      ];
+    // A tap row across the bus columns: on/off (lit when on).
+    const toggleRow = (id, label, level, on, onTap, note = '') => {
+      const b = small(on ? 'On' : 'Off', `${id}-toggle`, onTap);
+      b.classList.add('lcars-toggle');
+      b.setAttribute('aria-pressed', String(!!on));
+      return spanRow(id, label, level, b, note);
     };
+    // A fusion reactor (an impulse drive or an aux reactor): its reaction
+    // chamber (light / shut down), deuterium pump and EPS tap; a drive's
+    // accelerators (throttle) and driver coils (gear) and thrusters; an aux
+    // reactor's power output to the EPS.
+    const reactorRows = (rn, x, { drive = false } = {}) => {
+      const cap = (t) => `${t[0].toUpperCase()}${t.slice(1)}`;
+      const label = drive ? `${cap(rn)} impulse drive` : `Aux fusion reactor ${rn.slice(3)}`;
+      const src = drive ? `impulse${cap(rn)}` : rn;
+      const state = x.state === 'starting' ? `lighting ${x.start} of ${grid.impulseStartSecs} s` : x.state;
+      const out = drive ? (x.state === 'running' ? ` · ${grid.cells[src]?.EPS || 0} of ${grid.impulseOutput} to the EPS, the rest to thrust` : '') : (x.state === 'running' ? ` · ${grid.cells[src]?.EPS || 0} of ${grid.auxOutput} to the EPS` : '');
+      const self = x.epsTap && grid.epsLive && x.state === 'running';
+      const chamber = subRow(`${rn}Chamber`, 2, x.state === 'starting' ? (grid.subOk[`${rn}Chamber`] ? 'lighting' : 'NO POWER') : x.state === 'running' ? (self ? 'self-powered from the EPS' : 'on its bus ties') : '');
+      chamber.querySelector('th span').after(x.state === 'off' ? small('Light', `${rn}-start`, () => send({ type: 'grid', reactor: { name: rn, on: true } })) : small('Shut down', `${rn}-stop`, () => send({ type: 'grid', reactor: { name: rn, on: false } }), true));
+      const rows = [
+        parentRow(`ties-${src}`, label, 1, `${state}${out}`),
+        chamber,
+        subRow(`${rn}Pump`, 2, self ? 'self-powered' : ''),
+        toggleRow(`${rn}-epstap`, 'EPS tap', 2, x.epsTap, () => send({ type: 'grid', reactor: { name: rn, epsTap: !x.epsTap } }), x.epsTap ? (grid.epsLive ? 'running, the chamber powers itself from the EPS' : 'the EPS isn\'t energized: on its bus ties') : 'the chamber runs on its bus ties'),
+      ];
+      if (drive) {
+        const bar = lightBar(`${label} accelerators`, 100, (v) => send({ type: 'grid', reactor: { name: rn, accel: v } }));
+        bar.id = `accel-${rn}`;
+        bar.set(x.accel);
+        const gears = el('span', { className: 'grid-gears' }, ...['low', 'high'].map((g) => { const b = small(g === 'low' ? 'Low' : 'High', `${rn}-gear-${g}`, () => send({ type: 'grid', reactor: { name: rn, gear: g } })); b.setAttribute('aria-pressed', String(x.gear === g)); return b; }));
+        rows.push(
+          spanRow(`${rn}-accel`, 'Accelerators', 2, bar, `throttle ${x.accel}%`),
+          spanRow(`${rn}-coils`, 'Driver coils', 2, gears, x.gear === 'low' ? 'Low gear: quick, a quarter impulse at most' : 'High gear: full impulse, slower to build'),
+          ties(`thrusters${cap(rn)}`, 'Maneuvering thrusters', `thrusters${cap(rn)}`, { level: 2, note: x.thrusters ? 'tied in: the drive\'s unused thrust feeds the EPS' : 'untied: thrust only, nothing to the EPS' }));
+      } else rows.push(ties(rn, 'Power output', rn, { level: 2, note: `${grid.auxOutput} to the EPS while running` }));
+      return rows;
+    };
+    const driveRows = (d) => reactorRows(d, grid.drives[d], { drive: true });
+    const auxRows = () => Object.entries(grid.aux || {}).flatMap(([a, x]) => reactorRows(a, x));
+    // The deuterium feed: valves, cryo-pumps and slush heaters; pressure, tank, temperature.
+    const feedRows = () => [
+      parentRow('ties-deuterium-parent', 'Deuterium feed', 1, `pressure ${grid.dfeed.pressure}% (reactors light at ${grid.dfeed.min}%) · tank ${grid.deuterium} of ${grid.fuelCaps.deuterium} · slush ${grid.dfeed.temp} K`),
+      toggleRow('deuterium-valves', 'Isolation valves', 2, grid.dfeed.valves, () => send({ type: 'grid', valves: !grid.dfeed.valves }), grid.dfeed.valves ? 'open' : 'closed: no feed'),
+      subRow('cryoPumps', 2), subRow('slushHeaters', 2),
+    ];
     // The computer cores: a parent row, then each core with its Boot / Shut down tap and boot stage.
     const computerRows = () => {
       const cs = grid.computers || [];
@@ -830,7 +866,7 @@ function renderCombat() {
     const tapRows = () => [
       // What's flowing down the taps: out of the EPS, into each bus.
       (() => {
-        const tr = parentRow('eps-taps', 'EPS taps', 1, 'EPS power down into each low bus, up to the level set');
+        const tr = parentRow('eps-taps', 'EPS taps', 1, `${grid.epsLive ? 'EPS energized' : `EPS NOT ENERGIZED: the manifold charges from ${grid.epsChargeGen}+ of EPS generation (now ${grid.epsGen})`} · EPS power down into each low bus, up to the level set (a computer core works the regulators)`);
         COLS.forEach((n, i) => { const v = grid.cells.taps?.[n] || 0; tr.children[i + 1].replaceChildren(el('span', { className: `grid-flow${v > 0 ? ' grid-flow--in' : ''}`, textContent: v > 0 ? `+${v}` : v < 0 ? `−${-v}` : '' })); });
         return tr;
       })(),
@@ -851,7 +887,9 @@ function renderCombat() {
         ...['constriction', 'corePump', 'injector'].map((x) => subRow(x, 2)),
         ties('core', 'Power transfer conduits', 'core', { level: 2, note: c.damage.conduits >= 50 ? 'DAMAGED: no output' : 'carry the core\'s output into the EPS' }),
       ] : []),
+      ...feedRows(),
       ...driveRows('port'), ...driveRows('starboard'),
+      ...auxRows(),
       ...tapRows(),
       ...computerRows(),
     ];
@@ -968,10 +1006,14 @@ function renderCombat() {
             on: () => (busOn ? '' : 'the computer cores need Bus A, B or C energized') },
           { title: 'Antimatter containment', rows: () => containment, extra: antimatterButton, state: () => (!grid.antimatter ? 'Cold' : grid.ties.containment.length && grid.containmentOk ? 'Online' : 'Startup'),
             on: () => (grid.core === 'ejected' ? 'no warp core aboard' : busOn ? '' : 'containment needs Bus A, B or C energized'), off: () => (grid.antimatter ? 'containment can\'t be cut with antimatter aboard: offload it at a starbase' : '') },
-          { title: 'Impulse drives', rows: driveRowsAll, extra: fuelButton('deuterium'), state: () => (drives.every((d) => d.state === 'running') ? 'Online' : drives.some((d) => d.state !== 'off') ? 'Startup' : 'Cold'),
-            on: () => (!grid.deuterium ? 'the impulse drives need deuterium aboard' : busOn ? '' : 'the deuterium pumps need Bus A, B or C energized') },
+          { title: 'Deuterium feed', rows: feedRows, extra: fuelButton('deuterium'), state: () => (grid.dfeed.pressure >= 100 ? 'Online' : grid.dfeed.valves ? 'Startup' : 'Cold'),
+            on: () => (!grid.deuterium ? 'the feed needs deuterium aboard' : busOn ? '' : 'the cryo-pumps and slush heaters need Bus A, B or C energized') },
+          { title: 'Impulse drives', rows: driveRowsAll, state: () => (drives.every((d) => d.state === 'running') ? 'Online' : drives.some((d) => d.state !== 'off') ? 'Startup' : 'Cold'),
+            on: () => (grid.dfeed.pressure < grid.dfeed.min ? `the reaction chambers light at ${grid.dfeed.min}% deuterium feed pressure` : busOn ? '' : 'the reaction chambers and pumps need Bus A, B or C energized') },
+          { title: 'Aux fusion reactors', rows: auxRows, state: () => { const xs = Object.values(grid.aux || {}); return xs.length && xs.every((x) => x.state === 'running') ? 'Online' : xs.some((x) => x.state !== 'off') ? 'Startup' : 'Cold'; },
+            on: () => (grid.dfeed.pressure < grid.dfeed.min ? `the reaction chambers light at ${grid.dfeed.min}% deuterium feed pressure` : busOn ? '' : 'the reaction chambers and pumps need Bus A, B or C energized') },
           { title: 'EPS taps', rows: tapRows, state: () => (Object.values(grid.taps).some((v) => v > 0) ? 'Online' : 'Cold'),
-            on: () => (epsOn ? '' : 'the EPS taps need the EPS energized (impulse drives or warp core)') },
+            on: () => (!grid.epsLive ? `the EPS isn't energized: the manifold charges from ${grid.epsChargeGen}+ of EPS generation` : !(grid.computers || []).some((x) => x.state === 'online') ? 'the EPS taps need a computer core online' : epsOn ? '' : 'the EPS taps need the EPS energized') },
           { title: 'Warp core', rows: coreRows, state: () => ({ online: 'Online', starting: 'Startup', ejected: 'Ejected' })[grid.core] || 'Cold',
             on: () => (grid.core === 'ejected' ? 'no warp core: install one at a starbase' : !grid.antimatter ? 'the warp core needs antimatter aboard' : busOn ? '' : 'the constriction needs Bus A, B or C energized') },
           { title: 'Consoles and systems', rows: () => others.flatMap((st) => consoleRows(st)), state: () => { const manned = others.filter((st) => crewAt(st)); const tied = others.filter((st) => grid.ties[`console:${st}`].length); return manned.length && manned.every((st) => grid.consoleOk[st]) ? 'Online' : tied.length ? 'Startup' : 'Cold'; },

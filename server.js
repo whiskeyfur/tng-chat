@@ -763,7 +763,7 @@ const ratingOf = (s) => RATING[s] ?? 100;
 // emergency overdrive, which slowly damages it, faster the further over it runs.
 const POWER_MAX = 150;
 const OVERDRIVE_DAMAGE = 0.02; // damage per second for each point drawn over 100
-const REACTOR = 300; // power drawn for a full sensor signature (a warm ship idling draws a little less)
+const REACTOR = 320; // power drawn for a full sensor signature (a warm ship idling draws a little less)
 const MIN_SHIELD_POWER = 20;
 const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lighting: 100, lateral: 100, deflector: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
@@ -781,7 +781,7 @@ function powerOf(k) {
 }
 // How visible a ship is to other ships' sensors: the more power it uses (all
 // of it: systems, consoles, the warp core's containment), the further off it
-// shows up. 250 units drawn or more: seen at full sensor range; power down to run quiet.
+// shows up. 320 units drawn or more: seen at full sensor range; power down to run quiet.
 const signatureOf = (k) => (isBase(k) ? 1 : Math.max(0.1, Math.min(1, flow(k).drawn / REACTOR)));
 // The lateral arrays alone see a quarter as far as the long-range sensors.
 function rangesOf(k) {
@@ -806,14 +806,16 @@ function speedLimits(k) {
     warp: e.core !== 'online' ? 'the warp core is offline' : eng9 < 1 ? 'no power to the engines'
       : p.sif < HULL.warp.sif || p.idf < HULL.warp.idf ? `warp needs the structural integrity field and inertial dampers at ${HULL.warp.sif}% (SIF ${p.sif}%, dampers ${p.idf}%)`
       : p.sensors <= 0 ? 'the navigational deflector needs the long-range sensors' : cap.deflector < HULL.deflector ? `warp needs the navigational deflector at ${HULL.deflector}% (its limit is ${Math.floor(cap.deflector)}%)` : '',
-    impulse: !flow(k).thrusting ? 'start an impulse drive (Engineering)'
+    impulse: !DRIVES.some((d) => e.drives[d].state === 'running') ? 'start an impulse drive (Engineering)' : !flow(k).thrusting ? 'the impulse drives\' accelerators are at 0 (Engineering)'
       : p.sif < HULL.impulse.sif || p.idf < HULL.impulse.idf ? `impulse needs the SIF at ${HULL.impulse.sif}% and dampers at ${HULL.impulse.idf}% (SIF ${p.sif}%, dampers ${p.idf}%)` : '',
   };
   let warp = why.warp ? 0 : eng9;
   if (e.towing) warp = Math.min(warp, TRACTOR.maxWarp); // towing holds a ship back
-  return { warp, impulse: why.impulse ? 0 : 0.125 * flow(k).thrusting, why };
+  return { warp, impulse: why.impulse ? 0 : flow(k).thrusting, why };
 }
 const maxWarp = (k) => { const l = speedLimits(k); return l.warp || l.impulse; };
+// How fast impulse builds, per second: the quickest gear among the running drives.
+const impulseRate = (k) => Math.max(0, ...DRIVES.filter((d) => engOf(k).drives[d].state === 'running').map((d) => FUSION.gears[engOf(k).drives[d].gear].rate));
 // Is this speed within what the ship has? (impulse and warp are separate)
 const speedOk = (k, w) => { const l = speedLimits(k); return w <= 0 || (w < 1 ? w <= l.impulse + 1e-9 : w <= l.warp); };
 // Both ships' sensors have to reach for subspace comms (hails, data links).
@@ -1073,12 +1075,16 @@ function navCommand(ws, msg) {
       const lim = speedLimits(key);
       if (order.warp > 0 && order.warp < 1) {
         if (!lim.impulse) return note(`Helm: no impulse: ${lim.why?.impulse || 'start an impulse drive (Engineering)'}`);
-        order.warp = Math.min(order.warp, lim.impulse); // impulse: what there is
+        // Impulse: what there is, built up at the driver coils' rate (Low gear quicker than High).
+        const eg = engOf(key), now = navState.get(key)?.warp || 0;
+        eg.impulseWant = Math.min(order.warp, lim.impulse);
+        order.warp = Math.min(eg.impulseWant, (now < 1 ? now : 0) + impulseRate(key));
       } else if (order.warp >= 1 && order.warp > lim.warp) {
         return note(lim.warp ? `Helm: engines only give warp ${lim.warp} at this power` : lim.why?.warp === 'the warp core is offline' ? 'Helm: no warp: the warp core is offline' : lim.why?.warp === 'no power to the engines' ? 'Helm: no power to the engines' : `Helm: no warp: ${lim.why?.warp}`);
       }
     }
     if (order.warp === 0) navTargets.delete(key);
+    if (!(order.warp > 0 && order.warp < 1)) engOf(key).impulseWant = 0;
     send(core, order);
     const what = order.warp === 0 ? 'all stop' : `${order.dest ? `course for ${order.dest.name ? `${d0(order.dest.name)}` : `${Math.round(order.dest.x)}, ${Math.round(order.dest.y)}`}` : typeof order.heading === 'number' ? `heading ${Math.round(order.heading)}` : 'speed'}${order.warp ? `, ${order.warp < 1 ? 'impulse' : `warp ${order.warp}`}` : ''}`;
     opLog(key, `Helm (${ws.name}): ${what}`);
@@ -1315,7 +1321,7 @@ const AB = BUSES; // what a low-power tie may pick (one of them)
 const DRIVES = ['port', 'starboard'];
 const driveSource = (d) => `impulse${d[0].toUpperCase()}${d.slice(1)}`; // impulsePort, impulseStarboard
 // Sources, in the order they're drawn on: power a docked ship sends us first, batteries last.
-const SOURCES = ['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'core', 'batteryA', 'batteryB', 'batteryC', 'pressure'];
+const SOURCES = ['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'aux1', 'aux2', 'core', 'batteryA', 'batteryB', 'batteryC', 'pressure'];
 // Stores: a battery on each low bus, and the EPS manifold's plasma pressure.
 // Each is fixed to its own node (no ties to set): it covers that node's
 // shortfall (last, when nothing else will) and charges from its surplus.
@@ -1326,6 +1332,28 @@ const isStore = (name) => name in STORES;
 // regulators (the taps) need at least one online; text messages need one at
 // each end; the warp core's dilithium auto-trim needs all three.
 const COMPUTERS = ['computer1', 'computer2', 'computer3'];
+// Fusion reactors: the two impulse drives and two auxiliary fusion reactors.
+// Each has a fusion reaction chamber (a low bus: 10 to start, then 5 to keep
+// running) fed by its deuterium pump (a low bus, 5); with its EPS tap on, a
+// running chamber powers itself (and its pump) from the EPS instead. It lights
+// only with the deuterium feed at 30% pressure, and flames out below it, or
+// without its power. The impulse drives' accelerators (a 0-100 throttle) and
+// driver coils (Low gear: quick, a quarter impulse at most; High: slower, full
+// impulse) drive the ship; an aux reactor's output (75) goes to the EPS.
+const AUX = ['aux1', 'aux2'];
+const FUSION = { chamberStart: 10, chamberRun: 5, pump: 5, minPressure: 30, aux: 75, gears: { low: { top: 0.25, rate: 0.03 }, high: { top: 1, rate: 0.015 } } };
+const reactorsOf = (e) => [...DRIVES.map((d) => [d, e.drives[d]]), ...AUX.map((a) => [a, e.aux[a]])];
+const reactorLabel = (r) => (r.startsWith('aux') ? `aux fusion reactor ${r.slice(3)}` : `${r} impulse drive`);
+// A drive's share of impulse: half impulse (0.125) at full throttle in High gear.
+const driveTop = (dr) => (0.125 * (dr.accel / 100) * FUSION.gears[dr.gear].top);
+// The deuterium feed: isolation valves, cryo-pumps and slush heaters (a low
+// bus, 2.5 each, while the valves are open). With both powered and the valves
+// open, feed pressure builds; otherwise it falls.
+const DFEED = { draw: 2.5, rise: 10, fall: 5 };
+// The EPS manifold must be pressurized before the EPS carries anything: it
+// charges from 100 or more of EPS generation (about 10 s), and collapses
+// when the pressure runs out.
+const EPS_CHARGE_GEN = 100;
 const COMPUTER = { draw: 2, bootSecs: 14, stages: ['POST', 'LCARS kernel', 'ODN handshake', 'isolinear verification', 'subprocessor sync'] };
 const coresOnline = (k) => (isBase(k) || !eng.has(k) ? COMPUTERS.length : engOf(k).computers.filter((c) => c.state === 'online').length);
 // The crosslink is a chain, A–B–C: it joins A+B, B+C or all three (A and C only through B).
@@ -1334,7 +1362,7 @@ const storeOf = (node) => (node === 'EPS' ? 'pressure' : `battery${node}`);
 // Every tie is one class: Bus A/B, or the EPS only (the warp core's and
 // impulse drives' outputs). The warp core itself spans both: its
 // subsystems on A/B, its output on the EPS.
-const SOURCE_NODES = { ship: AB, solar: AB, dock: AB, impulsePort: ['EPS'], impulseStarboard: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: AB, crosslink: AB };
+const SOURCE_NODES = { ship: AB, solar: AB, dock: AB, impulsePort: ['EPS'], impulseStarboard: ['EPS'], aux1: ['EPS'], aux2: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: AB, crosslink: AB };
 // Low-power loads and sources may tie to several of Bus A, B and C (a load
 // split evenly over them, a source's output shared evenly); so may the
 // crosslink (the buses checked are one pool). EPS ties are one.
@@ -1362,8 +1390,16 @@ const SUBSYSTEMS = {
   constriction: { parent: 'core', ties: ['A'], name: 'magnetic constriction' },
   corePump: { parent: 'core', ties: ['A'], name: 'deuterium pump' },
   injector: { parent: 'core', ties: ['A'], name: 'antimatter injector' },
+  portChamber: { parent: 'impulsePort', ties: ['B'], name: 'fusion reaction chamber' },
   portPump: { parent: 'impulsePort', ties: ['B'], name: 'deuterium pump' },
+  starboardChamber: { parent: 'impulseStarboard', ties: ['B'], name: 'fusion reaction chamber' },
   starboardPump: { parent: 'impulseStarboard', ties: ['B'], name: 'deuterium pump' },
+  aux1Chamber: { parent: 'aux1', ties: ['A'], name: 'fusion reaction chamber' },
+  aux1Pump: { parent: 'aux1', ties: ['A'], name: 'deuterium pump' },
+  aux2Chamber: { parent: 'aux2', ties: ['B'], name: 'fusion reaction chamber' },
+  aux2Pump: { parent: 'aux2', ties: ['B'], name: 'deuterium pump' },
+  cryoPumps: { parent: 'deuterium', ties: ['A'], name: 'cryo-pumps' },
+  slushHeaters: { parent: 'deuterium', ties: ['B'], name: 'slush heaters' },
   forcefields: { parent: 'Security', ties: ['B'], name: 'force field emitters' },
   computer1: { parent: 'computer', ties: ['A'], name: 'computer core 1' },
   computer2: { parent: 'computer', ties: ['B'], name: 'computer core 2' },
@@ -1436,14 +1472,15 @@ const eng = new Map(); // ship key -> { core, antimatter, start, taps, ties, bat
 
 // thrustersPort / thrustersStarboard: a drive's maneuvering thrusters tied in
 // to the EPS (the drive's unused thrust feeds it) or not (thrust only).
-const DEFAULT_TIES = { solar: ['A'], dock: ['A'], ship: [], impulsePort: ['EPS'], impulseStarboard: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: ['A'], crosslink: [] };
+const DEFAULT_TIES = { solar: ['A'], dock: ['A'], ship: [], impulsePort: ['EPS'], impulseStarboard: ['EPS'], aux1: ['EPS'], aux2: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: ['A'], crosslink: [] };
 // New ships (unless their computer says --warm) and rebuilt ones start cold:
 // docked at a starbase, reactors offline, no power source tied in (consoles
 // and systems keep their wiring), taps closed, no antimatter or deuterium.
 // Engineering brings them up on dock power.
 // Cold iron: nothing tied in anywhere, sources or loads (the drives feed the EPS only through their thrusters' ties).
-const COLD = { ties: { ...Object.fromEntries([...Object.keys(DEFAULT_TIES), ...Object.keys(DEFAULT_LOAD_TIES)].map((k) => [k, []])), impulsePort: ['EPS'], impulseStarboard: ['EPS'] }, taps: { A: 0, B: 0, C: 0 }, breakers: { A: false, B: false, C: false }, computers: ['off', 'off', 'off'], core: 'offline', drives: { port: 'off', starboard: 'off' }, antimatter: 0, deuterium: 0 };
+const COLD = { ties: { ...Object.fromEntries([...Object.keys(DEFAULT_TIES), ...Object.keys(DEFAULT_LOAD_TIES)].map((k) => [k, []])), impulsePort: ['EPS'], impulseStarboard: ['EPS'] }, taps: { A: 0, B: 0, C: 0 }, breakers: { A: false, B: false, C: false }, computers: ['off', 'off', 'off'], core: 'offline', drives: { port: { state: 'off', epsTap: false, accel: 0, gear: 'low' }, starboard: { state: 'off', epsTap: false, accel: 0, gear: 'low' } }, aux: {}, dfeed: { valves: false, pressure: 0 }, epsLive: false, antimatter: 0, deuterium: 0 };
 function freshEng(saved, { cold = false } = {}) {
+  cold = cold || saved === COLD;
   const s = saved && typeof saved === 'object' ? saved : cold ? COLD : {};
   // Ties: a list of nodes (older saves had one bus, or null for off), only those allowed.
   // A saved tie that's no longer allowed (an EPS tie on an A/B load, say) moves to the default bus.
@@ -1466,9 +1503,19 @@ function freshEng(saved, { cold = false } = {}) {
   // (Older saves: life support was one load; its ties go to all three of its systems.)
   for (const [k, d] of Object.entries(DEFAULT_LOAD_TIES)) ties[k] = tiesOf(k, s.ties?.[k] ?? (LIFE_SUPPORT.includes(k.slice(7)) ? s.ties?.['system:lifeSupport'] : undefined), d);
   const core = s.core === 'ejected' || s.antimatter === false ? 'ejected' : s.core === 'offline' || !antimatter || !deuterium ? 'offline' : 'online';
+  // The EPS manifold: energized if anything was feeding it (older saves); then it starts at full pressure.
+  const epsLive = s.epsLive ?? (!cold && (s.core === 'online' || s.core === undefined || Object.values(s.drives || {}).some((x) => (typeof x === 'object' ? x?.state : x ?? 'running') === 'running')));
   return {
     core, antimatter, deuterium, start: 0, // a startup in progress starts over
-    drives: Object.fromEntries(DRIVES.map((d) => [d, { state: (s.drives?.[d] ?? 'running') === 'running' && deuterium > 0 ? 'running' : 'off', start: 0 }])),
+    // Fusion reactors (older saves: drives running, throttle open, High gear, EPS taps on; aux reactors off).
+    drives: Object.fromEntries(DRIVES.map((d) => {
+      const v = typeof s.drives?.[d] === 'object' && s.drives[d] ? s.drives[d] : { state: s.drives?.[d] };
+      return [d, { state: (v.state ?? 'running') === 'running' && deuterium > 0 ? 'running' : 'off', start: 0, epsTap: v.epsTap ?? !cold, accel: Number.isFinite(v.accel) ? Math.max(0, Math.min(100, v.accel)) : cold ? 0 : 100, gear: v.gear === 'low' || v.gear === 'high' ? v.gear : cold ? 'low' : 'high' }];
+    })),
+    aux: Object.fromEntries(AUX.map((a) => { const v = s.aux?.[a] || {}; return [a, { state: v.state === 'running' && deuterium > 0 ? 'running' : 'off', start: 0, epsTap: v.epsTap ?? false }]; })),
+    // The deuterium feed (older saves: valves open, at pressure) and the EPS manifold (energized if anything was feeding it).
+    dfeed: { valves: s.dfeed?.valves ?? !cold, pressure: Number.isFinite(s.dfeed?.pressure) ? s.dfeed.pressure : cold ? 0 : 100, temp: 13.8 },
+    epsLive,
     // Computer cores (older saves: online; a boot in progress starts over).
     computers: COMPUTERS.map((x, i) => ({ state: (s.computers?.[i] ?? 'online') === 'online' ? 'online' : 'off', t: 0 })),
     // EPS taps: how much EPS power may flow down into each low bus (older saves: open/closed).
@@ -1490,7 +1537,7 @@ function freshEng(saved, { cold = false } = {}) {
     // Each store's charge (older saves: one battery, shared out across A, B and C; the EPS starts unpressurized).
     stores: Object.fromEntries(Object.entries(STORES).map(([name, node]) => {
       const cap = node === 'EPS' ? GRID.epsCap : GRID.batteryCap;
-      const v = s.stores?.[name] ?? (node === 'EPS' ? 0 : Number.isFinite(s.battery?.charge) ? s.battery.charge / 3 : cap);
+      const v = s.stores?.[name] ?? (node === 'EPS' ? (epsLive ? cap : 0) : Number.isFinite(s.battery?.charge) ? s.battery.charge / 3 : cap);
       return [name, Math.max(0, Math.min(cap, Number(v) || 0))];
     })),
     docked: STARBASES.some((b) => b.name === s.docked) ? s.docked : null,
@@ -1513,7 +1560,10 @@ function saveBaseSettings() {
 const savedEng = (k) => {
   const e = engOf(k);
   return {
-    core: e.core === 'starting' ? 'offline' : e.core, drives: Object.fromEntries(DRIVES.map((d) => [d, e.drives[d].state === 'running' ? 'running' : 'off'])),
+    core: e.core === 'starting' ? 'offline' : e.core,
+    drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state === 'running' ? 'running' : 'off', epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear }]; })),
+    aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state === 'running' ? 'running' : 'off', epsTap: e.aux[a].epsTap }])),
+    dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure) }, epsLive: e.epsLive,
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     dockedPort: e.dockedPort, autoRefuel: e.autoRefuel,
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
@@ -1565,9 +1615,10 @@ function flow(k) {
   const nv = navState.get(k);
   const running = DRIVES.filter((d) => e.drives[d].state === 'running' && e.deuterium > 0);
   const impulseNow = nv && nv.warp > 0 && nv.warp < 1 ? nv.warp : 0;
-  const share = running.length ? Math.min(1, impulseNow / (0.125 * running.length)) : 0;
+  const thrustTop = running.reduce((n, d) => n + driveTop(e.drives[d]), 0);
+  const share = thrustTop > 0 ? Math.min(1, impulseNow / thrustTop) : 0;
   const driveGen = (d) => (running.includes(d) && (e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length ? GRID.impulse * (1 - share) : 0);
-  const cap = { ship: conns.reduce((n, cn) => n + (cn.net < 0 ? Math.min(-cn.net, cn.theirFed) : 0), 0), solar: GRID.solar, dock: e.docked ? GRID.dock : 0, impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), core: e.core === 'online' && (c.damage.conduits || 0) < SUB_FAIL_DAMAGE ? GRID.core : 0, ...Object.fromEntries(Object.entries(STORES).map(([name, node]) => [name, Math.min(node === 'EPS' ? GRID.epsOut : GRID.batteryOut, e.stores[name])])) };
+  const cap = { ship: conns.reduce((n, cn) => n + (cn.net < 0 ? Math.min(-cn.net, cn.theirFed) : 0), 0), solar: GRID.solar, dock: e.docked ? GRID.dock : 0, impulsePort: driveGen('port'), impulseStarboard: driveGen('starboard'), ...Object.fromEntries(AUX.map((a) => [a, e.aux[a].state === 'running' && e.deuterium > 0 ? FUSION.aux : 0])), core: e.core === 'online' && (c.damage.conduits || 0) < SUB_FAIL_DAMAGE ? GRID.core : 0, ...Object.fromEntries(Object.entries(STORES).map(([name, node]) => [name, Math.min(node === 'EPS' ? GRID.epsOut : GRID.batteryOut, e.stores[name])])) };
   // A source tied to several buses shares its output evenly between them.
   const srcs = SOURCES.map((name) => {
     const t = isStore(name) ? (STORES[name] === 'EPS' || e.breakers[STORES[name]] ? [STORES[name]] : []) : e.ties[name], full = t.length ? cap[name] : 0;
@@ -1604,6 +1655,7 @@ function flow(k) {
     let got = 0;
     const bus = buses[node];
     const pull = (s, eps, side = node) => {
+      if (eps && !e.epsLive) return; // the EPS manifold isn't pressurized: it carries nothing yet
       const room = Math.min(bus ? busRoom(node) - got : Infinity, eps ? maxOf('EPS') - viaEps : Infinity, bus && eps ? tapRoom(node) : Infinity);
       const t = Math.min(s.left, amt - got, room, s.share && !eps ? s.share[side] : Infinity);
       if (t <= 0) return;
@@ -1627,7 +1679,8 @@ function flow(k) {
   const tied = blank();
   const trippable = [];
   // Breakers watch sustained load: startup surges don't count.
-  const sustained = (key, amt) => (key === 'sub:constriction' && e.core === 'starting' ? GRID.constriction.run : key.endsWith('Pump') && key !== 'sub:corePump' ? 0 : amt);
+  const reactorStarting = (key) => { const m = /^sub:(port|starboard|aux\d)(Chamber|Pump)$/.exec(key); return m && reactorsOf(e).find(([r]) => r === m[1])[1].state === 'starting'; };
+  const sustained = (key, amt) => (key === 'sub:constriction' && e.core === 'starting' ? GRID.constriction.run : reactorStarting(key) ? 0 : amt);
   // Power for a docked ship goes out the way it comes in.
   const tiesFor = (key) => (key.startsWith('feed:') ? e.ties.ship : e.ties[key]) || [];
   // A load tied to several buses is split evenly across them (each bus
@@ -1665,7 +1718,13 @@ function flow(k) {
   const loads = [
     ['sub:constriction', !coreOn ? 0 : e.core === 'starting' ? GRID.constriction.start : GRID.constriction.run],
     ['sub:corePump', coreOn ? GRID.corePump : 0], ['sub:injector', coreOn ? GRID.injector : 0],
-    ...DRIVES.map((d) => [`sub:${d}Pump`, e.drives[d].state === 'starting' ? GRID.impulsePump : 0]), // running drives power their own pumps
+    // A reactor's chamber and pump: on the buses while it starts, and while it
+    // runs unless its EPS tap has it powering itself from the (energized) EPS.
+    ...reactorsOf(e).flatMap(([r, x]) => {
+      const onBus = x.state === 'starting' || (x.state === 'running' && !(x.epsTap && e.epsLive));
+      return [[`sub:${r}Chamber`, !onBus ? 0 : x.state === 'starting' ? FUSION.chamberStart : FUSION.chamberRun], [`sub:${r}Pump`, onBus ? FUSION.pump : 0]];
+    }),
+    ...['cryoPumps', 'slushHeaters'].map((x) => [`sub:${x}`, e.dfeed.valves ? DFEED.draw : 0]),
     ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => u.station === st).length * GRID.console]),
     ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
     ['sub:forcefields', e.forcefields.length * GRID.forcefield],
@@ -1685,7 +1744,7 @@ function flow(k) {
     if (!e.breakers[X] || usedOf(store) > 0) return; // breaker open, or covering a shortfall: not charging
     const room = Math.min(GRID.batteryCharge, GRID.batteryCap - e.stores[store]);
     for (const x of srcs) {
-      if (isStore(x.name) || charging[X] >= room || (!split && x.ties.length > 1)) continue;
+      if (isStore(x.name) || charging[X] >= room || (!split && x.ties.length > 1) || (!e.epsLive && x.ties.includes('EPS'))) continue;
       const sides = pool(X);
       const direct = sides.some((y) => x.ties.includes(y));
       if (!(direct || (tapRoom(X) > 0 && x.ties.includes('EPS')))) continue;
@@ -1717,7 +1776,8 @@ function flow(k) {
   for (const [key, amt] of order) if ((got[key] || 0) < amt - 1e-9) got[key] += serve(key, amt - (got[key] || 0), true);
   for (const X of BUSES) chargeFrom(X, true);
   // The EPS manifold's pressure: what's left of the EPS sources' output builds it up.
-  if (usedOf('pressure') <= 0) {
+  const epsGen = srcs.filter((x) => !isStore(x.name) && x.ties.includes('EPS')).reduce((n, x) => n + (cap[x.name] || 0), 0);
+  if (usedOf('pressure') <= 0 && (e.epsLive || epsGen >= EPS_CHARGE_GEN)) {
     const room = Math.min(GRID.epsCharge, GRID.epsCap - e.stores.pressure, maxOf('EPS') - viaEps);
     for (const x of srcs) {
       if (isStore(x.name) || !x.ties.includes('EPS') || charging.EPS >= room) continue;
@@ -1753,7 +1813,7 @@ function flow(k) {
   const used = Object.fromEntries(Object.entries(STORES).map(([name, node]) => [node, usedOf(name)]));
   const drawn = SOURCES.reduce((n, name, i) => n + ((srcs[i].ties.length ? cap[name] : 0) - srcs[i].left), 0); // charging included
   // Impulse: half impulse for each running drive.
-  const thrusting = running.length;
+  const thrusting = thrustTop; // the impulse the running drives can give, by throttle and gear
   // The grid table's footer: per bus (and the EPS), power used, available and the most it carries.
   const epsLeft = srcs.filter((x) => x.ties.includes('EPS')).reduce((m, x) => m + x.left, 0);
   const totals = Object.fromEntries(NODES.map((n) => {
@@ -1765,7 +1825,7 @@ function flow(k) {
   }));
   const f = {
     cells, totals, buses, consoleOk, demand, capacity, delivered, containmentOk, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
-    crossflow, storeUsed: used, coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps,
+    crossflow, storeUsed: used, coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps, epsGen,
   };
   flowCache.set(k, { at: Date.now(), f });
   return f;
@@ -1822,7 +1882,9 @@ function gridView(k) {
   const r = (o) => Object.fromEntries(Object.entries(o).map(([x, v]) => [x, Math.round(v)]));
   return {
     core: e.core, antimatter: Math.floor(e.antimatter), deuterium: Math.floor(e.deuterium), fuelCaps: { antimatter: FUEL.antimatter, deuterium: FUEL.deuterium },
-    drives: Object.fromEntries(DRIVES.map((d) => [d, { state: e.drives[d].state, start: e.drives[d].start, thrusters: !!(e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length }])), impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
+    drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state, start: dr.start, thrusters: !!(e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length, epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear, top: Math.round(driveTop(dr) * 1000) / 1000 }]; })),
+    aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state, start: e.aux[a].start, epsTap: e.aux[a].epsTap }])), auxOutput: FUSION.aux,
+    dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure), temp: e.dfeed.temp, min: FUSION.minPressure }, epsLive: e.epsLive, epsGen: Math.round(f.epsGen), epsChargeGen: EPS_CHARGE_GEN, impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
     transfer: e.transfer ? { ...e.transfer, left: Math.ceil(e.transfer.left), with: e.transfer.with === 'station' ? e.docked : shipName(e.transfer.with) } : null,
     dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName), autoRefuel: e.autoRefuel,
     // What each port holds: a starbase, a ship (with its power offers), or nothing.
@@ -1899,15 +1961,26 @@ function gridCommand(ws, msg) {
       said.push(`computer core ${i + 1} booting`);
     } else if (!msg.computer.on && cc.state !== 'off') { cc.state = 'off'; cc.t = 0; said.push(`computer core ${i + 1} shut down`); }
   }
-  if (msg.impulse && DRIVES.includes(msg.impulse.drive)) {
-    const d = e.drives[msg.impulse.drive], side = msg.impulse.drive;
-    if (msg.impulse.on && d.state === 'off') {
-      if (e.deuterium <= 0) return note('the impulse drives need deuterium');
-      d.state = 'starting'; d.start = 0; flowCache.delete(key);
-      if (!flow(key).subOk[`${side}Pump`]) { d.state = 'off'; flowCache.delete(key); return note(`the ${side} impulse drive's deuterium pump needs ${GRID.impulsePump} to start: tie it to a bus that has it`); }
-      said.push(`${side} impulse drive startup`);
-    } else if (!msg.impulse.on && d.state !== 'off') { d.state = 'off'; d.start = 0; said.push(`${side} impulse drive shut down`); }
+  // A fusion reactor (an impulse drive, or aux1/aux2): light its chamber or
+  // shut it down; its EPS tap; a drive's accelerators (0-100) and gear.
+  const rx = msg.impulse || msg.reactor;
+  const rName = rx && (msg.impulse ? rx.drive : rx.name);
+  const r = rName && (DRIVES.includes(rName) ? e.drives[rName] : AUX.includes(rName) ? e.aux[rName] : null);
+  if (r) {
+    const label = reactorLabel(rName);
+    if (rx.on === true && r.state === 'off') {
+      if (e.deuterium <= 0) return note(`the ${label} needs deuterium`);
+      if (e.dfeed.pressure < FUSION.minPressure) return note(`the ${label} won't light: deuterium feed pressure ${Math.round(e.dfeed.pressure)}% (it needs ${FUSION.minPressure}%: open the feed's valves, power its cryo-pumps and slush heaters)`);
+      r.state = 'starting'; r.start = 0; flowCache.delete(key);
+      if (!flow(key).subOk[`${rName}Chamber`] || !flow(key).subOk[`${rName}Pump`]) { r.state = 'off'; flowCache.delete(key); return note(`the ${label}'s reaction chamber (${FUSION.chamberStart} to start) and deuterium pump (${FUSION.pump}) need power: tie them to a bus that has it`); }
+      said.push(`${label}: chamber lighting`);
+    } else if (rx.on === false && r.state !== 'off') { r.state = 'off'; r.start = 0; said.push(`${label} shut down`); }
+    if (typeof rx.epsTap === 'boolean') { r.epsTap = rx.epsTap; said.push(`${label}'s EPS tap ${r.epsTap ? 'on: it powers itself from the EPS while running' : 'off: it runs on its bus ties'}`); }
+    if (DRIVES.includes(rName) && Number.isFinite(rx.accel)) { r.accel = Math.max(0, Math.min(100, Math.round(rx.accel))); said.push(`${label}'s accelerators at ${r.accel}%`); }
+    if (DRIVES.includes(rName) && (rx.gear === 'low' || rx.gear === 'high')) { r.gear = rx.gear; said.push(`${label}'s driver coils in ${rx.gear === 'low' ? 'Low gear (quick, a quarter impulse at most)' : 'High gear (full impulse)'}`); }
   }
+  // The deuterium feed's isolation valves.
+  if (typeof msg.valves === 'boolean') { e.dfeed.valves = msg.valves; said.push(`deuterium feed valves ${msg.valves ? 'open' : 'closed'}`); }
   // EPS taps: how much EPS power may flow into a bus ({bus, amount}, or {bus, on} for all or nothing).
   if (msg.tap && BUSES.includes(msg.tap.bus)) {
     const X = msg.tap.bus;
@@ -2477,16 +2550,36 @@ setInterval(() => {
       if (!f.subOk[COMPUTERS[i]]) { cc.state = 'crashed'; cc.t = 0; e.dirty = true; opLog(k, `computer core ${i + 1} crashed: power lost`); tellStations(k, ['Engineering'], `Engineering: computer core ${i + 1} crashed (power lost): boot it again`); return; }
       if (cc.state === 'booting' && ++cc.t >= COMPUTER.bootSecs) { cc.state = 'online'; cc.t = 0; e.dirty = true; opLog(k, `computer core ${i + 1} online`); tellStations(k, ['Engineering'], `Engineering: computer core ${i + 1} online`); }
     });
-    // Impulse drives: starting on bus power for their pumps, then self-sustaining.
-    for (const d of DRIVES) {
-      const dr = e.drives[d];
-      if (dr.state === 'starting') {
-        if (!f.subOk[`${d}Pump`]) { dr.state = 'off'; dr.start = 0; tellStations(k, ['Engineering'], `Engineering: ${d} impulse drive startup failed, no power to its deuterium pump`); }
-        else if (++dr.start >= GRID.impulseStartSecs) { dr.state = 'running'; dr.start = 0; e.dirty = true; opLog(k, `${d} impulse drive running`); tellStations(k, ['Engineering'], `Engineering: ${d} impulse drive running`); }
-      }
-      if (dr.state !== 'off') e.deuterium = Math.max(0, e.deuterium - FUEL.impulseBurn);
-      if (dr.state !== 'off' && (e.deuterium <= 0 || (c.damage[`${d}Pump`] || 0) >= SUB_FAIL_DAMAGE)) { dr.state = 'off'; e.dirty = true; tellStations(k, ['Engineering'], `Engineering: ${d} impulse drive shut down (${e.deuterium <= 0 ? 'out of deuterium' : 'deuterium pump damaged'})`); }
+    // The deuterium feed: pressure builds with the valves open and the
+    // cryo-pumps and slush heaters powered; otherwise it falls.
+    const feeding = e.dfeed.valves && e.deuterium > 0 && f.subOk.cryoPumps && f.subOk.slushHeaters;
+    e.dfeed.pressure = Math.max(0, Math.min(100, e.dfeed.pressure + (feeding ? DFEED.rise : -DFEED.fall)));
+    e.dfeed.temp = Math.round((e.dfeed.temp + ((e.dfeed.valves && f.subOk.slushHeaters ? 14.2 : 13.8) - e.dfeed.temp) * 0.3) * 100) / 100; // slush, kelvin
+    // Fusion reactors: lit on bus power, then running on it (or on the EPS,
+    // tap on); out of deuterium, feed pressure or power, they flame out.
+    for (const [rn, rr] of reactorsOf(e)) {
+      const label = reactorLabel(rn);
+      const out = (why) => { rr.state = 'off'; rr.start = 0; e.dirty = true; opLog(k, `${label} shut down: ${why}`); tellStations(k, ['Engineering'], `Engineering: ${label} shut down (${why})`); };
+      if (rr.state === 'off') continue;
+      const powered = f.subOk[`${rn}Chamber`] && f.subOk[`${rn}Pump`];
+      if (e.deuterium <= 0) { out('out of deuterium'); continue; }
+      if (e.dfeed.pressure < FUSION.minPressure) { out(`flameout: deuterium feed pressure ${Math.round(e.dfeed.pressure)}%`); continue; }
+      if ((c.damage[`${rn}Pump`] || 0) >= SUB_FAIL_DAMAGE) { out('deuterium pump damaged'); continue; }
+      if (rr.state === 'starting') {
+        if (!powered) { out('startup failed: no power to its chamber or pump'); continue; }
+        if (++rr.start >= GRID.impulseStartSecs) { rr.state = 'running'; rr.start = 0; e.dirty = true; opLog(k, `${label} running`); tellStations(k, ['Engineering'], `Engineering: ${label} running`); }
+      } else if (!(rr.epsTap && e.epsLive) && !powered) { out('no power to its chamber: tie it in, or turn its EPS tap on'); continue; }
+      e.deuterium = Math.max(0, e.deuterium - FUEL.impulseBurn);
     }
+    // The EPS manifold: energized once pressurized, collapsed when the pressure's gone.
+    if (!e.epsLive && e.stores.pressure + f.charging.EPS >= GRID.epsCap - 1e-6) { e.epsLive = true; e.dirty = true; opLog(k, 'EPS manifold pressurized: the EPS is energized'); tellStations(k, ['Engineering'], 'Engineering: EPS manifold pressurized: the EPS is energized'); }
+    else if (e.epsLive && e.stores.pressure - f.storeUsed.EPS + f.charging.EPS <= 0) { e.epsLive = false; e.dirty = true; opLog(k, 'EPS collapsed: manifold pressure lost'); tellStations(k, ['Engineering'], 'Engineering: EPS collapsed (manifold pressure lost): it has to be pressurized again'); }
+    // Impulse builds toward what Helm asked for, at the driver coils' rate.
+    { const nv = navState.get(k), want = e.impulseWant || 0, core = primaryCore.get(k);
+      if (want > 0 && nv && nv.warp < 1 && nv.warp < want - 1e-6 && core) {
+        const lim = speedLimits(k), next = Math.min(want, lim.impulse, nv.warp + impulseRate(k));
+        if (next > nv.warp + 1e-6) send(core, { type: 'core-helm', ship: shipName(k), warp: Math.round(next * 1000) / 1000 });
+      } }
     tripBreakers(k);
     // Batteries.
     for (const [name, node] of Object.entries(STORES)) e.stores[name] = Math.max(0, Math.min(node === 'EPS' ? GRID.epsCap : GRID.batteryCap, e.stores[name] - f.storeUsed[node] + f.charging[node]));
