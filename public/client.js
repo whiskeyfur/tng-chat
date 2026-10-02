@@ -845,12 +845,14 @@ function renderCombat() {
       const state = x.state === 'starting' ? `lighting ${x.start} of ${grid.impulseStartSecs} s` : x.state;
       const out = drive ? (x.state === 'running' ? ` · ${grid.cells[src]?.EPS || 0} of ${grid.impulseOutput} to the EPS, the rest to thrust` : '') : (x.state === 'running' ? ` · ${grid.cells[src]?.EPS || 0} of ${grid.auxOutput} to the EPS` : '');
       const self = x.epsTap && grid.epsLive && x.state === 'running';
-      const chamber = subRow(`${rn}Chamber`, 2, x.state === 'starting' ? (grid.subOk[`${rn}Chamber`] ? 'lighting' : 'NO POWER') : x.state === 'running' ? (self ? 'self-powered from the EPS' : 'on its bus ties') : '');
+      // The chamber's own pressure (its pump pulls deuterium from the feed): it lights at the feed's minimum.
+      const press = `pressure ${x.pressure}% (lights at ${grid.dfeed.min}%)`;
+      const chamber = subRow(`${rn}Chamber`, 2, `${press}${x.state === 'starting' ? (x.pressure < grid.dfeed.min ? ' · priming' : grid.subOk[`${rn}Chamber`] ? ' · lighting' : ' · NO POWER') : x.state === 'running' ? (self ? ' · self-powered from the EPS' : ' · on its bus ties') : ''}`);
       chamber.querySelector('th span').after(x.state === 'off' ? small('Light', `${rn}-start`, () => send({ type: 'grid', reactor: { name: rn, on: true } })) : small('Shut down', `${rn}-stop`, () => send({ type: 'grid', reactor: { name: rn, on: false } }), true));
       const rows = [
         parentRow(`ties-${src}`, label, 1, `${state}${out}`),
+        subRow(`${rn}Pump`, 2, self ? 'self-powered' : x.state !== 'off' ? 'pulling deuterium from the feed' : ''),
         chamber,
-        subRow(`${rn}Pump`, 2, self ? 'self-powered' : ''),
         toggleRow(`${rn}-epstap`, 'EPS tap', 2, x.epsTap, () => send({ type: 'grid', reactor: { name: rn, epsTap: !x.epsTap } }), x.epsTap ? (grid.epsLive ? 'running, the chamber powers itself from the EPS' : 'the EPS isn\'t energized: on its bus ties') : 'the chamber runs on its bus ties'),
       ];
       if (drive) {
@@ -869,7 +871,7 @@ function renderCombat() {
     const auxRows = () => Object.entries(grid.aux || {}).flatMap(([a, x]) => reactorRows(a, x));
     // The deuterium feed: valves, cryo-pumps and slush heaters; pressure, tank, temperature.
     const feedRows = () => [
-      parentRow('ties-deuterium-parent', 'Deuterium feed', 1, `pressure ${grid.dfeed.pressure}% (reactors light at ${grid.dfeed.min}%) · tank ${grid.deuterium} of ${grid.fuelCaps.deuterium} · slush ${grid.dfeed.temp} K`),
+      parentRow('ties-deuterium-parent', 'Deuterium feed', 1, `${grid.dfeed.pressure >= grid.dfeed.min ? 'deuterium available' : 'NO DEUTERIUM AVAILABLE'} · feed ${grid.dfeed.pressure}% · tank ${grid.deuterium} of ${grid.fuelCaps.deuterium} · slush ${grid.dfeed.temp} K`),
       toggleRow('deuterium-valves', 'Isolation valves', 2, grid.dfeed.valves, () => send({ type: 'grid', valves: !grid.dfeed.valves }), grid.dfeed.valves ? 'open' : 'closed: no feed'),
       subRow('cryoPumps', 2), subRow('slushHeaters', 2),
     ];

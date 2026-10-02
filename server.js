@@ -1336,15 +1336,16 @@ const isStore = (name) => name in STORES;
 // each end; the warp core's dilithium auto-trim needs all three.
 const COMPUTERS = ['computer1', 'computer2', 'computer3'];
 // Fusion reactors: the two impulse drives and two auxiliary fusion reactors.
-// Each has a fusion reaction chamber (a low bus: 10 to start, then 5 to keep
-// running) fed by its deuterium pump (a low bus, 5); with its EPS tap on, a
-// running chamber powers itself (and its pump) from the EPS instead. It lights
-// only with the deuterium feed at 30% pressure, and flames out below it, or
-// without its power. The impulse drives' accelerators (a 0-100 throttle) and
+// The deuterium feed makes deuterium available; each reactor's own deuterium
+// pump (a low bus, 5) pulls it into its fusion reaction chamber, building the
+// chamber's pressure (20% a second; without the pump or the feed it falls, 10%).
+// The chamber (a low bus: 10 to light, then 5 to keep running) lights at 30%
+// and flames out below it, or without its power. With its EPS tap on, a
+// running reactor powers its chamber and pump from the (energized) EPS instead. The impulse drives' accelerators (a 0-100 throttle) and
 // driver coils (Low gear: quick, a quarter impulse at most; High: slower, full
 // impulse) drive the ship; an aux reactor's output (75) goes to the EPS.
 const AUX = ['aux1', 'aux2'];
-const FUSION = { chamberStart: 10, chamberRun: 5, pump: 5, minPressure: 30, aux: 75, gears: { low: { top: 0.25, rate: 0.03 }, high: { top: 1, rate: 0.015 } } };
+const FUSION = { chamberStart: 10, chamberRun: 5, pump: 5, minPressure: 30, rise: 20, fall: 10, primeSecs: 10, aux: 75, gears: { low: { top: 0.25, rate: 0.03 }, high: { top: 1, rate: 0.015 } } };
 const reactorsOf = (e) => [...DRIVES.map((d) => [d, e.drives[d]]), ...AUX.map((a) => [a, e.aux[a]])];
 const reactorLabel = (r) => (r.startsWith('aux') ? `aux fusion reactor ${r.slice(3)}` : `${r} impulse drive`);
 // A drive's share of impulse: half impulse (0.125) at full throttle in High gear.
@@ -1538,9 +1539,10 @@ function freshEng(saved, { cold = false } = {}) {
     // Fusion reactors (older saves: drives running, throttle open, High gear, EPS taps on; aux reactors off).
     drives: Object.fromEntries(DRIVES.map((d) => {
       const v = typeof s.drives?.[d] === 'object' && s.drives[d] ? s.drives[d] : { state: s.drives?.[d] };
-      return [d, { state: (v.state ?? 'running') === 'running' && deuterium > 0 ? 'running' : 'off', start: 0, epsTap: v.epsTap ?? !cold, accel: Number.isFinite(v.accel) ? Math.max(0, Math.min(100, v.accel)) : cold ? 0 : 100, gear: v.gear === 'low' || v.gear === 'high' ? v.gear : cold ? 'low' : 'high' }];
+      const on = (v.state ?? 'running') === 'running' && deuterium > 0;
+      return [d, { state: on ? 'running' : 'off', start: 0, pressure: on ? 100 : 0, epsTap: v.epsTap ?? !cold, accel: Number.isFinite(v.accel) ? Math.max(0, Math.min(100, v.accel)) : cold ? 0 : 100, gear: v.gear === 'low' || v.gear === 'high' ? v.gear : cold ? 'low' : 'high' }];
     })),
-    aux: Object.fromEntries(AUX.map((a) => { const v = s.aux?.[a] || {}; return [a, { state: v.state === 'running' && deuterium > 0 ? 'running' : 'off', start: 0, epsTap: v.epsTap ?? false }]; })),
+    aux: Object.fromEntries(AUX.map((a) => { const v = s.aux?.[a] || {}; const on = v.state === 'running' && deuterium > 0; return [a, { state: on ? 'running' : 'off', start: 0, pressure: on ? 100 : 0, epsTap: v.epsTap ?? false }]; })),
     // The deuterium feed (older saves: valves open, at pressure) and the EPS manifold (energized if anything was feeding it).
     dfeed: { valves: s.dfeed?.valves ?? !cold, pressure: Number.isFinite(s.dfeed?.pressure) ? s.dfeed.pressure : cold ? 0 : 100, temp: 13.8 },
     epsLive,
@@ -1758,7 +1760,8 @@ function flow(k) {
     // runs unless its EPS tap has it powering itself from the (energized) EPS.
     ...reactorsOf(e).flatMap(([r, x]) => {
       const onBus = x.state === 'starting' || (x.state === 'running' && !(x.epsTap && e.epsLive));
-      return [[`sub:${r}Chamber`, !onBus ? 0 : x.state === 'starting' ? FUSION.chamberStart : FUSION.chamberRun], [`sub:${r}Pump`, onBus ? FUSION.pump : 0]];
+      const lighting = x.state === 'starting' && x.pressure >= FUSION.minPressure;
+      return [[`sub:${r}Chamber`, !onBus ? 0 : x.state === 'starting' ? (lighting ? FUSION.chamberStart : 0) : FUSION.chamberRun], [`sub:${r}Pump`, onBus ? FUSION.pump : 0]];
     }),
     ...['cryoPumps', 'slushHeaters'].map((x) => [`sub:${x}`, e.dfeed.valves ? DFEED.draw : 0]),
     ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => u.station === st).length * GRID.console]),
@@ -1918,8 +1921,8 @@ function gridView(k) {
   const r = (o) => Object.fromEntries(Object.entries(o).map(([x, v]) => [x, Math.round(v)]));
   return {
     core: e.core, antimatter: Math.floor(e.antimatter), deuterium: Math.floor(e.deuterium), fuelCaps: { antimatter: FUEL.antimatter, deuterium: FUEL.deuterium },
-    drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state, start: dr.start, thrusters: !!(e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length, epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear, top: Math.round(driveTop(dr) * 1000) / 1000 }]; })),
-    aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state, start: e.aux[a].start, epsTap: e.aux[a].epsTap }])), auxOutput: FUSION.aux,
+    drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state, start: dr.start, thrusters: !!(e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length, epsTap: dr.epsTap, pressure: Math.round(dr.pressure), accel: dr.accel, gear: dr.gear, top: Math.round(driveTop(dr) * 1000) / 1000 }]; })),
+    aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state, start: e.aux[a].start, epsTap: e.aux[a].epsTap, pressure: Math.round(e.aux[a].pressure) }])), auxOutput: FUSION.aux,
     dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure), temp: e.dfeed.temp, min: FUSION.minPressure }, epsLive: e.epsLive, epsGen: Math.round(f.epsGen), epsChargeGen: EPS_CHARGE_GEN, impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
     transfer: e.transfer ? { ...e.transfer, left: Math.ceil(e.transfer.left), with: e.transfer.with === 'station' ? e.docked : shipName(e.transfer.with) } : null,
     dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName), autoRefuel: e.autoRefuel,
@@ -2026,10 +2029,10 @@ function gridCommand(ws, msg) {
     const label = reactorLabel(rName);
     if (rx.on === true && r.state === 'off') {
       if (e.deuterium <= 0) return note(`the ${label} needs deuterium`);
-      if (e.dfeed.pressure < FUSION.minPressure) return note(`the ${label} won't light: deuterium feed pressure ${Math.round(e.dfeed.pressure)}% (it needs ${FUSION.minPressure}%: open the feed's valves, power its cryo-pumps and slush heaters)`);
-      r.state = 'starting'; r.start = 0; flowCache.delete(key);
-      if (!flow(key).subOk[`${rName}Chamber`] || !flow(key).subOk[`${rName}Pump`]) { r.state = 'off'; flowCache.delete(key); return note(`the ${label}'s reaction chamber (${FUSION.chamberStart} to start) and deuterium pump (${FUSION.pump}) need power: tie them to a bus that has it`); }
-      said.push(`${label}: chamber lighting`);
+      if (e.dfeed.pressure < FUSION.minPressure) return note(`the ${label} won't light: deuterium feed pressure ${Math.round(e.dfeed.pressure)}% (no deuterium available below ${FUSION.minPressure}%: open the feed's valves, power its cryo-pumps and slush heaters)`);
+      r.state = 'starting'; r.start = 0; r.prime = 0; flowCache.delete(key);
+      if (!flow(key).subOk[`${rName}Pump`]) { r.state = 'off'; flowCache.delete(key); return note(`the ${label}'s deuterium pump (${FUSION.pump}) needs power: tie it to a bus that has it`); }
+      said.push(`${label}: pump priming the chamber`);
     } else if (rx.on === false && r.state !== 'off') { r.state = 'off'; r.start = 0; said.push(`${label} shut down`); }
     if (typeof rx.epsTap === 'boolean') { r.epsTap = rx.epsTap; said.push(`${label}'s EPS tap ${r.epsTap ? 'on: it powers itself from the EPS while running' : 'off: it runs on its bus ties'}`); }
     if (DRIVES.includes(rName) && Number.isFinite(rx.accel)) { r.accel = Math.max(0, Math.min(100, Math.round(rx.accel))); said.push(`${label}'s accelerators at ${r.accel}%`); }
@@ -2643,15 +2646,19 @@ setInterval(() => {
     for (const [rn, rr] of reactorsOf(e)) {
       const label = reactorLabel(rn);
       const out = (why) => { rr.state = 'off'; rr.start = 0; e.dirty = true; opLog(k, `${label} shut down: ${why}`); tellStations(k, ['Engineering'], `Engineering: ${label} shut down (${why})`); };
+      // Its pump pulls deuterium from the feed into the chamber.
+      const pumping = rr.state !== 'off' && f.subOk[`${rn}Pump`] && (c.damage[`${rn}Pump`] || 0) < SUB_FAIL_DAMAGE && e.dfeed.pressure >= FUSION.minPressure && e.deuterium > 0;
+      rr.pressure = Math.max(0, Math.min(100, rr.pressure + (pumping ? FUSION.rise : -FUSION.fall)));
       if (rr.state === 'off') continue;
-      const powered = f.subOk[`${rn}Chamber`] && f.subOk[`${rn}Pump`];
       if (e.deuterium <= 0) { out('out of deuterium'); continue; }
-      if (e.dfeed.pressure < FUSION.minPressure) { out(`flameout: deuterium feed pressure ${Math.round(e.dfeed.pressure)}%`); continue; }
-      if ((c.damage[`${rn}Pump`] || 0) >= SUB_FAIL_DAMAGE) { out('deuterium pump damaged'); continue; }
       if (rr.state === 'starting') {
-        if (!powered) { out('startup failed: no power to its chamber or pump'); continue; }
+        if (rr.pressure < FUSION.minPressure) { if (++rr.prime > FUSION.primeSecs) out(`its pump couldn't bring the chamber to ${FUSION.minPressure}% pressure`); continue; }
+        if (!f.subOk[`${rn}Chamber`]) { out('the chamber has no power to light'); continue; }
         if (++rr.start >= GRID.impulseStartSecs) { rr.state = 'running'; rr.start = 0; e.dirty = true; opLog(k, `${label} running`); tellStations(k, ['Engineering'], `Engineering: ${label} running`); }
-      } else if (!(rr.epsTap && e.epsLive) && !powered) { out('no power to its chamber: tie it in, or turn its EPS tap on'); continue; }
+      } else {
+        if (rr.pressure < FUSION.minPressure) { out(`flameout: chamber pressure ${Math.round(rr.pressure)}%`); continue; }
+        if (!(rr.epsTap && e.epsLive) && !f.subOk[`${rn}Chamber`]) { out('no power to its chamber: tie it in, or turn its EPS tap on'); continue; }
+      }
       e.deuterium = Math.max(0, e.deuterium - FUEL.impulseBurn);
     }
     // The EPS manifold: energized once pressurized, collapsed when the pressure's gone.

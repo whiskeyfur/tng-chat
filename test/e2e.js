@@ -1663,8 +1663,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     // An aux fusion reactor: lit on bus power, its output (75) to the EPS.
     barclay.send({ type: 'grid', reactor: { name: 'aux1', on: true } });
     await waitFor(() => barclay.nav()?.own.grid.aux.aux1.state === 'running' && barclay.nav().own.grid.cells.aux1.EPS > 0, 15000);
-    barclay.send({ type: 'grid', reactor: { name: 'aux1', on: false } });
-    step(`aux fusion reactor 1 lit on bus power and fed the EPS (${barclay.nav().own.grid.cells.aux1.EPS})`);
+    const auxFed = barclay.nav().own.grid.cells.aux1.EPS;
+    // Its own pump pulls the deuterium in: untie the pump and the chamber's pressure falls; below 30% it flames out (the feed still up).
+    barclay.send({ type: 'grid', ties: { 'sub:aux1Pump': [] } });
+    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /aux fusion reactor 1 shut down \(flameout: chamber pressure \d+%\)/.test(m.text)), 15000);
+    assert.ok(barclay.nav().own.grid.dfeed.pressure >= 30, 'the feed itself was up');
+    barclay.send({ type: 'grid', ties: { 'sub:aux1Pump': ['A'] } });
+    step(`aux fusion reactor 1 lit on bus power and fed the EPS (${auxFed}); with its pump untied, its chamber's pressure fell and it flamed out though the feed was up`);
     barclay.send({ type: 'grid', ties: { thrustersPort: ['EPS'] }, impulse: { drive: 'port', on: false } });
     // #2: a battery on Bus A charges from Bus A's surplus even while Bus B and
     // the EPS are short (Bus A is served, and its batteries charged, first).
