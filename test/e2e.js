@@ -1259,22 +1259,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     await geordi.click('#core-eject');
     await waitFor(() => laforge.nav()?.own.grid.core === 'ejected' && !laforge.nav().own.grid.antimatter);
     step('Engineering ejected the warp core and antimatter pods from Damage control (armed by one press, fired by a second)');
-    // The menu, LCARS style: Power opens its submenu in place of the column; Back goes up, Home to the top.
-    assert.equal(await geordi.isDisabled('#back-button'), true, 'at the top of the menu, Back is dim');
-    await geordi.click('#sections [data-menu="Power"]');
-    await geordi.waitForSelector('#sections .lcars-nav-button--here:has-text("Power")');
-    assert.deepEqual(await geordi.$$eval('#sections [data-screen-tab]', (bs) => bs.map((b) => b.dataset.screenTab)), ['st-power', 'st-grid'], 'the column is the submenu');
-    await geordi.waitForSelector('[data-screen="st-power"]:not([hidden])');
-    await geordi.reload(); // the menu path is kept
-    await geordi.waitForSelector('#sections .lcars-nav-button--here:has-text("Power")');
+    // Back (the bottom-left corner): to the power grid, where geordi was before Damage control (and before the refresh).
     await geordi.click('#back-button');
-    await geordi.waitForSelector('#sections [data-menu="Power"]');
-    assert.equal(await geordi.isDisabled('#back-button'), true);
-    await geordi.click('#sections [data-menu="Power"]');
+    await geordi.waitForSelector('[data-screen="st-grid"]:not([hidden])');
+    // Home (the top-left corner): the station's main screen.
     await geordi.click('.lcars-elbow--top');
     await geordi.waitForSelector('[data-screen="st-ship"]:not([hidden])');
-    await geordi.waitForSelector('#sections [data-menu="Power"]');
-    step('the menu: Power opened its submenu in place (kept across a reload), Back went up a level, and Home (top-left) went to the top menu and the ship systems screen');
+    step('Back returned to the power grid; Home (top-left) went to the ship systems screen');
     // Shift-click the name in the header: back to sign-in, to start somewhere new (nothing signs back in).
     await geordi.click('#station-sub', { modifiers: ['Shift'] });
     await geordi.waitForSelector('[data-screen="register"]:not([hidden])');
@@ -1400,9 +1391,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.waitForSelector('#console-dark', { state: 'hidden' });
     await screen(op, 'status');
     await op.waitForSelector('#console-dark:not([hidden])', { state: 'attached' });
-    laforge.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'] } });
+    // (Cold iron: nothing tied in, consoles, sensors and comms included.)
+    laforge.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'], 'console:Operations': ['A'], 'console:Engineering': ['A'], 'system:lateral': ['A'], 'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'] } });
     await op.waitForSelector('#console-dark', { state: 'hidden' });
-    step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt cold (consoles dark, no fuel) docked at ${reborn.base}; tied to dock power, it came back`);
+    step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt cold iron (nothing tied in, no fuel) docked at ${reborn.base}; tied to dock power, the ops console came back`);
     laforge.close();
 
     // Automated starbases: a hail with nobody aboard gets the automated reply;
@@ -1533,7 +1525,15 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(cold.antimatter + cold.deuterium, 0);
     assert.ok(['solar', 'dock', 'ship', 'core', 'containment', 'crosslink'].every((k) => !cold.ties[k].length), 'a new ship should start with no power source tied in');
     assert.deepEqual(['A', 'B', 'C', 'EPS'].map((n) => cold.stores[n].level), [100, 100, 100, 0], 'full batteries on each bus; the EPS unpressurized');
-    assert.deepEqual(['A', 'B', 'C'].map((n) => cold.stores[n].breaker), [false, false, false], "the batteries' main breakers open"); assert.ok(Object.values(cold.drives).every((d) => d.state === 'off') && Object.values(cold.taps).every((t) => t === 0), 'drives off and taps closed');
+    assert.deepEqual(['A', 'B', 'C'].map((n) => cold.stores[n].breaker), [false, false, false], "the batteries' main breakers open");
+    assert.ok(Object.entries(cold.ties).every(([k, v]) => !v.length || ['impulsePort', 'impulseStarboard'].includes(k)), `cold iron: nothing tied in (${JSON.stringify(Object.entries(cold.ties).filter(([, v]) => v.length))})`);
+    // Engineering ties in the loads (a usual layout) before bringing anything up.
+    barclay.send({ type: 'grid', ties: {
+      'console:Engineering': ['A'], 'console:Tactical': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'system:gravity': ['A'], 'system:lighting': ['A'], 'system:lateral': ['A'],
+      'system:replicators': ['B'], 'system:recreation': ['B'], 'system:transporter': ['B'], 'sub:constriction': ['A'], 'sub:corePump': ['A'], 'sub:injector': ['A'], 'sub:portPump': ['B'], 'sub:starboardPump': ['B'],
+      'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'sub:forcefields': ['B'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'],
+      ...Object.fromEntries(['sensors', 'sif', 'idf', 'engines', 'injectors', 'shields', 'weapons', 'deflector', 'tractor'].map((x) => [`system:${x}`, ['EPS']])) } });
+    await waitFor(() => barclay.nav()?.own.grid.ties['system:sif'].join() === 'EPS'); assert.ok(Object.values(cold.drives).every((d) => d.state === 'off') && Object.values(cold.taps).every((t) => t === 0), 'drives off and taps closed');
     // A source tied to two buses splits evenly, but what one bus can't use goes to the other:
     // solar (25) on Bus A (short) and Bus C (nothing tied to it) gives A all 25.
     barclay.send({ type: 'grid', ties: { solar: ['A', 'C'] } });

@@ -1431,7 +1431,8 @@ const DEFAULT_TIES = { solar: ['A'], dock: ['A'], ship: [], impulsePort: ['EPS']
 // docked at a starbase, reactors offline, no power source tied in (consoles
 // and systems keep their wiring), taps closed, no antimatter or deuterium.
 // Engineering brings them up on dock power.
-const COLD = { ties: { ...Object.fromEntries(Object.keys(DEFAULT_TIES).map((k) => [k, []])), impulsePort: ['EPS'], impulseStarboard: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'] }, taps: { A: 0, B: 0, C: 0 }, breakers: { A: false, B: false, C: false }, core: 'offline', drives: { port: 'off', starboard: 'off' }, antimatter: 0, deuterium: 0 };
+// Cold iron: nothing tied in anywhere, sources or loads (the drives feed the EPS only through their thrusters' ties).
+const COLD = { ties: { ...Object.fromEntries([...Object.keys(DEFAULT_TIES), ...Object.keys(DEFAULT_LOAD_TIES)].map((k) => [k, []])), impulsePort: ['EPS'], impulseStarboard: ['EPS'] }, taps: { A: 0, B: 0, C: 0 }, breakers: { A: false, B: false, C: false }, core: 'offline', drives: { port: 'off', starboard: 'off' }, antimatter: 0, deuterium: 0 };
 function freshEng(saved, { cold = false } = {}) {
   const s = saved && typeof saved === 'object' ? saved : cold ? COLD : {};
   // Ties: a list of nodes (older saves had one bus, or null for off), only those allowed.

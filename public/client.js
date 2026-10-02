@@ -84,7 +84,7 @@ let reloading = false;
 // by hand comes back the same way.
 const shownScreen = () => [...document.querySelectorAll('[data-screen]')].find((x) => !x.hidden)?.dataset.screen;
 function saveRejoin() {
-  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: me.station, screen: shownScreen(), menu: menuPath })); } catch {}
+  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: me.station, screen: shownScreen() })); } catch {}
 }
 window.addEventListener("screenchange", () => { if (me) saveRejoin(); });
 window.addEventListener('pagehide', saveRejoin);
@@ -93,82 +93,55 @@ let pendingScreen = null;
 function restoreScreen() {
   const id = pendingScreen;
   pendingScreen = null;
+  quietScreen = true;
   if (id && document.querySelector(`[data-screen="${CSS.escape(id)}"]`)) showScreen(id);
+  quietScreen = false;
   saveRejoin();
 }
 
-// The left-hand menu, LCARS style: tapping a group replaces the column with
-// its own items (the group's button on top, relabelled with where you are);
-// Back (the bottom-left corner) goes up a level, Home (the top-left corner)
-// to the station's top menu and its main screen. Kept across reloads.
-let menuPath = [], pendingMenu = null;
+// Back (the bottom-left corner): the screens shown at this station, on this
+// vessel (a remote one too), newest last. Moving to another station starts
+// afresh, so Back never crosses stations. Kept across reloads.
+const HISTORY = 'stchat-history';
+let screenHistory = { key: null, stack: [], at: null };
+try { screenHistory = { ...screenHistory, ...JSON.parse(sessionStorage.getItem(HISTORY) || '{}') }; } catch {}
+let quietScreen = false; // showing a screen that isn't a step forward (Back, a rejoin, a station's first screen)
 let controllingVessel = null;
-const leafOf = (item) => (typeof item === 'string' ? item : leafOf(item.items[0]));
-function menuLevel() {
-  let items = stationView?.menu || [];
-  const trail = [];
-  for (const label of menuPath) {
-    const g = items.find((x) => typeof x === 'object' && x.label === label);
-    if (!g) break;
-    trail.push(g); items = g.items;
-  }
-  menuPath = trail.map((g) => g.label);
-  return { items, trail };
+const historyKey = () => (me ? `${controllingVessel || me.ship}|${me.station}` : null);
+function renderBack() {
+  const b = $('back-button');
+  if (b) b.disabled = !me || screenHistory.key !== historyKey() || !screenHistory.stack.length;
 }
-function renderMenu() {
-  const back = $('back-button');
-  if (!stationView) { if (back) back.disabled = true; return; }
-  const { items, trail } = menuLevel();
-  const sec = (id) => stationView.sections.find((x) => x.id === id);
-  const navButton = (label, color) => {
-    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-nav-button' });
-    if (color) b.style.setProperty('--accent', color);
-    b.append(Object.assign(document.createElement('span'), { textContent: label }));
-    return b;
-  };
-  const buttons = [];
-  if (trail.length) {
-    // Where you are: the open group's button, relabelled (tap it to go up).
-    const here = navButton(trail.map((g) => g.label).join(' › '), sec(leafOf(trail[trail.length - 1]))?.color);
-    here.classList.add('lcars-nav-button--here');
-    here.setAttribute('aria-current', 'location');
-    here.onclick = menuUp;
-    buttons.push(here);
+window.addEventListener('screenchange', (ev) => {
+  const key = historyKey(), id = ev.detail;
+  if (!key) return renderBack();
+  if (screenHistory.key !== key) screenHistory = { key, stack: [], at: null };
+  else if (!quietScreen && screenHistory.at && screenHistory.at !== id) { screenHistory.stack.push(screenHistory.at); screenHistory.stack.splice(0, screenHistory.stack.length - 50); }
+  screenHistory.at = id;
+  try { sessionStorage.setItem(HISTORY, JSON.stringify(screenHistory)); } catch {}
+  renderBack();
+});
+document.getElementById('back-button')?.addEventListener('click', () => {
+  if (screenHistory.key !== historyKey()) return;
+  while (screenHistory.stack.length) {
+    const id = screenHistory.stack.pop();
+    if (!document.querySelector(`[data-screen="${CSS.escape(id)}"]`)) continue;
+    quietScreen = true;
+    showScreen(id);
+    quietScreen = false;
+    return;
   }
-  for (const it of items) {
-    if (typeof it === 'string') {
-      const x = sec(it);
-      if (!x) continue;
-      const b = navButton(x.title, x.color);
-      b.dataset.screenTab = x.id;
-      buttons.push(b);
-    } else {
-      const b = navButton(it.label, sec(leafOf(it))?.color);
-      b.classList.add('lcars-nav-button--group');
-      b.dataset.menu = it.label;
-      b.onclick = () => { menuPath.push(it.label); renderMenu(); showScreen(leafOf(it)); };
-      buttons.push(b);
-    }
-  }
-  $('sections').replaceChildren(...buttons);
-  // The screen showing keeps its tab lit.
-  const shown = shownScreen();
-  for (const b of document.querySelectorAll('[data-screen-tab]')) { if (b.dataset.screenTab === shown) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
-  if (back) back.disabled = !trail.length;
-  saveRejoin();
-}
-function menuUp() { if (!menuPath.length) return; menuPath.pop(); renderMenu(); }
-function menuHome() {
+  renderBack();
+});
+// Home (the top-left corner): the station's main screen.
+function goHome() {
   if (!me) return;
-  menuPath = [];
-  renderMenu();
-  showScreen(stationView ? leafOf(stationView.menu[0]) : 'status');
+  showScreen(stationView ? stationView.sections[0].id : 'status');
 }
-document.getElementById('back-button')?.addEventListener('click', menuUp);
 for (const corner of document.querySelectorAll('.lcars-elbow--top')) {
   corner.setAttribute('role', 'button'); corner.tabIndex = 0; corner.setAttribute('aria-label', 'Home');
-  corner.addEventListener('click', menuHome);
-  corner.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); menuHome(); } });
+  corner.addEventListener('click', goHome);
+  corner.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); goHome(); } });
 }
 // Shift-click the name and ship in the header: sign out to the sign-in screen
 // to start somewhere new. Leaves the ship (and any call), and forgets the
@@ -206,7 +179,6 @@ function tryRejoin() {
   const r = rejoin;
   rejoin = null;
   pendingScreen = r.screen || null;
-  pendingMenu = Array.isArray(r.menu) ? r.menu : null;
   if (r.station === 'Operations' && opsKeyRequired) { $('name').value = r.name; return; } // needs the code: sign in by hand
   if (r.station === 'Operations') send({ type: 'operator', name: r.name, ship: r.ship });
   else send({ type: 'register', name: r.name, ship: r.ship, station: r.station });
@@ -277,10 +249,15 @@ function showStation() {
   setHeader(stationView.code, `${me.name} · ${me.ship}`, me.station);
   // The top-left elbow and the header bar running from it share the station's colour.
   document.querySelector('.lcars-header').style.setProperty('--elbow', `var(--lcars-${stationView.color})`);
-  // A new station starts at the top of its menu (a rejoin goes back where it was).
-  menuPath = pendingMenu || [];
-  pendingMenu = null;
-  renderMenu();
+  $('sections').replaceChildren(...stationView.sections.map((s) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'lcars-nav-button';
+    b.dataset.screenTab = s.id;
+    b.style.setProperty('--accent', s.color);
+    b.append(Object.assign(document.createElement('span'), { textContent: s.title }));
+    return b;
+  }));
   stationView.setCrew(comms.users);
   // Helm and Science fly and watch the ship on the sector map.
   const navRoot = document.querySelector('[data-helm], [data-sensors]');
@@ -296,7 +273,9 @@ function showStation() {
   fillReassign();
   renderTraffic();
   renderCommLinks();
-  showScreen(leafOf(stationView.menu[0]));
+  quietScreen = screenHistory.key === historyKey();
+  showScreen(stationView.sections[0].id);
+  quietScreen = false;
   restoreScreen();
 }
 
@@ -1318,9 +1297,9 @@ function showOps() {
   $('ops-log').replaceChildren();
   ops = createOps({ send, comms, me: () => me });
   fillReassign();
-  menuPath = [];
-  renderMenu();
+  quietScreen = screenHistory.key === historyKey();
   showScreen('status');
+  quietScreen = false;
   restoreScreen();
 }
 
