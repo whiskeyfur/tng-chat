@@ -1434,6 +1434,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     await geordi.waitForSelector('#admin-dialog:has-text("no supervisor")');
     // Create ship: a name, a class (taps, none picked to start), and for a starbase a spot on the map.
     // Create stays off until it's all there. (A ship needs the supervisor to start its computer.)
+    // (The panel scrolls on its own, within the window: Create ship is below the status.)
+    assert.deepEqual(await geordi.$eval('#admin-dialog', (d) => [getComputedStyle(d).overflowY, d.getBoundingClientRect().bottom <= window.innerHeight + 1]), ['auto', true]);
     await geordi.fill('#create-name', 'Starbase 99');
     assert.equal(await geordi.isDisabled('#create-go'), true, 'Create should wait for a class');
     await geordi.click('#create-class button[data-value="starbase"]');
