@@ -121,9 +121,11 @@
           const li = document.createElement('li');
           li.className = 'comms-entry';
           const name = document.createElement('span');
-          name.textContent = u.name;
+          name.textContent = u.title || u.name;
           const station = document.createElement('small');
-          station.textContent = `${isHome ? u.station : `${u.station}, ${u.ship}`}${u.sickbay ? ' · sickbay' : ''}${u.confined ? ' · confined' : ''}`;
+          // Species and gender come only for people in the same place.
+          const inPerson = [u.species, u.gender].filter(Boolean).join(', ');
+          station.textContent = `${isHome ? u.station : `${u.station}, ${u.ship}`}${inPerson ? ` · ${inPerson}` : ''}${u.sickbay ? ' · sickbay' : ''}${u.confined ? ' · confined' : ''}`;
           name.append(station);
           const btn = document.createElement('button');
           btn.type = 'button';
@@ -159,7 +161,7 @@
         const others = m.to.filter((t) => t.id !== me()?.id).map((t) => t.name);
         li.className = mine ? 'comms-msg--mine' : '';
         const head = document.createElement('small');
-        head.textContent = `${new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${mine ? `to ${m.to.map((t) => t.name).join(', ')}` : `${m.from.name}${others.length ? ` to you, ${others.join(', ')}` : ''}`}`;
+        head.textContent = `${new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${mine ? `to ${m.to.map((t) => t.title || t.name).join(', ')}` : `${m.from.title || m.from.name}${others.length ? ` to you, ${others.join(', ')}` : ''}`}`;
         const reply = document.createElement('button');
         reply.type = 'button';
         reply.className = 'lcars-button lcars-button--pill comms-reply';
@@ -202,7 +204,7 @@
           return true;
         case 'text':
           messages.push(msg);
-          if (msg.from.id !== me()?.id) { opts.log(`message from ${msg.from.name}: ${msg.text}`); if (!dialog.open) unread++; }
+          if (msg.from.id !== me()?.id) { opts.log(`message from ${msg.from.title || msg.from.name}: ${msg.text}`); if (!dialog.open) unread++; }
           renderMessages();
           renderButton();
           return true;

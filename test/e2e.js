@@ -38,9 +38,9 @@ const stopComputer = (proc) => new Promise((r) => { proc.once('exit', r); proc.k
 const stored = (folder, ship, name) => { try { return fs.readFileSync(path.join(DATA_DIR, folder, ship, name), 'utf8'); } catch { return null; } };
 // Each column of the grid table balances: what the sources give (and the
 // EPS taps bring down) is what the loads and charging batteries take. Cells
-// are rounded for display, so allow a unit or two. Returns the columns that don't.
+// are rounded up for display, so allow a few units. Returns the columns that don't.
 const GRID_SOURCES = ['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'core', 'stores', 'taps'];
-const unbalanced = (g) => ['A', 'B', 'C', 'EPS'].map((n) => [n, Object.entries(g.cells).reduce((sum, [k, c]) => sum + (GRID_SOURCES.includes(k) ? c[n] || 0 : k === 'feed' ? 0 : -(c[n] || 0)), 0)]).filter(([, v]) => Math.abs(v) > 2);
+const unbalanced = (g) => ['A', 'B', 'C', 'EPS'].map((n) => [n, Object.entries(g.cells).reduce((sum, [k, c]) => sum + (GRID_SOURCES.includes(k) ? c[n] || 0 : k === 'feed' ? 0 : -(c[n] || 0)), 0)]).filter(([, v]) => Math.abs(v) > 6); // (cells are shown rounded up)
 const SYSTEMS_SHORT = (own) => Object.keys(own.grid.demand).filter((k) => own.grid.delivered[k] < own.grid.demand[k]);
 // The transporter's TOS energize sliders: all three to the top.
 const energize = async (page) => { await page.waitForSelector('#beam-slider-1:not([disabled])'); await page.waitForFunction(() => [...document.querySelectorAll('.tr-slider')].every((r) => Number(r.value) === 0)); for (const n of [1, 2, 3]) await page.$eval(`#beam-slider-${n}`, (r) => { r.value = 100; r.dispatchEvent(new Event('input', { bubbles: true })); }); };
@@ -418,7 +418,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     step('ops called carol from the roster');
 
     // Station consoles: each post gets its own displays.
-    assert.equal(await alice.locator('#st-ship .st-ship').count(), 1, 'crew console shows the ship');
+    assert.equal(await alice.locator('#st-msd .msd-canvas').count(), 1, 'crew console shows the master systems display');
 
     // Ship to ship: alice (Enterprise) reaches martok (K'Vatch) only through
     // both ships' operators.
@@ -438,7 +438,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await martok.waitForSelector('#st-dept li[data-dept="Operations"][data-manned]', { state: 'attached' });
     assert.match(await martok.textContent('#st-dept li[data-dept="Medical"]'), /Unmanned/);
     assert.equal(await martok.locator('#st-dept li[data-dept="Medical"][data-manned]').count(), 0);
-    assert.equal(await kor.locator('#st-ship .st-ship').count(), 1, 'engineering console has the ship schematic');
+    assert.equal(await kor.locator('#st-msd .msd-canvas').count(), 1, 'engineering console has the master systems display');
     step('each ship sees only its own crew; ops see the other ship; stations get their own displays');
 
     await screen(op, 'hail');
@@ -1261,7 +1261,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     await geordi.waitForSelector('#ls-table .ls-tap[data-loc="Crew"][data-sys="gravity"][aria-pressed="false"]');
     await geordi.waitForFunction((b) => window.__nav.last.own.grid.demand.gravity < b, gravBefore);
     await geordi.click('#ls-table .ls-tap[data-loc="Crew"][data-sys="gravity"]');
-    step('the Life support panel: gravity switched off in Crew quarters took its share off the draw, and back on');
+    // Atmosphere off where someone is: everyone aboard is warned, naming the place.
+    const bobAt = await bob.evaluate(() => window.__voice.me.station);
+    await geordi.click(`#ls-table .ls-tap[data-loc="${bobAt}"][data-sys="atmosphere"]`);
+    await bob.waitForSelector(`.bcast--alert:has-text("NO ATMOSPHERE: ${bobAt}")`, { state: 'attached' });
+    await geordi.click(`#ls-table .ls-tap[data-loc="${bobAt}"][data-sys="atmosphere"]`);
+    await bob.waitForFunction(() => !document.querySelector('.bcast--alert')?.textContent.includes('NO ATMOSPHERE'));
+    step(`the Life support panel: gravity switched off in Crew quarters took its share off the draw; atmosphere off at ${bobAt}, where bob is, warned "NO ATMOSPHERE: ${bobAt}"`);
     // The Warp core panel: the reaction's state, readouts and controls.
     await screen(geordi, 'st-core');
     await geordi.waitForSelector('#wc-state:has-text("Running")');
@@ -1404,7 +1410,7 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // The Captain sets the self-destruct; everyone aboard sees the countdown; aborted.
     picard.on('dialog', (d) => d.accept());
-    await screen(picard, 'st-status');
+    await screen(picard, 'st-msd'); // (the ship's status and the self-destruct sit under the master systems display)
     await picard.click('#self-destruct');
     await bob.waitForSelector('.bcast--alert:has-text("Self-destruct in")', { state: 'attached' });
     await picard.click('#self-destruct-abort');
@@ -1568,7 +1574,17 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.ok(Object.entries(cold.ties).every(([k, v]) => !v.length || ['impulsePort', 'impulseStarboard'].includes(k)), `cold iron: nothing tied in (${JSON.stringify(Object.entries(cold.ties).filter(([, v]) => v.length))})`);
     // A dark room: no lights and the console dark: black but for Station and comms.
     const dataPage = await openAs(browser, 'data', 'data', 'Excelsior', 'Science');
-    await dataPage.waitForFunction(() => document.body.hasAttribute('data-blackout'));
+    await dataPage.waitForFunction(() => document.body.dataset.blackout === 'all');
+    const inert = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#sections > [data-screen-tab], #log-tab, #library-tab, #reassign-tab, #comms-button, .lcars-elbow--top, #back-button')]
+      .map((b) => [b.dataset.screenTab || b.id || b.className, getComputedStyle(b).pointerEvents === 'none'])));
+    const darkSeen = await inert(dataPage);
+    assert.ok(Object.entries(darkSeen).every(([k, v]) => v === !['reassign', 'reassign-tab', 'comms-button'].includes(k)), `only Comms and Station work in the dark: ${JSON.stringify(darkSeen)}`);
+    // Engineering in the dark keeps its Power grid too, to bring the ship up.
+    const engDark = await openAs(browser, 'scott', 'scott', 'Excelsior', 'Engineering');
+    await engDark.waitForFunction(() => document.body.dataset.blackout === 'engineering');
+    const engSeen = await inert(engDark);
+    assert.ok(engSeen['st-grid'] === false && engSeen['st-msd'] === true && engSeen.reassign === false && engSeen['comms-button'] === false, JSON.stringify(engSeen));
+    await engDark.close();
     assert.equal(await dataPage.isVisible('#reassign-tab'), true, 'the Station button still works');
     await dataPage.click('#reassign-tab');
     await dataPage.waitForSelector('[data-screen="reassign"]:not([hidden])');
@@ -1791,6 +1807,21 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await alice.evaluate(() => window.__voice.state), 'idle', 'no call needed for messages');
     await closeComms(alice);
     step('alice texted bob and carol together without a call; bob\'s Comms button showed the unread message');
+
+    // Rank, species and gender: alice picks hers on the Station screen. Her rank shows to
+    // everyone with her name; her species and gender only to people in the same place.
+    await screen(alice, 'reassign');
+    for (const [k, v] of [['rank', 'Lt. Cmdr.'], ['species', 'Vulcan'], ['gender', 'Female']]) await alice.click(`#station-profile [data-profile="${k}"][data-value="${v}"]`);
+    await alice.waitForSelector('#station-sub:has-text("Lt. Cmdr. alice")');
+    const aliceAs = (page) => page.evaluate((who) => window.__comms.users.find((u) => u.id === who), id('alice'));
+    const aliceAt = await alice.evaluate(() => window.__voice.me.station);
+    for (const page of [bob, carol]) {
+      await page.waitForFunction((who) => window.__comms.users.find((u) => u.id === who)?.title === 'Lt. Cmdr. alice', id('alice'));
+      const there = (await page.evaluate(() => window.__voice.me.station)) === aliceAt, seen = await aliceAs(page);
+      assert.deepEqual([seen.species ?? null, seen.gender ?? null], there ? ['Vulcan', 'Female'] : [null, null], `${await page.evaluate(() => window.__voice.me.name)} at ${await page.evaluate(() => window.__voice.me.station)} (alice at ${aliceAt})`);
+    }
+    assert.equal(await alice.evaluate(() => JSON.parse(localStorage.getItem('stchat-profile')).rank), 'Lt. Cmdr.', 'remembered with the name');
+    step("alice took Lt. Cmdr., Vulcan, female on the Station screen: everyone sees \"Lt. Cmdr. alice\"; only people in her place see Vulcan, female");
 
     // Closing the tab mid-call ends the call for the other side. Meanwhile
     // another ship's Communications can't see this call inside the Enterprise.

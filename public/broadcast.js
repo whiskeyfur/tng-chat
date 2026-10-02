@@ -96,7 +96,7 @@
           const audio = new Audio();
           audio.autoplay = true;
           listening.set(msg.bid, { bid: msg.bid, from: msg.from, label: msg.label, audio, muted: false });
-          log?.(`all hands: ${msg.from.name} (${msg.from.station})`);
+          log?.(`all hands: ${msg.from.title || msg.from.name} (${msg.from.station})`);
           render();
           return true;
         }
@@ -150,14 +150,14 @@
       for (const o of orders) {
         const done = (type) => { orders.splice(orders.indexOf(o), 1); if (o.id) send({ type, id: o.id }); render(); };
         // A reassignment moves you when you acknowledge it; you may decline it.
-        pill('bcast--order', `${o.from.station === 'First Officer' ? "First Officer's" : "Captain's"} orders · ${o.from.name}: ${o.text}`,
+        pill('bcast--order', `${o.from.station === 'First Officer' ? "First Officer's" : "Captain's"} orders · ${o.from.title || o.from.name}: ${o.text}`,
           button('Acknowledge', () => done('order-ack')), ...(o.reassign ? [button('Decline', () => done('order-decline'), true)] : []));
       }
       if (speaking) {
         pill('bcast--speaking', `On air: ${speaking.label}`, button('End broadcast', () => send({ type: 'bcast-end', bid: speaking.bid }), true));
       }
       for (const l of listening.values()) {
-        pill('bcast--listening', `All hands · ${l.from.name} (${l.from.station}${l.from.ship.toLowerCase() !== me()?.ship.toLowerCase() ? `, ${l.from.ship}` : ''})`,
+        pill('bcast--listening', `All hands · ${l.from.title || l.from.name} (${l.from.station}${l.from.ship.toLowerCase() !== me()?.ship.toLowerCase() ? `, ${l.from.ship}` : ''})`,
           button(l.muted ? 'Unmute' : 'Mute', () => { l.muted = !l.muted; l.audio.muted = l.muted; render(); }));
       }
       if (radio) {

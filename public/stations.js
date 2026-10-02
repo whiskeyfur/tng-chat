@@ -307,9 +307,10 @@
     Captain: (ship) => ({ code: 'CMD 01', color: 'gold', panels: [
       // Alert status and orders (client.js fills it in).
       panel('st-command', 'Command', 'red', true, h('div', { 'data-command': '' })),
-      // Real hull, shields, speed and damage (client.js fills it in).
-      panel('st-status', 'Ship status', 'gold', true, h('div', { 'data-ship-status': '' })),
-      panel('st-msd', 'Master systems display', 'orange', false, h('div', { class: 'msd', 'data-msd': '' })),
+      // The master systems display, with the ship's real hull, shields, speed and
+      // damage, and the self-destruct, under it (client.js fills them in).
+      panel('st-msd', 'Master systems display', 'orange', true, h('div', { class: 'msd', 'data-msd': '' }),
+        h('section', { class: 'msd-card' }, h('h3', {}, 'Ship status'), h('div', { 'data-ship-status': '' }))),
       panel('st-tactical', 'Tactical plot', 'red', false, sweep(240, 'red', 4, 'Tactical plot')),
       panel('st-dept', 'Department readiness', 'blue', false, h('ul', { class: 'st-depts', 'data-depts': '' })),
       panel('st-roster', 'Senior staff on duty', 'lilac', true, h('ul', { class: 'st-roster', 'data-roster': '' })),
@@ -321,11 +322,6 @@
       panel('st-assign', 'Reassign crew', 'peach', true, h('div', { 'data-reassign': '' })),
       panel('st-roster', 'Duty roster', 'gold', true, h('ul', { class: 'st-roster', 'data-roster': '' })),
       panel('st-dept', 'Department readiness', 'blue', false, h('ul', { class: 'st-depts', 'data-depts': '' })),
-      panel('st-status', 'Ship status', 'orange', false,
-        live(readout('Crew complement', 'gold'), drift(1012, 1008, 1014, 1), Math.round),
-        live(readout('Shift', 'sky'), () => ['Alpha', 'Beta', 'Gamma'][Math.floor(new Date().getHours() / 8)]),
-        live(readout('Shuttles available', 'orange'), () => 8),
-        live(readout('Drills scheduled', 'peach'), () => 2)),
       panel('st-msd', 'Master systems display', 'orange', false, h('div', { class: 'msd', 'data-msd': '' })),
       panel('st-log', 'Duty log', 'lilac', true, logView([
         ['Security drill scheduled, deck 8'], [`${ship}: personnel evaluations due`], ['Shore leave rotation approved'], ['Away team readiness confirmed']])),
@@ -370,7 +366,6 @@
       return { code: 'ENG 06', color: 'orange', panels: [
         // The master systems display (msd.js, filled in by client.js): Engineering's main screen.
         panel('st-msd', 'Master systems display', 'orange', true, h('div', { class: 'msd', 'data-msd': '' })),
-        panel('st-ship', `Ship systems · ${ship}`, 'orange', true, shipSide(ship)),
         // The warp core's reaction: client.js fills in the controls.
         panel('st-core', 'Warp core', 'sky', true,
           h('div', { 'data-warpcore': '' }),
@@ -432,10 +427,11 @@
         live(readout('Targeting scanners', 'gold'), () => `Locked: the ${ship}`)),
     ] }),
     Crew: (ship) => ({ code: 'CRW 10', color: 'tan', panels: [
-      panel('st-ship', `The ${ship}`, 'orange', true, shipSide(ship)),
-      // Real alert status, replicators and recreation (client.js fills it in).
-      panel('st-status', 'Ship status', 'gold', false, h('div', { 'data-services': '' }),
-        live(readout('Shift', 'gold'), () => ['Alpha', 'Beta', 'Gamma'][Math.floor(new Date().getHours() / 8)])),
+      // The master systems display, with the real alert status, replicators and
+      // recreation under it (client.js fills them in).
+      panel('st-msd', 'Master systems display', 'orange', true, h('div', { class: 'msd', 'data-msd': '' }),
+        h('section', { class: 'msd-card' }, h('h3', {}, 'Crew services'), h('div', { 'data-services': '' }),
+          live(readout('Shift', 'gold'), () => ['Alpha', 'Beta', 'Gamma'][Math.floor(new Date().getHours() / 8)]))),
       panel('st-decks', 'Deck status', 'blue', false, deckGrid(8, 8)),
     ] }),
   };
@@ -476,9 +472,9 @@
       // Rosters list who is actually aboard, by station.
       setCrew(users) {
         const aboard = users.filter((u) => u.ship.toLowerCase() === ship.toLowerCase());
-        const tags = (u) => `${u.station}${u.sickbay ? ' · sickbay' : ''}${u.confined ? ' · confined' : ''}`;
+        const tags = (u) => `${u.station}${[u.species, u.gender].filter(Boolean).map((x) => ` · ${x}`).join('')}${u.sickbay ? ' · sickbay' : ''}${u.confined ? ' · confined' : ''}`;
         for (const ul of container.querySelectorAll('[data-roster]')) {
-          ul.replaceChildren(...(aboard.length ? aboard : [{ name: 'No one else aboard', station: '' }]).map((u) => h('li', {}, u.name, h('span', {}, tags(u)))));
+          ul.replaceChildren(...(aboard.length ? aboard : [{ name: 'No one else aboard', station: '' }]).map((u) => h('li', {}, u.title || u.name, h('span', {}, tags(u)))));
         }
         // Department readiness: how many are at each duty station; the label is
         // green when manned, red when not.

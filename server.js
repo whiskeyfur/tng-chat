@@ -96,8 +96,22 @@ const linkRequests = new Map(); // request id -> { id, fromShip, toShip }
 const clean = (s) => (typeof s === 'string' ? s.trim().replace(/\s+/g, ' ') : '');
 const shipKey = (ship) => ship.toLowerCase();
 const userId = (name, ship) => `${name.toLowerCase()}@${shipKey(ship)}`;
-const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station,
+// Players' rank, species and gender (set at sign-in, changed later). Rank
+// shows wherever the name does (rosters, calls, messages, orders: "Lt. Cmdr.
+// Brandy"); species and gender only to people in the same place (same ship, same station).
+const RANKS = ['Ensign', 'Lt. JG', 'Lieutenant', 'Lt. Cmdr.', 'Commander', 'Captain', 'Admiral', 'Crewman', 'Civilian'];
+const RANK_TITLE = { Ensign: 'Ens.', 'Lt. JG': 'Lt. JG', Lieutenant: 'Lt.', 'Lt. Cmdr.': 'Lt. Cmdr.', Commander: 'Cmdr.', Captain: 'Capt.', Admiral: 'Adm.', Crewman: 'Crewman', Civilian: '' };
+const SPECIES = ['Human', 'Vulcan', 'Klingon', 'Betazoid', 'Andorian', 'Bajoran', 'Trill', 'Ferengi', 'Romulan', 'Cardassian', 'Android', 'Hologram', 'Other'];
+const GENDERS = ['Male', 'Female', 'Non-binary', 'Other'];
+const profileFrom = (msg) => ({ rank: RANKS.includes(msg?.rank) ? msg.rank : null, species: SPECIES.includes(msg?.species) ? msg.species : null, gender: GENDERS.includes(msg?.gender) ? msg.gender : null });
+const titled = (ws) => (ws.rank && RANK_TITLE[ws.rank] ? `${RANK_TITLE[ws.rank]} ${ws.name}` : ws.name);
+const samePlace = (a, b) => a.shipKey === b.shipKey && a.station === b.station;
+// What others see of someone: in person adds species and gender.
+const seenBy = (viewer, u) => ({ ...info(u), ...(viewer && samePlace(viewer, u) ? { species: u.species || null, gender: u.gender || null } : {}) });
+const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station, ...(ws.rank ? { rank: ws.rank } : {}), title: titled(ws),
   ...(ws.sickbay ? { sickbay: true } : {}), ...(ws.confined ? { confined: true } : {}) });
+// The sign-in reply: who you are, all of it.
+const selfInfo = (ws) => ({ ...info(ws), profile: { rank: ws.rank || null, species: ws.species || null, gender: ws.gender || null } });
 const crewOf = (key) => [...users.values()].filter((u) => u.shipKey === key);
 const opsOf = (key) => [...operators].filter((op) => op.shipKey === key);
 const shipName = (key) => ships.get(key) || key;
@@ -135,12 +149,11 @@ function broadcastCrew(key) {
   scheduleTraffic();
   scheduleNav();
   const net = network(key);
-  const list = [...net].flatMap(crewOf).map(info)
-    .sort((a, b) => a.ship.localeCompare(b.ship) || a.name.localeCompare(b.name));
+  const everyone = [...net].flatMap(crewOf).sort((a, b) => a.ship.localeCompare(b.ship) || a.name.localeCompare(b.name));
   for (const k of net) {
     const ops = opsOf(k).length > 0;
     for (const u of crewOf(k)) {
-      send(u, { type: 'users', users: list, ops, network: [...net].map(shipName).sort() });
+      send(u, { type: 'users', users: everyone.map((x) => seenBy(u, x)), ops, network: [...net].map(shipName).sort() });
       sendLibrary(u);
     }
     broadcastOps(k);
@@ -513,7 +526,7 @@ function beam(u, toKey, station, how = 'beamed') {
     const was = u.station;
     if (u.state !== 'idle') send(u, { type: 'force-hangup', reason: `beamed to ${station}` });
     u.station = station;
-    send(u, { type: 'registered', ...info(u), token: u.token });
+    send(u, { type: 'registered', ...selfInfo(u), token: u.token });
     send(u, { type: 'notice', text: `Transporter: beamed from ${was} to ${station}` });
     broadcastCrew(toKey);
     opLog(toKey, `${u.name} beamed from ${was} to ${station}`);
@@ -524,7 +537,7 @@ function beam(u, toKey, station, how = 'beamed') {
   signOut(u);
   Object.assign(u, { id: userId(u.name, shipName(toKey)), shipKey: toKey, ship: shipName(toKey), state: 'idle', peers: [], cid: null });
   users.set(u.id, u);
-  send(u, { type: 'registered', ...info(u), token: u.token, [how === 'walked' ? 'walkedFrom' : how === 'beamed' ? 'beamedFrom' : how === 'returned' ? 'returnedFrom' : 'remoteVia']: from });
+  send(u, { type: 'registered', ...selfInfo(u), token: u.token, [how === 'walked' ? 'walkedFrom' : how === 'beamed' ? 'beamedFrom' : how === 'returned' ? 'returnedFrom' : 'remoteVia']: from });
   sendShipRadio(u);
   joinBroadcasts(u);
   broadcastCrew(toKey);
@@ -1215,7 +1228,7 @@ function crewCommand(ws, msg) {
         if (sealed(key, to)) return note(`A Security force field isolates ${to}: you can't report there`);
         const was = ws.station;
         ws.station = to;
-        send(ws, { type: 'registered', ...info(ws), token: ws.token });
+        send(ws, { type: 'registered', ...selfInfo(ws), token: ws.token });
         broadcastCrew(key);
         opLog(key, `${ws.name} reported to ${to} (from ${was}), as ordered`);
       }
@@ -1343,6 +1356,8 @@ const SOURCES = ['ship', 'solar', 'dock', 'impulsePort', 'impulseStarboard', 'au
 // shortfall (last, when nothing else will) and charges from its surplus.
 const STORES = { batteryA: 'A', batteryB: 'B', batteryC: 'C', pressure: 'EPS' };
 const isStore = (name) => name in STORES;
+// Power as shown: rounded up, away from zero (float dust aside).
+const ceilUp = (v) => (v < 0 ? -Math.ceil(-v - 1e-9) : Math.ceil(v - 1e-9));
 // The computer cores: three, each on a low bus (2), booting in stages (about
 // 14 s) and crashing if their power fails (boot them again). The EPS flow
 // regulators (the taps) need at least one online; text messages need one at
@@ -1883,10 +1898,10 @@ function flow(k) {
   const epsLeft = srcs.filter((x) => x.ties.includes('EPS')).reduce((m, x) => m + x.left, 0);
   const totals = Object.fromEntries(NODES.map((n) => {
     const cond = Math.round(100 - (c.damage[`bus${n}`] || 0));
-    if (n === 'EPS') return [n, { used: Math.round(viaEps), available: Math.round(Math.min(maxOf('EPS'), viaEps + epsLeft)), max: Math.round(maxOf('EPS')), fullMax: BUS_MAX.EPS, condition: cond, tied: Math.round(tied.EPS) }];
+    if (n === 'EPS') return [n, { used: ceilUp(viaEps), available: ceilUp(Math.min(maxOf('EPS'), viaEps + epsLeft)), max: Math.round(maxOf('EPS')), fullMax: BUS_MAX.EPS, condition: cond, tied: Math.round(tied.EPS) }];
     const direct = srcs.filter((x) => pool(n).some((y) => x.ties.includes(y))).reduce((m, x) => m + x.left, 0);
     const have = buses[n].have;
-    return [n, { used: Math.round(have), available: Math.round(Math.min(maxOf(n), have + direct + Math.min(epsLeft, tapRoom(n)))), max: Math.round(maxOf(n)), fullMax: BUS_MAX[n], condition: cond, tied: Math.round(tied[n]), tap: e.taps[n], pool: pool(n).join('') }];
+    return [n, { used: ceilUp(have), available: ceilUp(Math.min(maxOf(n), have + direct + Math.min(epsLeft, tapRoom(n)))), max: Math.round(maxOf(n)), fullMax: BUS_MAX[n], condition: cond, tied: Math.round(tied[n]), tap: e.taps[n], pool: pool(n).join('') }];
   }));
   const f = {
     cells, totals, buses, consoleOk, demand, capacity, delivered, containmentOk, containFeed, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
@@ -1944,14 +1959,16 @@ function gridView(k) {
   const e = engOf(k), f = flow(k);
   const near = isBase(k) ? null : STARBASES.find((b) => navState.has(k) && Math.hypot(navState.get(k).x - b.x, navState.get(k).y - b.y) <= DOCK_RANGE);
   const tower = towedBy(k);
-  const r = (o) => Object.fromEntries(Object.entries(o).map(([x, v]) => [x, Math.round(v)]));
+  // Shown rounded up (a split load, 8.33..., shows as 9); the sums behind them aren't.
+  const r = (o) => Object.fromEntries(Object.entries(o).map(([x, v]) => [x, ceilUp(v)]));
   return {
     core: e.core, antimatter: Math.floor(e.antimatter), deuterium: Math.floor(e.deuterium), fuelCaps: { antimatter: FUEL.antimatter, deuterium: FUEL.deuterium },
     drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state, start: dr.start, thrusters: !!(e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length, epsTap: dr.epsTap, pressure: Math.round(dr.pressure), accel: dr.accel, gear: dr.gear, top: Math.round(driveTop(dr) * 1000) / 1000 }]; })),
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state, start: e.aux[a].start, epsTap: e.aux[a].epsTap, pressure: Math.round(e.aux[a].pressure) }])), auxOutput: FUSION.aux,
     // Each place: what's switched on, what it's actually getting, and whether it's lit.
     ls: (() => {
-      const servedAll = Object.fromEntries(LS_SYSTEMS.map((x) => { const u = 100 * lsShare(k, x); return [x, u > 0 && f.delivered[x] >= u * 0.99]; }));
+      // Served: the system has power (at less than full, it serves them less well: life support's level shows that).
+      const servedAll = Object.fromEntries(LS_SYSTEMS.map((x) => { const u = 100 * lsShare(k, x); return [x, u > 0 && f.delivered[x] > 0.5]; }));
       const emergency = (f.delivered.lighting || 0) >= 99;
       return Object.fromEntries(LOCATIONS.map((l) => { const on = e.ls[l]; const got = Object.fromEntries(LS_SYSTEMS.map((x) => [x, on[x] && servedAll[x]])); return [l, { on, got, lit: got.lights || (on.lights && emergency), emergency: on.lights && !got.lights && emergency }]; }));
     })(),
@@ -3276,6 +3293,7 @@ wss.on('connection', (ws) => {
       if (users.has(id)) return send(ws, { type: 'operator-failed', reason: `${name} is already aboard the ${shipName(shipKey(ship))}` });
       ws.id = id;
       ws.name = name;
+      Object.assign(ws, profileFrom(msg));
       ws.shipKey = registerShip(ship);
       ws.ship = shipName(ws.shipKey);
       users.set(id, ws);
@@ -3315,18 +3333,28 @@ wss.on('connection', (ws) => {
       if (users.has(id)) return send(ws, { type: 'register-failed', reason: `${name} is already aboard the ${shipName(shipKey(ship))}` });
       ws.id = id;
       ws.name = name;
+      Object.assign(ws, profileFrom(msg));
       ws.shipKey = registerShip(ship);
       ws.ship = shipName(ws.shipKey);
       ws.station = msg.station;
       users.set(id, ws);
       ws.token = crypto.randomBytes(16).toString('hex');
       tokens.set(ws.token, ws);
-      send(ws, { type: 'registered', ...info(ws), token: ws.token });
+      send(ws, { type: 'registered', ...selfInfo(ws), token: ws.token });
       broadcastCrew(ws.shipKey);
       broadcastShips();
       console.log(`${name} (${ws.station}) reported aboard the ${ws.ship}`);
       sendShipRadio(ws);
       joinBroadcasts(ws);
+      return;
+    }
+
+    // Rank, species and gender, changed after sign-in.
+    if (msg.type === 'profile' && ws.id) {
+      Object.assign(ws, profileFrom(msg));
+      send(ws, { type: 'profile', ...selfInfo(ws) });
+      broadcastCrew(ws.shipKey);
+      broadcastOps(ws.shipKey);
       return;
     }
 
@@ -3362,7 +3390,7 @@ wss.on('connection', (ws) => {
       }
       if (ws.operator) leaveOps(ws);
       ws.station = msg.station;
-      send(ws, { type: 'registered', ...info(ws), token: ws.token });
+      send(ws, { type: 'registered', ...selfInfo(ws), token: ws.token });
       broadcastCrew(ws.shipKey);
       broadcastTraffic();
       opLog(ws.shipKey, `${ws.name} moved from ${was} to ${ws.station}`);

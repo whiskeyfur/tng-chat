@@ -225,10 +225,17 @@
     .admin-dialog .admin-log { max-height: 220px; overflow: auto; font-size: 12px; background: #111; padding: 8px; white-space: pre-wrap; }
     #link { cursor: default; }
     /* A dark room: everything black but the Station button and comms. */
-    body[data-blackout] .lcars-app > :not(.lcars-sidebar):not(.lcars-content), body[data-blackout] .lcars-sidebar > :not(#reassign-tab):not(#comms-button),
-    body[data-blackout] .lcars-content:not(:has([data-screen="reassign"]:not([hidden]))) { filter: brightness(0.06); pointer-events: none; }
+    /* Header and footer (Home, Back) and every menu button but Comms and Station (#sections is display: contents, so its buttons are dimmed one by one). */
+    body[data-blackout] .lcars-app > :not(.lcars-sidebar):not(.lcars-content),
+    body[data-blackout] .lcars-sidebar > :not(#reassign-tab):not(#comms-button):not(#sections),
+    body[data-blackout="all"] #sections > *,
+    body[data-blackout="engineering"] #sections > :not([data-screen-tab="st-grid"]),
+    body[data-blackout="all"] .lcars-content:not(:has([data-screen="reassign"]:not([hidden]))),
+    body[data-blackout="engineering"] .lcars-content:not(:has([data-screen="reassign"]:not([hidden]), [data-screen="st-grid"]:not([hidden]))) { filter: brightness(0.06); pointer-events: none; }
     body[data-blackout] .lcars-content { background: #000; }
     .ls-table .ls-tap[data-short] { background: var(--lcars-red); }
+    .profile-taps { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; }
+    .profile-head { margin: 12px 0 4px; color: var(--lcars-tan); text-transform: uppercase; font-size: 16px; }
     button.lcars-back { border: 0; font: inherit; color: #000; cursor: pointer; display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 14px 6px 0; letter-spacing: 0.1em; }
     /* Dim: only the label, so the corner stays the colour of the bar it joins. */
     button.lcars-back:disabled { cursor: default; }
@@ -338,6 +345,8 @@
             <input class="ops-input" id="key" type="password" placeholder="Authorization code (if required)" autocomplete="off" aria-label="operator authorization code" hidden>
             <button class="lcars-button lcars-button--pill">Report aboard</button>
           </form>
+          <!-- Rank, species and gender (taps; remembered with the name). -->
+          <div class="profile-taps" id="signin-profile" data-profile-taps></div>
           <p class="lcars-note" id="register-error"></p>
           <form class="ops-form relay-form" id="relay-form">
             <span>Comm relay</span>
@@ -500,6 +509,8 @@
           <div class="lcars-panel__body">
             <p class="ops-network" id="assignment"></p>
             <div class="tr-taps" id="station-taps" role="group" aria-label="stations aboard"></div>
+            <h3 class="profile-head">You</h3>
+            <div class="profile-taps" id="station-profile" data-profile-taps></div>
             <form class="ops-form" id="reassign-form" hidden>
               <input class="ops-input" id="reassign-key" type="password" placeholder="Authorization code" autocomplete="off" aria-label="operator authorization code">
               <button class="lcars-button lcars-button--pill" id="reassign-ops">Take the ops station</button>

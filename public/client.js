@@ -189,6 +189,34 @@ function renderAdmin(st) {
   const pre = d.querySelector('#admin-log'); pre.scrollTop = pre.scrollHeight;
 }
 
+// Rank, species and gender: picked by taps at sign-in or on the Station
+// screen, remembered with the name in this browser. Rank shows with your name
+// everywhere; species and gender to people in the same place.
+const PROFILE = {
+  rank: ['Ensign', 'Lt. JG', 'Lieutenant', 'Lt. Cmdr.', 'Commander', 'Captain', 'Admiral', 'Crewman', 'Civilian'],
+  species: ['Human', 'Vulcan', 'Klingon', 'Betazoid', 'Andorian', 'Bajoran', 'Trill', 'Ferengi', 'Romulan', 'Cardassian', 'Android', 'Hologram', 'Other'],
+  gender: ['Male', 'Female', 'Non-binary', 'Other'],
+};
+let profile = { rank: null, species: null, gender: null };
+try { profile = { ...profile, ...JSON.parse(localStorage.getItem('stchat-profile') || '{}') }; } catch {}
+function setProfile(p, tell = true) {
+  profile = { ...profile, ...p };
+  try { localStorage.setItem('stchat-profile', JSON.stringify(profile)); } catch {}
+  if (tell && me) send({ type: 'profile', ...profile });
+  for (const box of document.querySelectorAll('[data-profile-taps]')) renderProfileTaps(box);
+}
+function renderProfileTaps(box) {
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  box.replaceChildren(...Object.entries(PROFILE).map(([k, list]) => el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: k[0].toUpperCase() + k.slice(1) }),
+    el('div', { className: 'tr-taps', role: 'group', ariaLabel: k }, ...list.map((v) => {
+      const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: v, onclick: () => setProfile({ [k]: profile[k] === v ? null : v }) });
+      b.dataset.profile = k; b.dataset.value = v;
+      b.setAttribute('aria-pressed', String(profile[k] === v));
+      return b;
+    })))));
+}
+for (const box of document.querySelectorAll('[data-profile-taps]')) renderProfileTaps(box);
+
 // Shift-click the name and ship in the header: sign out to the sign-in screen
 // to start somewhere new. Leaves the ship (and any call), and forgets the
 // ship, station, screen and menu so nothing signs back in; the name stays.
@@ -226,8 +254,8 @@ function tryRejoin() {
   rejoin = null;
   pendingScreen = r.screen || null;
   if (r.station === 'Operations' && opsKeyRequired) { $('name').value = r.name; return; } // needs the code: sign in by hand
-  if (r.station === 'Operations') send({ type: 'operator', name: r.name, ship: r.ship });
-  else send({ type: 'register', name: r.name, ship: r.ship, station: r.station });
+  if (r.station === 'Operations') send({ type: 'operator', name: r.name, ship: r.ship, ...profile });
+  else send({ type: 'register', name: r.name, ship: r.ship, station: r.station, ...profile });
   log(`rejoined the ${r.ship} as ${r.name}, ${r.station}`);
 }
 
@@ -292,7 +320,7 @@ function updateSignInMode() {
 // Station displays, and a sidebar tab for each one.
 function showStation() {
   stationView = renderStation($('station-view'), me.station, { ship: me.ship });
-  setHeader(stationView.code, `${me.name} · ${me.ship}`, me.station);
+  setHeader(stationView.code, `${me.title || me.name} · ${me.ship}`, me.station);
   // The top-left elbow and the header bar running from it share the station's colour.
   document.querySelector('.lcars-header').style.setProperty('--elbow', `var(--lcars-${stationView.color})`);
   $('sections').replaceChildren(...stationView.sections.map((s) => {
@@ -429,7 +457,12 @@ let shipStateSig = '';
 function renderShipState() {
   if (!me) return;
   const p = ownPower();
-  bc.setAlert('life', p && p.lifeSupport < 50 ? `Life support at ${p.lifeSupport}%` : null);
+  // Life support: any place with someone in it that has no atmosphere (switched off, or
+  // unpowered) is named; otherwise a warning when life support runs low. Empty places don't warn.
+  const ls = lastNav?.own?.grid?.ls;
+  const occupied = new Set(comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase()).map((u) => u.station));
+  const airless = ls ? Object.entries(ls).filter(([loc, x]) => occupied.has(loc) && !x.got.atmosphere).map(([loc]) => loc) : [];
+  bc.setAlert('life', airless.length ? `NO ATMOSPHERE: ${airless.join(', ')}` : p && p.lifeSupport < 50 ? `Life support at ${p.lifeSupport}%` : null);
   // Alert status: red or yellow frame and a bar on every console aboard.
   const alert = lastNav?.own?.alert || 'green';
   document.body.dataset.alert = alert;
@@ -577,7 +610,7 @@ const MSD_SCREENS = {
   shld: ['st-shieldctl', 'st-power'], tractor: ['st-weapons', 'st-grid'],
 };
 function openSystem(k) {
-  const id = (MSD_SCREENS[k] || []).find((x) => document.querySelector(`[data-screen="${x}"]`)) || (document.querySelector('[data-screen="st-status"]') ? 'st-status' : null);
+  const id = (MSD_SCREENS[k] || []).find((x) => document.querySelector(`[data-screen="${x}"]`));
   if (id) showScreen(id);
 }
 // Engineering's Life support panel: each place aboard, its atmosphere, heat,
@@ -772,10 +805,13 @@ function updateCover() {
 // A dark room: no lights where this console is (off, or unpowered with no
 // emergency lighting) and the console itself dark: the whole screen goes
 // black but for the Station button and comms.
+// Engineering is the exception: its Power grid stays usable too, to bring the ship up from cold iron.
 function renderDarkness() {
-  const here = me && lastNav?.own?.grid?.ls?.[me.station];
-  const dark = !!(here && !here.lit && consoleDark && !(me.station === 'Engineering'));
-  document.body.toggleAttribute('data-blackout', dark);
+  const grid = lastNav?.own?.grid, here = me && grid?.ls?.[me.station];
+  const unpowered = me && (me.station === 'Engineering' ? grid?.consoleOk?.Engineering === false : consoleDark);
+  const dark = !!(here && !here.lit && unpowered);
+  if (dark) document.body.dataset.blackout = me.station === 'Engineering' ? 'engineering' : 'all';
+  else delete document.body.dataset.blackout;
 }
 window.addEventListener('screenchange', updateCover);
 
@@ -1080,7 +1116,9 @@ function renderCombat() {
             for (const child of kids) sysRow(child, level + 1);
             return;
           }
-          const want = sys === 'tractor' ? (grid.towing ? 30 : 0) : grid.demand[sys], got = sys === 'tractor' ? want : grid.delivered[sys];
+          // (Shown rounded up: a load split over places can be fractional.)
+          const up = (v) => Math.ceil(v - 1e-9);
+          const want = up(sys === 'tractor' ? (grid.towing ? 30 : 0) : grid.demand[sys]), got = up(sys === 'tractor' ? want : grid.delivered[sys]);
           rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { level, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}${got > 100 ? ' · OVERDRIVE' : ''}` : 'off' }));
           for (const child of grid.systemChildren[sys] || []) sysRow(child, level + 1);
         };
@@ -1539,8 +1577,14 @@ async function onMessage(msg) {
   }
   if (await comms.handle(msg)) return;
   switch (msg.type) {
+    case 'profile':
+      if (me) me.title = msg.title;
+      if (msg.profile) setProfile(msg.profile, false);
+      if (stationView) setHeader(stationView.code, `${me.title || me.name} · ${me.ship}`, me.station);
+      break;
     case 'registered':
-      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station };
+      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, title: msg.title };
+      if (msg.profile) setProfile(msg.profile, false);
       token = msg.token;
       if (ops) hideOps();
       queueMicrotask(() => comms.radio?.render());
@@ -1629,7 +1673,7 @@ async function onMessage(msg) {
       break;
     }
     case 'order':
-      log(`Captain's orders (${msg.from.name}): ${msg.text}`);
+      log(`Captain's orders (${msg.from.title || msg.from.name}): ${msg.text}`);
       bc.addOrder(msg.from, msg.text, msg.id, msg.reassign);
       break;
     case 'destroyed':
@@ -1713,8 +1757,8 @@ $('register-form').onsubmit = (e) => {
   if (ws?.readyState !== WebSocket.OPEN) return;
   $('register-error').textContent = '';
   $('register-form').querySelector('button').disabled = true;
-  if (opsSelected()) send({ type: 'operator', name: $('name').value.trim(), ship: $('ship').value, key: $('key').value });
-  else send({ type: 'register', name: $('name').value.trim(), ship: $('ship').value, station: $('station').value });
+  if (opsSelected()) send({ type: 'operator', name: $('name').value.trim(), ship: $('ship').value, key: $('key').value, ...profile });
+  else send({ type: 'register', name: $('name').value.trim(), ship: $('ship').value, station: $('station').value, ...profile });
 };
 $('reassign-form').onsubmit = (e) => {
   e.preventDefault();
