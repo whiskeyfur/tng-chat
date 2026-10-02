@@ -913,6 +913,10 @@ function renderCombat() {
           button('Fire phasers', 'fire-phaser', () => send({ type: 'fire', weapon: 'phaser', ...(wpFocus ? { ship: wpFocus } : {}) }), 'lcars-button--alert'),
           button('Fire torpedo', 'fire-torpedo', () => send({ type: 'fire', weapon: 'torpedo', ...(wpFocus ? { ship: wpFocus } : {}) }), 'lcars-button--alert'),
           button('Release all locks', 'weapons-release', () => send({ type: 'lock', ship: null }))),
+        // Torpedo yield (a light bar), and the weapons' and shields' frequencies (taps).
+        el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Yield' }), (() => { const bar = lightBar('Torpedo yield', 10, (v) => send({ type: 'yield', value: v })); bar.id = 'torpedo-yield'; return bar; })(), el('span', { className: 'ops-hint', id: 'yield-note' })),
+        el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Weapon freq.' }), el('div', { className: 'tr-taps', id: 'freq-weapons' })),
+        el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Shield freq.' }), el('div', { className: 'tr-taps', id: 'freq-shields' })),
         el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Tractor' }), el('div', { className: 'tr-taps', id: 'tractor-targets' })),
         el('div', { className: 'ops-form' }, button('Release tractor', 'tractor-release', () => send({ type: 'tractor', ship: null })), el('span', { className: 'ops-hint', id: 'tractor-state' })),
         el('div', { className: 'ops-readouts' },
@@ -945,6 +949,14 @@ function renderCombat() {
     wp.querySelector('#weapons-release').disabled = !locks.length;
     wp.querySelector('#tractor-release').disabled = !grid.towing;
     wp.querySelector('#tractor-state').textContent = grid.towing ? `Towing the ${grid.towing} (warp 3 at most)` : grid.towedBy ? `Held in the ${grid.towedBy}'s tractor beam` : 'Tractor beam: holds a locked target within 20 units with its shields down';
+    wp.querySelector('#torpedo-yield').set(c.torpedo.yield ?? 5);
+    wp.querySelector('#yield-note').textContent = `yield ${c.torpedo.yield ?? 5}: ${c.torpedo.antimatter ?? 10} antimatter a torpedo (bay ${c.torpedo.bay ?? 0}), ${(c.torpedo.reload / 1000).toFixed(1)} s to load`;
+    for (const which of ['weapons', 'shields']) {
+      const box = wp.querySelector(`#freq-${which}`), cur = c.freq?.[which];
+      if (box.dataset.cur === String(cur)) continue;
+      box.dataset.cur = String(cur);
+      box.replaceChildren(...Array.from({ length: c.freq?.max || 10 }, (_, i) => { const b = button(String(i + 1), '', () => send({ type: 'frequency', [which]: i + 1 })); b.classList.add('tr-tap'); b.dataset.value = String(i + 1); b.setAttribute('aria-pressed', String(cur === i + 1)); return b; }));
+    }
     const arm = wp.querySelector('#arm-phasers');
     arm.textContent = c.phaser.armed ? 'Stand down phasers' : 'Arm phasers';
     arm.setAttribute('aria-pressed', String(c.phaser.armed));

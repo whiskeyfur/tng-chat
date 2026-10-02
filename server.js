@@ -1225,7 +1225,7 @@ function scanData(key, t) {
   return {
     distance: t === key ? 0 : Math.round(distance(key, t)), x: n.x, y: n.y, heading: n.heading, warp: n.warp,
     shields: shields.has(t), ops: opsOf(t).length > 0, crew: crew.length, stations, lifeforms, species,
-    sensors: loc.sensors, shieldLevel: loc.shield, resolved: loc.resolved,
+    sensors: loc.sensors, shieldLevel: loc.shield, resolved: loc.resolved, shieldFreq: loc.resolved && shields.has(t) ? combatOf(t).shieldFreq : null,
     inCommsRange: commsOk(key, t), inTransporterRange: transporterOk(key, t),
     hull: Math.round(combatOf(t).hull), shieldStrength: Math.round(combatOf(t).shield), signature: Math.round(signatureOf(t) * 100),
     damaged: DAMAGEABLE.filter((s) => combatOf(t).damage[s] >= 1).map((s) => damageName(s)), core: engOf(t).core, docked: engOf(t).docked,
@@ -2897,6 +2897,16 @@ function destroy(k, cause) {
 
 const PHASER = { range: 150, damage: 15, chargeRate: 20 }; // charge in % a second at full weapons power
 const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 5000 }; // restock: one every 5 s, docked
+// Torpedo yield (1-10, a light bar; 5 to start): damage 5 a step, loading 2 s
+// plus 0.6 s a step, and 2 antimatter a step from the torpedo bay's tank at
+// launch (no antimatter, no launch). A shielded target takes a tenth of it (all
+// on its shields); an unshielded one takes it all, and from yield 8 it's
+// crippled: a third of the yield in systems, each yield x 10% damaged.
+const YIELD = { start: 5, damage: 5, loadBase: 2000, loadStep: 600, antimatter: 2, shielded: 0.1, cripple: 8 };
+const torpedoLoad = (y) => YIELD.loadBase + YIELD.loadStep * y;
+// Frequencies (1-10): the shields' and the weapons'. A hit on the frequency of
+// the target's shields goes straight through them.
+const FREQS = 10;
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
@@ -2919,14 +2929,14 @@ function freshCombat(saved) {
     damage: Object.fromEntries(DAMAGEABLE.map((k) => [k, num(s.damage?.[k] ?? (LIFE_SUPPORT.includes(k) ? s.damage?.lifeSupport : undefined), 0)])),
     torpedoes: num(s.torpedoes, TORPEDO.carried, TORPEDO.carried),
     repair: s.repair === 'hull' || DAMAGEABLE.includes(s.repair) ? s.repair : null,
-    lock: null, locks: [], aim: {}, arrays: [0, 0, 0, 0], armed: false, phaserCharge: 0, torpedoAt: 0, restockAt: Date.now(), hitAt: 0, hitBy: null, dirty: false,
+    lock: null, locks: [], aim: {}, arrays: [0, 0, 0, 0], yield: num(s.yield, YIELD.start, 10) || YIELD.start, shieldFreq: num(s.shieldFreq, 1 + Math.floor(Math.random() * FREQS), FREQS) || 1, weaponFreq: num(s.weaponFreq, 1 + Math.floor(Math.random() * FREQS), FREQS) || 1, armed: false, phaserCharge: 0, torpedoAt: 0, restockAt: Date.now(), hitAt: 0, hitBy: null, dirty: false,
   };
 }
 const combatOf = (k) => { if (!combat.has(k)) combat.set(k, freshCombat(isBase(k) ? baseSettings[shipName(k)]?.combat : undefined)); return combat.get(k); };
 const round1 = (v) => Math.round(v * 10) / 10;
 const savedCombat = (k) => {
   const c = combatOf(k);
-  return { hull: round1(c.hull), shield: round1(c.shield), damage: Object.fromEntries(DAMAGEABLE.map((s) => [s, round1(c.damage[s])])), torpedoes: c.torpedoes, repair: c.repair };
+  return { hull: round1(c.hull), shield: round1(c.shield), damage: Object.fromEntries(DAMAGEABLE.map((s) => [s, round1(c.damage[s])])), torpedoes: c.torpedoes, repair: c.repair, yield: c.yield, shieldFreq: c.shieldFreq, weaponFreq: c.weaponFreq };
 };
 // What a ship's computer keeps: its position and settings, plus combat and grid state.
 const coreCopy = (k) => (navState.has(k) ? { ...navState.get(k), combat: savedCombat(k), eng: savedEng(k) } : undefined);
@@ -2950,7 +2960,8 @@ function combatView(k) {
     damage: Object.fromEntries(DAMAGEABLE.map((s) => [s, Math.ceil(c.damage[s])])),
     repair: c.repair, torpedoes: c.torpedoes, carried: TORPEDO.carried,
     phaser: { range: PHASER.range, armed: c.armed, charge: Math.floor(Math.max(...c.arrays.slice(0, arraysOf(k)))), arrays: c.arrays.slice(0, arraysOf(k)).map(Math.floor) },
-    torpedo: { range: TORPEDO.range, ready: Math.max(0, c.torpedoAt - now), reload: TORPEDO.reload },
+    torpedo: { range: TORPEDO.range, ready: Math.max(0, c.torpedoAt - now), reload: torpedoLoad(c.yield), yield: c.yield, antimatter: YIELD.antimatter * c.yield, bay: Math.floor(engOf(k).tanks?.am?.torpedo || 0) },
+    freq: { shields: c.shieldFreq, weapons: c.weaponFreq, max: FREQS },
     lock: t ? lockInfo(k, t) : null,
     // Every lock (the phasers' and the tractor beam's targets), each with what its phasers are aimed at.
     locks: c.locks.filter((x) => navState.has(x)).map((x) => lockInfo(k, x)), lockMax: lockMax(k), aimable: AIMABLE.map((x) => [x, damageName(x)]),
@@ -2976,17 +2987,20 @@ function enforcePower(k) {
 }
 
 // A hit on ship t from ship `from`. Returns what happened, for the firing ship.
-function hit(t, dmg, from, what = '', aim = null) {
+function hit(t, dmg, from, what = '', aim = null, { torpedo = false, yield: y = 0, freq = null } = {}) {
   const c = combatOf(t);
   c.hitAt = Date.now();
   c.hitBy = shipName(from);
   c.dirty = true;
+  // On the frequency of its shields: straight through them.
+  const through = freq != null && freq === c.shieldFreq && shields.has(t);
+  if (torpedo && shields.has(t) && !through) dmg *= YIELD.shielded; // (a shielded target takes a tenth of a torpedo)
   let rest = dmg;
-  const said = [];
-  if (shields.has(t)) {
+  const said = through ? ['on their shield frequency: straight through'] : [];
+  if (shields.has(t) && !through) {
     // Shield strength drained per point of damage: less with more shield power.
     const drain = (dmg * 60) / Math.max(MIN_SHIELD_POWER, powerOf(t).shields) / (isBase(t) ? 3 : 1); // (a starbase's shields hold three times as much)
-    if (c.shield > drain) { c.shield -= drain; rest = 0; } else { rest = dmg * (1 - c.shield / drain); c.shield = 0; }
+    if (c.shield > drain || torpedo) { c.shield = Math.max(0, c.shield - drain); rest = 0; } else { rest = dmg * (1 - c.shield / drain); c.shield = 0; } // (a torpedo's tenth all goes on the shields)
     said.push(`their shields at ${Math.round(c.shield)}%`);
     if (c.shield <= 0) {
       shields.delete(t);
@@ -3000,6 +3014,13 @@ function hit(t, dmg, from, what = '', aim = null) {
     c.hull = Math.max(0, c.hull - rest);
     const sys = aim && AIMABLE.includes(aim) ? aim : DAMAGEABLE[Math.floor(Math.random() * DAMAGEABLE.length)]; // (phasers can be aimed)
     c.damage[sys] = Math.min(100, c.damage[sys] + rest * 2);
+    // A high-yield torpedo on an unshielded target cripples it: more systems, badly damaged.
+    if (torpedo && y >= YIELD.cripple && !shields.has(t)) {
+      const more = DAMAGEABLE.filter((x) => x !== sys).sort(() => Math.random() - 0.5).slice(0, Math.max(1, Math.floor(y / 3)));
+      for (const x of more) c.damage[x] = Math.min(100, (c.damage[x] || 0) + y * 10);
+      said.push(`crippled: ${more.map(damageName).join(', ')}`);
+      tellStations(t, ['Engineering', 'Captain'], `Engineering: crippled by a torpedo: ${more.map(damageName).join(', ')} badly damaged`);
+    }
     said.push(`hull ${Math.round(c.hull)}%`, `${damageName(sys)} damaged`);
     opLog(t, `hit by the ${shipName(from)}${what ? ` (${what})` : ''}: hull ${Math.round(c.hull)}%, ${damageName(sys)} damaged`);
     tellStations(t, ['Engineering'], `Engineering: ${damageName(sys)} damaged (${Math.ceil(c.damage[sys])}%)`);
@@ -3069,6 +3090,18 @@ function combatCommand(ws, msg) {
     scheduleNav();
     return note(`weapons locked on the ${shipName(t)}`);
   }
+  // Torpedo yield (1-10) and the frequencies (1-10) of our weapons and shields.
+  if (msg.type === 'yield') {
+    c.yield = Math.max(1, Math.min(10, Math.round(Number(msg.value) || YIELD.start))); c.dirty = true; scheduleNav();
+    return note(`torpedo yield ${c.yield}: ${YIELD.antimatter * c.yield} antimatter a torpedo, ${torpedoLoad(c.yield) / 1000} s to load`);
+  }
+  if (msg.type === 'frequency') {
+    const f = (v) => Math.max(1, Math.min(FREQS, Math.round(Number(v))));
+    if (Number.isFinite(Number(msg.weapons))) c.weaponFreq = f(msg.weapons);
+    if (Number.isFinite(Number(msg.shields))) c.shieldFreq = f(msg.shields);
+    c.dirty = true; scheduleNav();
+    return note(`weapon frequency ${c.weaponFreq}, shield frequency ${c.shieldFreq}`);
+  }
   if (msg.type === 'aim') {
     const t = shipKey(clean(msg.ship || ''));
     if (!c.locks.includes(t)) return note(`no lock on the ${clean(msg.ship)}`);
@@ -3093,8 +3126,12 @@ function combatCommand(ws, msg) {
     if (torpedo) {
       if (c.torpedoes <= 0) return note('no torpedoes left: restock at a starbase');
       if (now < c.torpedoAt) return note('torpedo tubes reloading');
+      // Loaded with antimatter just before launch, from the torpedo bay's tank.
+      const am = YIELD.antimatter * c.yield, e = engOf(key);
+      if ((e.tanks.am.torpedo || 0) < am) return note(`not enough antimatter in the torpedo bay for yield ${c.yield} (needs ${am}, has ${Math.floor(e.tanks.am.torpedo || 0)})`);
+      e.tanks.am.torpedo -= am; e.dirty = true;
       c.torpedoes--;
-      c.torpedoAt = now + TORPEDO.reload;
+      c.torpedoAt = now + torpedoLoad(c.yield);
       c.dirty = true;
     } else {
       if (!c.armed) return note('phasers are not armed');
@@ -3103,7 +3140,7 @@ function combatCommand(ws, msg) {
       if (i < 0) return note(`phaser ${arraysOf(key) > 1 ? 'arrays' : 'array'} charging (${Math.floor(Math.max(...c.arrays.slice(0, arraysOf(key))))}%)`);
       c.arrays[i] = 0;
     }
-    const result = hit(t, w.damage, key, torpedo ? 'torpedo' : 'phasers', torpedo ? null : c.aim[t]);
+    const result = hit(t, torpedo ? YIELD.damage * c.yield : w.damage, key, torpedo ? `torpedo, yield ${c.yield}` : 'phasers', torpedo ? null : c.aim[t], { torpedo, yield: c.yield, freq: c.weaponFreq });
     opLog(key, `${ws.name} fired ${torpedo ? 'a torpedo' : 'phasers'} at the ${shipName(t)}: ${result}`);
     note(`${torpedo ? 'torpedo' : 'phaser'} hit on the ${shipName(t)}: ${result}`);
     scheduleNav();
@@ -3305,7 +3342,7 @@ function stationCommand(ws, msg) {
   const t = msg.type;
   // Off the ODN, the station's controls do nothing (answering an order needs no console).
   const odnOff = !odnLinked(ws.shipKey, ws.operator ? OPS_STATION : ws.station) && !['order-ack', 'order-decline'].includes(t);
-  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'lock', 'aim', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
+  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
     send(ws, { type: 'notice', text: 'Disconnected from the optical data network' });
     return true;
   }
@@ -3318,7 +3355,7 @@ function stationCommand(ws, msg) {
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
   if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(t)) return gate(crewCommand);
-  if (['lock', 'aim', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
+  if (['lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
   if (t === 'grid') return gridCommand(ws, msg), true; // emergency power: works with the console dark
   if (t === 'tractor') return gate(tractorCommand);
   if (t === 'dock') return gate(dockCommand);

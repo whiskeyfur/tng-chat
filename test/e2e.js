@@ -1156,8 +1156,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     // The Defiant raises shields: a torpedo drains them, the hull holds.
     kira.send({ type: 'shields', up: true });
     await carol.waitForSelector('#weapons-lock-state:has-text("shields up")');
+    // A torpedo (yield 5) is loaded with antimatter at launch; a shielded target takes a tenth of it.
+    // (The bay tops itself up from the antimatter bus, so its level after launch isn't checked here.)
+    assert.ok((await carol.evaluate(() => window.__nav.last.own.combat.torpedo.bay)) >= 10, 'the torpedo bay has antimatter for a yield-5 torpedo');
     await carol.click('#fire-torpedo');
-    await waitFor(() => kira.nav()?.own.combat.shield < 80 && kira.nav().own.combat.hull === 100);
+    await waitFor(() => kira.nav()?.own.combat.shield < 100 && kira.nav().own.combat.hull === 100);
     assert.equal(await carol.isDisabled('#fire-torpedo'), true, 'torpedo tubes should be reloading');
     // Science locks sensors on the Defiant: tracked each second. With its shields up, locations
     // resolve only while our sensors (delivered %) beat its shields' strength.
@@ -1190,6 +1193,22 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.ok(!(damaged[0] in hit.power) || hit.power[damaged[0]] <= 1.5 * (100 - damaged[1]) + 1, 'damage should cap the system\'s power'); // subsystems have no power level: they fail at 50%
     await waitFor(() => obrien.msgs.some((m) => m.type === 'notice' && /^Engineering: .* damaged/.test(m.text)));
     step(`with shields down a phaser hit, aimed at the lateral sensor arrays, took the hull to ${hit.combat.hull}% and damaged them, capping their power`);
+    // Frequencies: on the frequency of the Defiant's shields, phasers go straight through them.
+    kira.send({ type: 'shields', up: true });
+    await carol.waitForSelector('#weapons-lock-state:has-text("shields up")');
+    const freq = kira.nav().own.combat.freq.shields, shieldNow = kira.nav().own.combat.shield, hullNow = kira.nav().own.combat.hull;
+    await carol.click(`#freq-weapons button[data-value="${freq}"]`);
+    await carol.waitForSelector(`#freq-weapons button[data-value="${freq}"][aria-pressed="true"]`);
+    await carol.waitForSelector('#fire-phaser:not([disabled])', { timeout: 20000 });
+    await carol.click('#fire-phaser');
+    await waitFor(() => kira.nav()?.own.combat.hull < hullNow);
+    assert.ok(kira.nav().own.combat.shield >= shieldNow, 'the shields took the hit');
+    kira.send({ type: 'shields', up: false });
+    // Torpedo yield: a light bar; more yield, more antimatter and a longer load.
+    await carol.click('#torpedo-yield [data-level="10"]');
+    await carol.waitForSelector('#yield-note:has-text("yield 10: 20 antimatter")');
+    await carol.click('#torpedo-yield [data-level="5"]');
+    step(`on the Defiant's shield frequency (${freq}), a phaser hit went straight through its raised shields; the torpedo yield bar set 20 antimatter a torpedo at yield 10`);
 
     // Engineering directs repairs; the ship's computer keeps the damage.
     obrien.send({ type: 'repair', system: damaged[0] });
