@@ -770,6 +770,96 @@ function openSystem(k) {
 // Engineering's Life support panel: each place aboard, its atmosphere, heat,
 // gravity and lights (taps), and what it's actually getting.
 // The Brig's screen: the force field, and who's held here.
+// Engineering's Distribution: a flow schematic, one bus at a time (picked by the
+// taps on the right): the sources on the left feeding the bus (the EPS manifold)
+// in the middle, branching to the places on it, then their consoles, systems and
+// subsystems. Each is a pill with its live value and state: LIVE, OPEN (not tied
+// to this bus), DEAD (tied, nothing flowing) or CUT OFF (a conduit above it untied).
+// Lines are lit where power flows. Tap a pill to tie it to this bus or untie it,
+// as on the grid. Deu. and AM show the fuel bus: the main storage, the tanks on it.
+let distBus = 'EPS';
+function renderDistribution(grid) {
+  const box = document.querySelector('[data-distribution]');
+  if (!box || !grid) return;
+  const sig = JSON.stringify([distBus, grid.ties, grid.cells, grid.cutOff, grid.totals, grid.stores, grid.fuel, grid.taps]);
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  const NS = 'http://www.w3.org/2000/svg';
+  const svgEl = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; };
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const X = distBus, fuel = X === 'Deu' || X === 'AM';
+  const busName = { A: 'Bus A', B: 'Bus B', C: 'Bus C', EPS: 'EPS manifold', Deu: 'Deuterium bus', AM: 'Antimatter bus' }[X];
+  const toggle = (key) => send({ type: 'grid', ties: { [key]: grid.multi.includes(key) ? ['A', 'B', 'C', 'EPS'].filter((n) => (n === X ? !grid.ties[key].includes(X) : grid.ties[key].includes(n))) : grid.ties[key].includes(X) ? [] : [X] } });
+  const SRC = { solar: 'Solar', dock: 'Dock power', dockEps: 'Dock EPS', ship: 'Docked ship', shipEps: 'Docked ship EPS', emergA: 'Emergency battery A', emergB: 'Emergency battery B', emergC: 'Emergency battery C',
+    impulsePort: 'Impulse reactor (port)', impulseStarboard: 'Impulse reactor (starboard)', aux1: 'Aux fusion 1', aux2: 'Aux fusion 2', core: 'Warp core (PTC)' };
+  const nameOf = (key) => key.startsWith('console:') ? `${key.slice(8)} console` : key.startsWith('sub:') ? grid.subsystems[key.slice(4)]?.name || key.slice(4)
+    : key.startsWith('system:') ? (grid.sysNames?.[key.slice(7)] || key.slice(7)) : key.startsWith('place:') ? key.slice(6) : key;
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const state = (key, flow) => (grid.cutOff?.[key]?.includes(X) ? 'cut' : !grid.ties[key]?.includes(X) ? 'open' : flow > 0.5 ? 'live' : 'dead');
+  const left = [], right = [];
+  let mid;
+  if (!fuel) {
+    for (const [key, label] of Object.entries(SRC)) if (grid.tieNodes[key]?.includes(X)) { const v = Math.max(0, grid.cells[key]?.[X] || 0); left.push({ key, label, value: `${Math.round(v)} MW`, st: state(key, v) }); }
+    const store = grid.stores?.[X];
+    if (store) left.push({ label: X === 'EPS' ? 'EPS pressure' : `Battery ${X}`, value: `${store.level}%${store.supplying ? ` · ${store.supplying} out` : store.charging ? ` · charging ${store.charging}` : ''}`, st: store.supplying > 0 ? 'live' : store.breaker === false ? 'open' : 'dead' });
+    const t = grid.totals?.[X] || {};
+    mid = { label: busName, value: `${Math.round(t.used || 0)} of ${Math.round(t.available || 0)} MW`, st: (t.available || 0) > 0 ? 'live' : 'dead',
+      notes: X === 'EPS' ? [] : [`crosslink: TIE ${grid.ties.crosslink.includes(X) ? 'CLOSED' : 'OPEN'}`, `EPS tap: ${grid.taps?.[X] ? `up to ${grid.taps[X]}` : 'closed'}`] };
+    // The places on it (the design's, by deck), and what's in each that can tie to this bus.
+    const places = [...(window.PLACES || [])].sort((a, b) => a.deck - b.deck), fallback = places.find((p) => p.default) || places[places.length - 1];
+    const parentOf = { injectors: 'system:engines', atmosphere: 'system:lifeSupport', thermal: 'system:lifeSupport', gravity: 'system:lifeSupport', lights: 'system:lifeSupport', lighting: 'system:lifeSupport' };
+    const placeOf = (key) => key.startsWith('console:') ? places.find((p) => p.stations.includes(key.slice(8)))
+      : places.find((p) => (p.rows || []).includes(parentOf[key.slice(7)] || key)) || fallback;
+    const loads = Object.keys(grid.ties).filter((k) => /^(console|system|sub):/.test(k) && !k.startsWith('place:') && grid.tieNodes[k]?.includes(X) && (grid.conduits || []).indexOf(k) < 0 || k === 'system:lifeSupport' && grid.tieNodes[k]?.includes(X));
+    for (const p of places) {
+      const pk = `place:${p.name}`, mine = loads.filter((k) => placeOf(k) === p);
+      if (!grid.tieNodes[pk] || (!mine.length && !grid.ties[pk]?.includes(X))) continue;
+      const draws = mine.reduce((n, k) => n + Math.max(0, -(grid.cells[k]?.[X] || 0)), 0);
+      right.push({ key: pk, label: `Deck ${p.deck} · ${p.name}`, value: `${Math.round(draws)} MW`, st: state(pk, draws), kind: 'place' });
+      for (const k of mine) { const v = Math.max(0, -(grid.cells[k]?.[X] || 0)); right.push({ key: k, label: cap(nameOf(k)), value: k === 'system:lifeSupport' ? 'conduit' : `${Math.round(v)} MW`, st: state(k, k === 'system:lifeSupport' ? draws : v), kind: k.startsWith('sub:') || parentOf[k.slice(7)] ? 'sub' : 'load' }); }
+    }
+  } else {
+    const fb = grid.fuel?.[X === 'Deu' ? 'deu' : 'am'];
+    const tanks = fb?.tanks || [];
+    const main = tanks.find((t) => t.name === 'main');
+    if (main) left.push({ label: main.label || 'Main storage', value: `${main.level} of ${main.cap}`, st: main.tied ? (fb.flow ? 'live' : 'dead') : 'open', tank: 'main' });
+    mid = { label: busName, value: fb?.down ? fb.why : fb?.flow ? `moving ${fb.flow}/s` : 'idle', st: fb?.down ? 'dead' : fb?.flow ? 'live' : 'dead', notes: [] };
+    for (const t of tanks.filter((x) => x.name !== 'main')) right.push({ label: `${cap(t.name)} tank`, value: `${t.level} of ${t.cap}`, st: t.tied ? (fb.flow ? 'live' : 'dead') : 'open', tank: t.name, kind: 'load' });
+  }
+  // The layout: three columns; pills 200 × 40.
+  const W = 1040, PH = 40, GAP = 10, cx = { left: 20, mid: 330, right: 640 };
+  const rowsH = (n) => n * (PH + GAP);
+  const H = Math.max(rowsH(left.length), rowsH(right.length), 160) + 40;
+  const svg = svgEl('svg', { class: 'dist-map', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `${busName} flow schematic` });
+  const COLOR = { live: 'var(--lcars-sky)', dead: 'var(--lcars-tan)', open: '#3a3550', cut: '#5a1f22' };
+  const pill = (x, y, n, w = 260) => {
+    const g = svgEl('g', { class: `dist-node dist-node--${n.st}`, transform: `translate(${x} ${y})`, role: 'button', tabindex: 0, 'data-key': n.key || n.tank || n.label });
+    g.append(svgEl('rect', { width: w, height: PH, rx: PH / 2, fill: COLOR[n.st], opacity: n.st === 'dead' ? 0.6 : 1, ...(n.st === 'cut' ? { stroke: 'var(--lcars-red)', 'stroke-width': 2 } : {}) }),
+      svgEl('text', { x: 16, y: 17, 'font-size': 14, fill: n.st === 'open' || n.st === 'cut' ? 'var(--lcars-text)' : '#000' }, n.label.toUpperCase()),
+      svgEl('text', { x: 16, y: 32, 'font-size': 11, fill: n.st === 'open' || n.st === 'cut' ? '#aaa' : '#000' }, `${n.value} · ${{ live: 'live', dead: 'dead', open: 'open', cut: 'CUT OFF' }[n.st]}`));
+    if (n.key || n.tank) g.addEventListener('click', () => (n.tank ? send({ type: 'grid', tank: { bus: X === 'Deu' ? 'deu' : 'am', name: n.tank, tied: n.st === 'open' } }) : toggle(n.key)));
+    svg.append(g);
+    return { x, y, w };
+  };
+  const line = (x1, y1, x2, y2, lit) => svg.append(svgEl('path', { d: `M${x1},${y1} H${(x1 + x2) / 2} V${y2} H${x2}`, fill: 'none', stroke: lit ? 'var(--lcars-sky)' : '#444', 'stroke-width': lit ? 3 : 1.5 }));
+  const midY = H / 2 - PH / 2;
+  const L = left.map((n, i) => ({ n, ...pill(cx.left, 20 + rowsH(i), n) }));
+  const M = pill(cx.mid, midY, mid);
+  mid.notes.forEach((t, i) => svg.append(svgEl('text', { x: cx.mid + 8, y: midY + PH + 18 + i * 16, 'font-size': 12, fill: 'var(--lcars-gold)' }, t)));
+  let placeAt = null;
+  const R = right.map((n, i) => ({ n, ...pill(cx.right + (n.kind === 'sub' ? 60 : n.kind === 'load' ? 30 : 0), 20 + rowsH(i), n, n.kind === 'place' ? 300 : 260) }));
+  for (const s of L) line(s.x + s.w, s.y + PH / 2, M.x, midY + PH / 2, s.n.st === 'live');
+  for (const r of R) {
+    if (r.n.kind === 'place' || fuel) { line(M.x + M.w, midY + PH / 2, r.x, r.y + PH / 2, r.n.st === 'live'); placeAt = r; }
+    else if (placeAt) svg.append(svgEl('path', { d: `M${placeAt.x + 12},${placeAt.y + PH} V${r.y + PH / 2} H${r.x}`, fill: 'none', stroke: r.n.st === 'live' ? 'var(--lcars-sky)' : '#444', 'stroke-width': r.n.st === 'live' ? 3 : 1.5 }));
+  }
+  // The buses, as a right-capped cluster (situational: this panel's own choice).
+  const tap = (b) => { const t = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: { Deu: 'Deu.', AM: 'AM' }[b] || (b === 'EPS' ? 'EPS' : `Bus ${b}`) }); t.dataset.bus = b; t.setAttribute('aria-pressed', String(b === X)); t.onclick = () => { distBus = b; box.dataset.sig = ''; renderDistribution(lastNav?.own?.grid); }; return t; };
+  box.replaceChildren(
+    el('div', { className: 'place-bar dist-buses' }, el('span', { className: 'place-label', textContent: 'Bus' }), ...['A', 'B', 'C', 'EPS', 'Deu', 'AM'].map(tap), el('span', { className: 'place-cap place-cap--r' })),
+    el('div', { className: 'dist-wrap' }, svg),
+    el('p', { className: 'ops-hint', textContent: 'Power runs source → bus → place → system → subsystem: a load gets this bus\'s power only while everything above it is tied to it (CUT OFF otherwise). Tap a pill to tie it to this bus or untie it.' }));
+}
 function renderBrig(grid) {
   const box = document.querySelector('[data-brig]');
   if (!box || !grid) return;
@@ -2074,6 +2164,7 @@ async function onMessage(msg) {
       // The brig's force field changes which stations can be walked to.
       if (!!msg.own?.grid?.brigSealed !== !!window.__brigSealed) { window.__brigSealed = !!msg.own?.grid?.brigSealed; fillReassign(); }
       renderBrig(msg.own?.grid);
+      renderDistribution(msg.own?.grid);
       // Department readiness (Captain, First Officer): redraw when the answers change.
       if (JSON.stringify(msg.own?.readiness) !== JSON.stringify(window.__readiness)) { window.__readiness = msg.own?.readiness; stationView?.setCrew?.(comms.users); }
       // The Communications console's subspace bands follow the subspace relay.

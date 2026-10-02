@@ -376,6 +376,8 @@
         panel('st-power', 'Power distribution', 'gold', true, h('div', { class: 'pw', 'data-power': '' })),
         // Power sources, buses, the warp core and containment (client.js fills it in).
         panel('st-grid', 'Power grid', 'sky', true, h('div', { 'data-grid': '' })),
+        // The flow schematic, a bus at a time (client.js fills it in).
+        panel('st-dist', 'Distribution', 'orange', true, h('div', { class: 'dist', 'data-distribution': '' })),
         // Damage and where the repair crews go (client.js fills it in).
         panel('st-damage', 'Damage control', 'red', true, h('div', { 'data-damage': '' })),
         // Life support, place by place (client.js fills it in).

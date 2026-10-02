@@ -173,7 +173,13 @@
     .place-bar .place-label { display: flex; align-items: center; padding: 0 12px; min-height: 32px; background: var(--lcars-orange); color: #000; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; }
     .place-bar .tr-tap { border-radius: 0; margin: 0; }
     /* The two-column sidebar and the left pane (see console.css). */
-        /* A bridge console's top buttons: what it runs. */
+        /* Engineering's Distribution: the flow schematic (wide: it scrolls sideways in its panel). */
+    .dist-wrap { overflow-x: auto; touch-action: pan-x pan-y; }
+    .dist-map { display: block; width: 100%; min-width: 900px; height: auto; }
+    .dist-map text { font-family: var(--font); letter-spacing: 0.05em; }
+    .dist-node { cursor: pointer; }
+    .dist-node:hover rect { filter: brightness(1.2); }
+    /* A bridge console's top buttons: what it runs. */
     .lcars-header { position: relative; }
     .console-bar { position: absolute; top: 44px; left: calc(var(--side) + 40px); z-index: 6; display: flex; gap: 6px; align-items: center; }
     .console-bar[hidden] { display: none; }

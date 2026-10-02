@@ -64,6 +64,19 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     assert.match(await page.textContent('#ties-system-spore'), /Spore drive/);
     assert.match(await page.textContent('#ties-system-amBus'), /AM bus magnetic containment/);
     step('every grid row on a Crossfield has a name (the AM bus magnetic containment and the spore drive too)');
+    // Engineering's Distribution: the EPS schematic (sources, the manifold, places, loads); a tap ties or unties.
+    await page.evaluate(() => document.querySelector('[data-screen-tab="st-dist"]').click());
+    await page.waitForSelector('[data-distribution] .dist-map .dist-node');
+    assert.ok(await page.$('[data-distribution] .dist-node[data-key="place:Main Engineering"]'), 'the EPS: Main Engineering on it');
+    await page.click('[data-distribution] button[data-bus="A"]');
+    await page.waitForSelector('[data-distribution] .dist-node[data-key="console:Engineering"]');
+    const tiedA = () => page.evaluate(() => window.__nav.last.own.grid.ties['console:Helm'].includes('A'));
+    const was = await tiedA();
+    await page.click('[data-distribution] .dist-node[data-key="console:Helm"]');
+    await page.waitForFunction((w) => window.__nav.last.own.grid.ties['console:Helm'].includes('A') !== w, was);
+    await page.click('[data-distribution] .dist-node[data-key="console:Helm"]');
+    await page.waitForFunction((w) => window.__nav.last.own.grid.ties['console:Helm'].includes('A') === w, was);
+    step('Distribution: the EPS schematic (Main Engineering on it); Bus A, where a tap on the Helm console untied it and another tied it back');
     // The sidebar: two columns (ship-wide on the left, this station's screens on the right), each
     // scrolling by itself when it's taller than the screen.
     for (const col of ['.lcars-sidebar__col--right', '.lcars-sidebar__col--left']) {
