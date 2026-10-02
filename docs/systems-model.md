@@ -8,7 +8,7 @@ The relay (`server.js`) runs the simulation. The ship's computers (`tools/shipco
 
 **In the relay's memory, per ship (keyed by the lower-cased ship name):**
 
-- `navState` (around line 840): the ship's position, heading, speed (`warp`: under 1 is impulse), destination, and Engineering's limiter settings (`power`, a % per system), as last reported by its computer.
+- `navState` (line 854): the ship's position, heading, speed (`warp`: under 1 is impulse), destination, and Engineering's limiter settings (`power`, a % per system), as last reported by its computer.
 - `eng` (`const eng = new Map`, line 1563): the power grid and everything Engineering runs. `freshEng()` (line 1574) builds it from a save or from the cold-iron default `COLD` (line 1573). It holds:
   - `ties`: for each source and load, the nodes it's tied to (any of `A`, `B`, `C`, `EPS`). Keys look like `console:Helm`, `system:shields`, `sub:rf`, `contain:amCore`, `solar`, `dock`, `ship`, `core`, `crosslink`.
   - `taps` (EPS → bus limits), `breakers` (per battery), and `stores` (battery A/B/C charge; EPS manifold `pressure`).
@@ -17,7 +17,7 @@ The relay (`server.js`) runs the simulation. The ship's computers (`tools/shipco
   - `computers` (three, state and boot time) and `epsLive` (manifold energized).
   - `antimatter` and `deuterium` (the main storage), `tanks` (the systems' own tanks), `tankCfg` (each tank's tie and Fill/Drain), `contain` (main containment field and reserve), and `tankContain` (the other antimatter tanks').
   - `ls` (life support per place), `trDiag` (transporter diagnostic), `conn` (Connections' Import/Export), `docked`, `shipDocks`, `forcefields`, and others.
-- `combat` (line around 2450, `freshCombat`): hull, shield strength, damage per system, phaser charge, torpedoes, lock, repair.
+- `combat` (`freshCombat`, line 2565): hull, shield strength, damage per system, phaser charge, torpedoes, lock, repair.
 - `transporters` (line 2987): transporter lock and energizing state.
 - `flowCache` (line 1713): each ship's last power-flow result, recomputed at most every 200 ms or when invalidated (`gridChanged`, line 1969).
 
@@ -195,7 +195,4 @@ All of this goes over one WebSocket per console.
 - The consoles render from the last `nav` (`public/client.js`, `case 'nav'`) and send commands back: `grid`, `power`, `helm`, `beam`, `transporter-lock`, and others.
 - Engineering's grid commands go through `gridCommand` (line 2075).
 
-**Unsure:**
-
-- The exact line numbers of `navState` and `freshCombat`; I didn't pin them.
-- I haven't checked whether every older-save field has a migration.
+**Unsure:** I haven't checked whether every older-save field has a migration.
