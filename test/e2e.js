@@ -643,6 +643,9 @@ const audioBytes = (page) => page.evaluate(async () => {
     const chief = await openAs(browser, 'chief', 'chief', 'Enterprise', 'Transporter');
     const wes = await openAs(browser, 'wes', 'wes', 'Enterprise', 'Crew');
     await wes.waitForFunction(() => window.__voice.myName === 'wes');
+    // From: this ship, a manned station (Crew), then who (one or more); To: a vessel, then a station.
+    await chief.waitForSelector('#beam-from-station button[data-value="Crew"]', { state: 'attached' });
+    await chief.$eval('#beam-from-station button[data-value="Crew"]', (b) => b.click());
     await chief.waitForSelector('#beam-who button[data-value="wes@enterprise"]', { state: 'attached' });
     await screen(carol, 'st-shieldctl');
     await carol.click('[data-shield-control] button');
@@ -659,7 +662,7 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     await carol.click('[data-shield-control] button');
     await chief.waitForFunction(() => !document.body.hasAttribute('data-shields-up'));
-    await chief.click(`#beam-who button[data-value="${id('wes')}"]`);
+    await chief.waitForSelector(`#beam-who button[data-value="${id('wes')}"][aria-pressed="true"]`);
     await chief.waitForSelector('#beam-status:has-text("No lock")');
     assert.equal(await chief.isDisabled('#beam-slider-1'), true, 'no lock: the sliders are dead');
     assert.equal(await chief.evaluate(() => window.__nav.last.own.power.transporter), 0, 'no lock, no power drawn');
@@ -681,8 +684,11 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // Site to site, to a station: an ensign beamed to the Enterprise's Engineering console.
     const ensign = await (async () => { const sock = new (require('ws'))(`ws://localhost:${process.env.PORT}`); const msgs = []; sock.on('message', (m) => msgs.push(JSON.parse(m))); await new Promise((r) => sock.on('open', r)); sock.send(JSON.stringify({ type: 'register', name: 'ensign', ship: 'Enterprise', station: 'Crew' })); return { sock, msgs }; })();
+    await chief.waitForSelector('#beam-from-station button[data-value="Crew"]', { state: 'attached' });
+    await chief.click('#beam-from-station button[data-value="Crew"]');
     await chief.waitForSelector(`#beam-who button[data-value="${id('ensign')}"]`, { state: 'attached' });
     await chief.click(`#beam-who button[data-value="${id('ensign')}"]`);
+    assert.equal(await chief.locator('#beam-who button[aria-pressed="true"]').count(), 1, 'only the ensign picked');
     await chief.click('#beam-ship button[data-value="Enterprise"]');
     await chief.click('#beam-station button[data-value="Engineering"]');
     await energize(chief);
@@ -938,8 +944,12 @@ const audioBytes = (page) => page.evaluate(async () => {
     step('with the Enterprise\'s subspace relay untied the data link dropped; tied again, a new link opened with the far-off Defiant');
 
     // And back: intercept the Defiant, arriving within transporter range.
+    // (Far off, the Defiant may be off our sensors: head for where it is, then intercept.)
+    const dpos = await nog.evaluate(() => window.__nav.last.own);
+    helm({ dest: { x: dpos.x, y: dpos.y + 30 }, warp: 7 });
+    await waitFor(async () => (await spock.evaluate(() => window.__nav.last?.own.warp === 0 && window.__nav.last.ships.some((s) => s.name === 'Defiant'))), 30000).catch(async () => { throw new Error(`no Defiant on sensors: ${JSON.stringify(await spock.evaluate(() => ({ own: [window.__nav.last?.own.x, window.__nav.last?.own.y, window.__nav.last?.own.warp], ships: window.__nav.last?.ships.map((x) => [x.name, x.distance]), ranges: window.__nav.last?.ranges })))} sulu: ${JSON.stringify(suluMsgs.filter((m) => m.type === 'notice').slice(-3))} defiant: ${JSON.stringify(dpos && [dpos.x, dpos.y])} now ${JSON.stringify(await nog.evaluate(() => [window.__nav.last.own.x, window.__nav.last.own.y, window.__nav.last.own.signature]))}`); })
     helm({ dest: { ship: 'Defiant' }, warp: 7 });
-    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); const d = n?.ships.find((s) => s.name === 'Defiant'); return n?.own.warp === 0 && d && d.distance <= 20; }, 30000);
+    await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); const d = n?.ships.find((s) => s.name === 'Defiant'); return n?.own.warp === 0 && d && d.distance <= 20; }, 30000).catch(async () => { throw new Error(`intercept failed: sulu ${JSON.stringify(suluMsgs.filter((m) => m.type === "notice").slice(-4).map((m) => m.text))}`); });
     await op.waitForFunction(() => window.__operator.ships.includes('Defiant'));
     beamSelf();
     await waitFor(() => randMsgs.some((m) => m.type === 'registered' && m.ship === 'Defiant'));
@@ -1110,20 +1120,21 @@ const audioBytes = (page) => page.evaluate(async () => {
       if (refused) throw new Error(`${name} could not report aboard the ${ship}: ${refused.reason}`);
       return { msgs, send: (m) => sock.send(JSON.stringify(m)), close: () => sock.close(), nav: () => [...msgs].reverse().find((m) => m.type === 'nav') };
     };
-    // A transporter lock on a person aboard another vessel (Science can place them: the Defiant's
-    // shields are down), then beaming them aboard, to the transporter room.
+    // Beaming people aboard from another vessel: From lists the Defiant (Science can place its
+    // people: its shields are down), its manned stations and who's there; two beam over at once.
     {
       const lwaxana = await crewWs('lwaxana', 'Defiant', 'Crew');
+      const barclay2 = await crewWs('reg', 'Defiant', 'Crew');
       const chief2 = await crewWs('chief2', 'Enterprise', 'Transporter');
-      await waitFor(() => chief2.nav()?.own.transporter.people?.some((x) => x.id === id('lwaxana', 'Defiant') && !x.why && x.where === 'Crew'));
-      chief2.send({ type: 'transporter-lock', person: id('lwaxana', 'Defiant') });
-      await waitFor(() => chief2.nav()?.own.transporter.person?.ship === 'Defiant');
-      assert.equal(chief2.nav().own.transporter.lock, 'Defiant');
-      chief2.send({ type: 'beam' });
-      await waitFor(() => lwaxana.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && m.station === 'Transporter'), 15000);
-      await waitFor(() => !chief2.nav()?.own.transporter.lock);
-      lwaxana.close(); chief2.close();
-      step('the Enterprise\'s transporter locked on lwaxana aboard the Defiant (located: its shields down) and beamed them aboard to the transporter room');
+      await waitFor(() => chief2.nav()?.own.transporter.from?.find((v) => v.ship === 'Defiant')?.stations.find((x) => x.station === 'Crew')?.people.length >= 2);
+      chief2.send({ type: 'transporter-lock', ship: 'Enterprise' });
+      await waitFor(() => chief2.nav()?.own.transporter.lock === 'Enterprise');
+      chief2.send({ type: 'beam', who: [id('lwaxana', 'Defiant'), id('reg', 'Defiant')], station: 'Transporter' });
+      await waitFor(() => [lwaxana, barclay2].every((w) => w.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && m.station === 'Transporter')), 15000);
+      lwaxana.close(); barclay2.close();
+      chief2.send({ type: 'transporter-lock', ship: null });
+      chief2.close();
+      step('the Enterprise\'s transporter beamed two people aboard from the Defiant\'s Crew quarters (placed: its shields down) to its transporter room, in one go');
     }
     const kira = await crewWs('kira', 'Defiant', 'Tactical');
     const obrien = await crewWs('obrien', 'Defiant', 'Engineering');
