@@ -48,7 +48,20 @@ const MAX_UPLOAD = Number(process.env.MAX_UPLOAD_MB || 200) * 1024 * 1024;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, ...
 const OPS_STATION = 'Operations';   // operators only
-const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay', 'Brig'];
+const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay', 'Brig', 'Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
+// The bridge: five dedicated stations, and five consoles whose top buttons pick
+// what they run (one of CONSOLE_MODES). At a bridge console someone's station is
+// what it runs (their controls, notices, orders, readiness) and their console is
+// where they are (its power, ODN link, life support, force fields).
+const BRIDGE_CONSOLES = ['Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
+const CONSOLE_MODES = ['Science', 'Engineering', 'Communications', 'Security', 'Medical'];
+const BRIDGE = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Operations', ...BRIDGE_CONSOLES];
+const placeOf = (u) => (u.operator ? 'Operations' : u.console || u.station);
+const modeOf = (k, c) => (CONSOLE_MODES.includes(eng.get(k)?.bridgeModes?.[c]) ? eng.get(k).bridgeModes[c] : CONSOLE_MODES[BRIDGE_CONSOLES.indexOf(c)]);
+// Put someone at a station (a bridge console: running what it's set to).
+function seat(u, station) {
+  if (BRIDGE_CONSOLES.includes(station)) { u.console = station; u.station = modeOf(u.shipKey, station); } else { u.console = null; u.station = station; }
+}
 // Operator commands (everything else from an operator is handled as crew).
 const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-hail', 'cancel-hail', 'transfer',
   'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock', 'prefix', 'automation']);
@@ -108,11 +121,11 @@ const SPECIES = ['Human', 'Vulcan', 'Klingon', 'Betazoid', 'Andorian', 'Bajoran'
 const GENDERS = ['Male', 'Female', 'Non-binary', 'Other'];
 const profileFrom = (msg) => ({ rank: RANKS.includes(msg?.rank) ? msg.rank : null, species: SPECIES.includes(msg?.species) ? msg.species : null, gender: GENDERS.includes(msg?.gender) ? msg.gender : null });
 const titled = (ws) => (ws.rank && RANK_TITLE[ws.rank] ? `${RANK_TITLE[ws.rank]} ${ws.name}` : ws.name);
-const samePlace = (a, b) => a.shipKey === b.shipKey && a.station === b.station;
+const samePlace = (a, b) => a.shipKey === b.shipKey && placeOf(a) === placeOf(b);
 // What others see of someone: in person adds species and gender.
 const seenBy = (viewer, u) => ({ ...info(u), ...(viewer && samePlace(viewer, u) ? { species: u.species || null, gender: u.gender || null } : {}) });
 const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station, ...(ws.rank ? { rank: ws.rank } : {}), title: titled(ws),
-  ...(ws.sickbay ? { sickbay: true } : {}), ...(ws.confined ? { confined: true } : {}) });
+  ...(ws.console ? { console: ws.console } : {}), ...(ws.fielded ? { fielded: true } : {}), ...(ws.sickbay ? { sickbay: true } : {}), ...(ws.confined ? { confined: true } : {}) });
 // The sign-in reply: who you are, all of it.
 const selfInfo = (ws) => ({ ...info(ws), profile: { rank: ws.rank || null, species: ws.species || null, gender: ws.gender || null } });
 const crewOf = (key) => [...users.values()].filter((u) => u.shipKey === key);
@@ -566,19 +579,20 @@ function beam(u, toKey, station, how = 'beamed') {
   // Site to site: within the ship, to another station's console.
   // Beaming drops you out of any call you're in (the others stay connected).
   if (toKey === u.shipKey) {
-    const was = u.station;
+    const was = placeOf(u);
     if (u.state !== 'idle') send(u, { type: 'force-hangup', reason: `beamed to ${station}` });
-    u.station = station;
+    seat(u, station); u.fielded = false;
     send(u, { type: 'registered', ...selfInfo(u), token: u.token });
     send(u, { type: 'notice', text: `Transporter: beamed from ${was} to ${station}` });
     broadcastCrew(toKey);
     opLog(toKey, `${u.name} beamed from ${was} to ${station}`);
     return;
   }
-  if (station) u.station = station;
+  const to = station || u.console || u.station;
   send(u, { type: 'force-hangup', reason: `${how} to the ${shipName(toKey)}` });
   signOut(u);
-  Object.assign(u, { id: userId(u.name, shipName(toKey)), shipKey: toKey, ship: shipName(toKey), state: 'idle', peers: [], cid: null });
+  Object.assign(u, { id: userId(u.name, shipName(toKey)), shipKey: toKey, ship: shipName(toKey), state: 'idle', peers: [], cid: null, fielded: false });
+  seat(u, hasStation(toKey, to) ? to : 'Crew');
   users.set(u.id, u);
   send(u, { type: 'registered', ...selfInfo(u), token: u.token, [how === 'walked' ? 'walkedFrom' : how === 'beamed' ? 'beamedFrom' : how === 'returned' ? 'returnedFrom' : 'remoteVia']: from });
   sendShipRadio(u);
@@ -1434,10 +1448,11 @@ function crewCommand(ws, msg) {
       // A reassignment: move now, as walking would (force fields hold).
       if (o.reassign) {
         const to = o.reassign.station;
-        if (sealed(key, ws.station)) return note(`A Security force field isolates ${ws.station}: you can't leave to report to ${to}`);
+        if (sealed(key, placeOf(ws))) return note(`A Security force field isolates ${placeOf(ws)}: you can't leave to report to ${to}`);
+        if (held(ws)) return note(`A Security force field holds you at ${placeOf(ws)}: you can't leave to report to ${to}`);
         if (sealed(key, to)) return note(`A Security force field isolates ${to}: you can't report there`);
-        const was = ws.station;
-        ws.station = to;
+        const was = placeOf(ws);
+        seat(ws, to);
         send(ws, { type: 'registered', ...selfInfo(ws), token: ws.token });
         broadcastCrew(key);
         opLog(key, `${ws.name} reported to ${to} (from ${was}), as ordered`);
@@ -1454,7 +1469,7 @@ function crewCommand(ws, msg) {
       if (!u) return note('That crew member is not aboard');
       if (u.operator) return note('The ops station can only be left by the operator');
       if (!STATIONS.includes(msg.station) || !hasStation(key, msg.station)) return note('No such station');
-      if (u.station === msg.station) return;
+      if (placeOf(u) === msg.station) return;
       // An order to the crewman: they move when they acknowledge (or decline it).
       const o = { id: newId('o-'), ship: key, by: ws.id, from: info(ws), text: `${u.name}: report to ${msg.station}`, at: Date.now(), pending: new Set([u.id]), acked: new Set(), reassign: { who: u.id, station: msg.station } };
       orders.set(o.id, o);
@@ -1496,6 +1511,18 @@ function crewCommand(ws, msg) {
       opLog(key, `Hangar control (${ws.name}): shuttle bay doors ${open ? 'open' : 'closed'}`);
       gridChanged(key); broadcastOps(key);
       return note(`Hangar control: shuttle bay doors ${open ? 'open' : 'closed'}`);
+    }
+    case 'person-field': {
+      // Security puts a force field around someone on the bridge (or takes it down): they can't walk off.
+      if (ws.station !== 'Security') return note('Only Security puts force fields around people');
+      const u = aboard(msg.who);
+      if (!u) return note('That crew member is not aboard');
+      if (msg.on && !BRIDGE.includes(placeOf(u))) return note(`${u.name} is not on the bridge`);
+      u.fielded = !!msg.on;
+      opLog(key, `Security (${ws.name}): force field ${msg.on ? 'around' : 'down from'} ${u.name}`);
+      send(u, { type: 'notice', text: msg.on ? `Security: a force field holds you at ${placeOf(u)}` : 'Security: the force field around you is down' });
+      gridChanged(key); broadcastCrew(key);
+      return note(`Security: force field ${msg.on ? 'around' : 'down from'} ${u.name}`);
     }
     case 'brig-field': {
       // Security raises or drops the brig's force field.
@@ -1773,7 +1800,7 @@ const bayLinks = (k) => {
 const partners = (k) => [...shipsDocked(k), ...bayLinks(k)];
 const slotFor = (o, k) => portFor(o, k) || (engOf(o).landed === k ? 'bay' : engOf(k).landed === o ? `bay:${k}` : null);
 const SYSTEM_BUS = { spore: 'EPS', phaser1: 'EPS', phaser2: 'EPS', phaser3: 'EPS', phaser4: 'EPS', drydock1: 'EPS', drydock2: 'EPS', drydock3: 'EPS', industrial: 'EPS', atmosphere: 'A', thermal: 'A', gravity: 'A', lights: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', bussard: 'EPS', amBus: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
-const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B', 'Shuttle Bay': 'B', Brig: 'B' };
+const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B', 'Shuttle Bay': 'B', Brig: 'B', 'Bridge 1': 'A', 'Bridge 2': 'A', 'Bridge 3': 'A', 'Bridge 4': 'A', 'Bridge 5': 'A' };
 // Why this ship can't spore-jump now (null: it can).
 function sporeFault(k) {
   const e = engOf(k);
@@ -2011,6 +2038,7 @@ function freshEng(saved, { cold = false } = {}) {
     spores: Number.isFinite(s.spores) ? Math.max(0, Math.min(SPORE.cap, s.spores)) : cold ? 0 : SPORE.cap, spore: { charging: false, t: 0, dest: null, ready: 0 },
     // The shuttle bay: its doors (Ops opens them), and the bay this craft has landed in (kept across restarts).
     brigField: s.brigField ?? true, // the brig's force field (up to start)
+    bridgeModes: s.bridgeModes && typeof s.bridgeModes === 'object' ? Object.fromEntries(BRIDGE_CONSOLES.filter((c) => CONSOLE_MODES.includes(s.bridgeModes[c])).map((c) => [c, s.bridgeModes[c]])) : {}, // what each bridge console runs
     bayOpen: !!s.bayOpen, landed: typeof s.landed === 'string' && s.landed ? shipKey(s.landed) : null,
     remoteBlock: !!s.remoteBlock, // ops refuse remote control by other vessels
     prefix: /^\d{5}$/.test(s.prefix) ? s.prefix : PREFIX.factory, // the command prefix (kept in .nav.json)
@@ -2108,7 +2136,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores), brigField: !!e.brigField, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores), brigField: !!e.brigField, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
@@ -2301,9 +2329,9 @@ function flow(k) {
     // A reactor's chamber: on the buses while it lights, and while it runs
     // unless its EPS tap has it powering itself from the (energized) EPS.
     ...reactorsOf(e).map(([r, x]) => [`sub:${r}Chamber`, x.state === 'starting' ? FUSION.chamberStart : x.state === 'running' && !(x.epsTap && e.epsLive) ? FUSION.chamberRun : 0]),
-    ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => u.station === st).length * GRID.console]),
+    ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => placeOf(u) === st).length * GRID.console]),
     ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
-    ['sub:forcefields', e.forcefields.length * GRID.forcefield],
+    ['sub:forcefields', (e.forcefields.length + crew.filter((u) => u.fielded).length) * GRID.forcefield],
     ['sub:brigField', e.brigField && hasStation(k, 'Brig') ? GRID.forcefield : 0],
     ['sub:bayDoors', e.bayOpen ? BAY.doors : 0], ['sub:bayField', e.bayOpen ? BAY.field : 0],
     ['sub:patternBuffers', TR.buffers], ['sub:targetingScanners', TR.small], ['sub:heisenberg', TR.small], ['sub:biofilter', TR.small],
@@ -2433,8 +2461,10 @@ const feedTie = (key) => ({ 'feed:station': 'dock', 'feedEps:station': 'dockEps'
 // is inside keeps using its console. Transporters get through.
 const sealed = (k, station) => (engOf(k).forcefields.includes(station) && flow(k).subOk.forcefields !== false) || (station === 'Brig' && brigSealed(k));
 // The brig: sealed while its force field is up and powered.
+// Someone held by a personal force field (it needs the emitters' power).
+const held = (u) => !!u.fielded && !u.operator && flow(u.shipKey).subOk.forcefields !== false;
 const brigSealed = (k) => !!engOf(k).brigField && hasStation(k, 'Brig') && flow(k).subOk.brigField !== false;
-const consoleDark = (ws) => { flowCache.delete(ws.shipKey); return flow(ws.shipKey).consoleOk[ws.station] === false; }; // fresh: who's aboard may have just changed
+const consoleDark = (ws) => { flowCache.delete(ws.shipKey); return flow(ws.shipKey).consoleOk[placeOf(ws)] === false; }; // fresh: who's aboard may have just changed
 const darkNote = (ws) => send(ws, { type: 'notice', text: `${ws.station}: console offline, no power on its bus` });
 // Communications' subsystems: local RF (calls aboard), radio (hails, calls
 // between ships), subspace relay (data links). Starbases always have them.
@@ -3175,7 +3205,7 @@ const consoleDarkFor = (k, station) => flow(k).consoleOk[station] === false;
 // Comms and the library need this console powered or the ship's local RF up
 // (without either, only proximity chat, which isn't built yet).
 const COMMS_OFFLINE = 'Comms offline: no console power or local RF';
-const commsReach = (u) => !present(u.shipKey) || isBase(u.shipKey) || !consoleDarkFor(u.shipKey, u.operator ? OPS_STATION : u.station) || commsUp(u.shipKey, 'rf');
+const commsReach = (u) => !present(u.shipKey) || isBase(u.shipKey) || !consoleDarkFor(u.shipKey, placeOf(u)) || commsUp(u.shipKey, 'rf');
 
 
 // A ship is destroyed: it takes ships close by with it (some), and comes back
@@ -3830,7 +3860,7 @@ function panelRoutine(k, p) {
   if (p === 'lifeSupport') {
     // Atmosphere, heat, gravity and lights on where there are people, off where there aren't.
     const a = automaton(k, 'Engineering');
-    const here = new Set(crewOf(k).map((u) => (u.operator ? OPS_STATION : u.station)));
+    const here = new Set(crewOf(k).map(placeOf));
     for (const l of LOCATIONS) for (const x of LS_SYSTEMS) {
       const want = here.has(l);
       if (!!e.ls[l]?.[x] !== want) { gridCommand(a, { ls: { sys: x, loc: l, on: want } }); return `${SYSTEM_NAMES[x]} ${want ? 'on' : 'off'} at ${l}`; }
@@ -3944,8 +3974,8 @@ function stationCommand(ws, msg) {
   // A tap by hand on an automated panel hands it back.
   { const p = !ws.automaton && panelOfCommand(ws.station, msg); if (p && autoOn(ws.shipKey, p)) setAuto(ws.shipKey, p, null, `${ws.name} took over`); }
   // Off the ODN, the station's controls do nothing (answering an order needs no console).
-  const odnOff = !odnLinked(ws.shipKey, ws.operator ? OPS_STATION : ws.station) && !['order-ack', 'order-decline'].includes(t);
-  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'brig-field', 'bay-doors', 'readiness', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
+  const odnOff = !odnLinked(ws.shipKey, placeOf(ws)) && !['order-ack', 'order-decline'].includes(t);
+  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'brig-field', 'person-field', 'bay-doors', 'readiness', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
     send(ws, { type: 'notice', text: 'Disconnected from the optical data network' });
     return true;
   }
@@ -3957,7 +3987,7 @@ function stationCommand(ws, msg) {
   if (['helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
-  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'brig-field', 'bay-doors', 'readiness'].includes(t)) return gate(crewCommand);
+  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'brig-field', 'person-field', 'bay-doors', 'readiness'].includes(t)) return gate(crewCommand);
   if (['lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
   if (t === 'grid') return gridCommand(ws, msg), true; // emergency power: works with the console dark
   if (t === 'tractor') return gate(tractorCommand);
@@ -4085,7 +4115,7 @@ function beamSources(k) {
   const vessels = [k, ...[...new Set([...users.values()].map((u) => u.shipKey))].filter((t) => t !== k && present(t) && navState.has(t) && sensorOk(k, t) && locatable(k, t).resolved && transporterOk(k, t)).sort()];
   return vessels.map((t) => {
     const stations = {};
-    for (const u of crewOf(t)) if (!u.operator) (stations[u.station] ||= []).push({ id: u.id, name: titled(u) });
+    for (const u of crewOf(t)) if (!u.operator) (stations[placeOf(u)] ||= []).push({ id: u.id, name: titled(u) });
     return { ship: shipName(t), here: t === k, stations: Object.entries(stations).sort(([a], [b]) => STATIONS.indexOf(a) - STATIONS.indexOf(b)).map(([station, people]) => ({ station, people: people.sort((x, y) => x.name.localeCompare(y.name)) })) };
   }).filter((v) => v.here || v.stations.length);
 }
@@ -4322,7 +4352,7 @@ async function libraryRequest(req, res, urlPath) {
 // any of them can route hails, manage links and so on.
 function joinOps(ws) {
   ws.operator = true;
-  ws.station = OPS_STATION;
+  ws.station = OPS_STATION; ws.console = null;
   operators.add(ws);
   send(ws, { type: 'operator-ok', ...info(ws), token: ws.token });
   broadcastAllOps();          // other ships now see this one
@@ -4548,7 +4578,7 @@ wss.on('connection', (ws) => {
       Object.assign(ws, profileFrom(msg));
       ws.shipKey = registerShip(ship);
       ws.ship = shipName(ws.shipKey);
-      ws.station = msg.station;
+      seat(ws, msg.station);
       users.set(id, ws);
       ws.token = crypto.randomBytes(16).toString('hex');
       tokens.set(ws.token, ws);
@@ -4578,7 +4608,8 @@ wss.on('connection', (ws) => {
       { const where = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey; if (present(where) && !hasStation(where, msg.station)) return send(ws, { type: 'station-failed', reason: `the ${shipName(where)} (${classOf(where).name} class) has no ${msg.station} station` }); }
       // Force fields: nobody walks out of an isolated station, or into one (aboard here or across a dock).
       const target = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey;
-      if (!ws.operator && sealed(ws.shipKey, ws.station)) return send(ws, { type: 'station-failed', reason: `a Security force field isolates ${ws.station}: nobody walks out (the transporter can beam you)` });
+      if (!ws.operator && sealed(ws.shipKey, placeOf(ws))) return send(ws, { type: 'station-failed', reason: `a Security force field isolates ${placeOf(ws)}: nobody walks out (the transporter can beam you)` });
+      if (held(ws)) return send(ws, { type: 'station-failed', reason: `a Security force field holds you at ${placeOf(ws)} (the transporter can beam you)` });
       if (msg.station !== OPS_STATION && present(target) && sealed(target, msg.station)) return send(ws, { type: 'station-failed', reason: `a Security force field isolates ${msg.station}${target !== ws.shipKey ? ` aboard the ${shipName(target)}` : ''}: nobody walks in` });
       // Across the dock: walk over to a station aboard a vessel docked with this one.
       const there = msg.ship ? shipKey(clean(msg.ship)) : ws.shipKey;
@@ -4592,8 +4623,8 @@ wss.on('connection', (ws) => {
         if (msg.station === OPS_STATION) { opLog(there, `${ws.name} took the ops station`); joinOps(ws); }
         return;
       }
-      if (msg.station === ws.station) return;
-      const was = ws.station;
+      if (msg.station === placeOf(ws)) return;
+      const was = placeOf(ws);
       if (msg.station === OPS_STATION) {
         if (OPERATOR_KEY && msg.key !== OPERATOR_KEY) return send(ws, { type: 'station-failed', reason: 'wrong operator key' });
         opLog(ws.shipKey, `${ws.name} moved from ${was} to the ops station`);
@@ -4602,11 +4633,26 @@ wss.on('connection', (ws) => {
         return;
       }
       if (ws.operator) leaveOps(ws);
-      ws.station = msg.station;
+      seat(ws, msg.station);
       send(ws, { type: 'registered', ...selfInfo(ws), token: ws.token });
       broadcastCrew(ws.shipKey);
       broadcastTraffic();
-      opLog(ws.shipKey, `${ws.name} moved from ${was} to ${ws.station}`);
+      opLog(ws.shipKey, `${ws.name} moved from ${was} to ${placeOf(ws)}`);
+      return;
+    }
+
+    // A bridge console reconfigured (its top buttons): whoever is at it now runs that
+    // station, staying where they are (their calls and comms carry on).
+    if (msg.type === 'console-mode' && ws.id) {
+      if (!ws.console) return send(ws, { type: 'notice', text: 'Only a bridge console is reconfigured' });
+      if (!CONSOLE_MODES.includes(msg.mode)) return send(ws, { type: 'notice', text: 'No such console mode' });
+      if (consoleDark(ws)) return send(ws, { type: 'notice', text: 'console offline, no power on its bus' });
+      const e = engOf(ws.shipKey);
+      e.bridgeModes = { ...e.bridgeModes, [ws.console]: msg.mode }; e.dirty = true;
+      for (const u of crewOf(ws.shipKey)) if (u.console === ws.console && u.station !== msg.mode) { u.station = msg.mode; send(u, { type: 'registered', ...selfInfo(u), token: u.token }); }
+      broadcastCrew(ws.shipKey);
+      broadcastTraffic();
+      opLog(ws.shipKey, `${ws.name}: ${ws.console} set to ${msg.mode}`);
       return;
     }
 

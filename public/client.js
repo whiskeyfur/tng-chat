@@ -82,9 +82,14 @@ const REJOIN = 'stchat-rejoin';
 let reloading = false;
 // Kept up to date while signed in (the screen showing too), so a refresh
 // by hand comes back the same way.
+// Where you are: your station, or the bridge console you're at (which runs a station).
+const myPlace = () => me?.console || me?.station;
+const BRIDGE_CONSOLES = ['Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
+const CONSOLE_MODES = ['Science', 'Engineering', 'Communications', 'Security', 'Medical'];
+const BRIDGE = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Operations', ...BRIDGE_CONSOLES];
 const shownScreen = () => [...document.querySelectorAll('[data-screen]')].find((x) => !x.hidden)?.dataset.screen;
 function saveRejoin() {
-  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: me.station, screen: shownScreen() })); } catch {}
+  try { if (me) sessionStorage.setItem(REJOIN, JSON.stringify({ name: me.name, ship: me.ship, station: myPlace(), screen: shownScreen() })); } catch {}
 }
 window.addEventListener("screenchange", () => { if (me) saveRejoin(); });
 window.addEventListener('pagehide', saveRejoin);
@@ -374,6 +379,7 @@ function updateSignInMode() {
 // Station displays, and a sidebar tab for each one.
 function showStation() {
   stationView = renderStation($('station-view'), me.station, { ship: me.ship });
+  renderConsoleBar();
   setHeader(stationView.code, `${me.title || me.name} · ${me.ship}`, me.station);
   // The top-left elbow and the header bar running from it share the station's colour.
   document.querySelector('.lcars-header').style.setProperty('--elbow', `var(--lcars-${stationView.color})`);
@@ -411,21 +417,35 @@ function showStation() {
   restoreScreen();
 }
 
+// A bridge console: buttons along the top pick what it runs (you stay at the console).
+function renderConsoleBar() {
+  const bar = $('console-bar');
+  bar.hidden = !me?.console;
+  if (!me?.console) return bar.replaceChildren();
+  bar.replaceChildren(Object.assign(document.createElement('span'), { className: 'console-bar__name', textContent: me.console }), ...CONSOLE_MODES.map((m) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: m });
+    b.dataset.mode = m;
+    b.setAttribute('aria-pressed', String(m === me.station));
+    b.onclick = () => { if (m !== me.station) send({ type: 'console-mode', mode: m }); };
+    return b;
+  }));
+}
+
 // The Station screen: any other station, Operations included.
 // Every station is a tap; Operations asks for the code first if the relay
 // wants one. Docked, the vessels across the dock get their own taps.
 let dockSig = '';
 function fillReassign() {
   if (!me) return;
-  $('assignment').textContent = `${me.name}: ${me.station}, the ${me.ship}`;
+  $('assignment').textContent = `${me.name}: ${me.console ? `${me.console} (${me.station})` : me.station}, the ${me.ship}`;
   // Every vessel lists every station, Operations included; where you are now is greyed out.
   const tap = (name, ship) => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: name });
     b.dataset.station = name;
     if (ship) b.dataset.ship = ship;
-    if (!ship && name === me.station) { b.disabled = true; b.title = 'You are here'; b.setAttribute('aria-current', 'true'); }
+    if (!ship && name === myPlace()) { b.disabled = true; b.title = 'You are here'; b.setAttribute('aria-current', 'true'); }
     // The brig's force field: nobody walks into the Brig, or out of it.
-    else if (!ship && lastNav?.own?.grid?.brigSealed && (name === 'Brig' || me.station === 'Brig')) { b.disabled = true; b.title = 'The brig force field is up'; b.textContent = `${name} · brig field up`; }
+    else if (!ship && lastNav?.own?.grid?.brigSealed && (name === 'Brig' || myPlace() === 'Brig')) { b.disabled = true; b.title = 'The brig force field is up'; b.textContent = `${name} · brig field up`; }
     b.onclick = () => {
       $('reassign-error').textContent = '';
       if (name === 'Operations' && opsKeyRequired) { $('reassign-form').hidden = false; $('reassign-form').dataset.ship = ship || ''; $('reassign-key').focus(); return; }
@@ -781,7 +801,7 @@ function renderCrewPanels() {
   const status = (u) => (u.sickbay ? 'Sickbay' : u.confined ? 'Confined to quarters' : 'On duty');
   // Rebuild a panel only when what it shows has changed (buttons stay put).
   const changed = (node, ...state) => { const sig = JSON.stringify(state); if (node.dataset.sig === sig) return false; node.dataset.sig = sig; return true; };
-  const crewSig = crew.map((u) => [u.id, u.station, !!u.sickbay, !!u.confined]);
+  const crewSig = crew.map((u) => [u.id, u.station, u.console, !!u.fielded, !!u.sickbay, !!u.confined]);
   const pickCrew = (id, list, keep) => {
     const sel = el('select', { className: 'ops-select', id, ariaLabel: 'crew member' }, ...list.map((u) => new Option(u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`, u.id)));
     if (keep && list.some((u) => u.id === keep)) sel.value = keep;
@@ -854,6 +874,18 @@ function renderCrewPanels() {
         return b;
       })),
       el('p', { className: 'ops-hint', textContent: fields.length ? `Isolated: ${fields.join(', ')}${lastNav?.own?.grid?.fieldsUp ? '' : ' (emitters have no power: fields are down)'}` : 'Tap a station to isolate it: nobody walks in or out (the transporter still gets through); whoever is inside keeps their console. 5 power each, from the emitters.' }),
+      el('h3', { className: 'ops-subhead', textContent: 'Bridge force fields (hold a person)' }),
+      el('div', { className: 'tr-taps', id: 'sec-people' }, ...(() => {
+        const onBridge = crew.filter((u) => BRIDGE.includes(u.console || u.station));
+        return onBridge.length ? onBridge.map((u) => {
+          const b = button(`${u.title || u.name} · ${u.console || u.station}`, () => send({ type: 'person-field', who: u.id, on: !u.fielded }), u.fielded ? 'lcars-button--alert' : '');
+          b.classList.add('tr-tap');
+          b.dataset.person = u.id;
+          b.setAttribute('aria-pressed', String(!!u.fielded));
+          return b;
+        }) : [el('p', { className: 'ops-hint', textContent: 'Nobody on the bridge' })];
+      })()),
+      el('p', { className: 'ops-hint', textContent: 'Tap someone on the bridge to hold them in a force field: they can\'t walk off (the transporter still gets through). 5 power each, from the emitters.' }),
       el('div', { className: 'ops-form' }, el('span', { textContent: 'Quarters' }), who,
         button('Confine', () => send({ type: 'confine', who: who.value, on: true }), 'lcars-button--alert'),
         button('Release', () => send({ type: 'confine', who: who.value, on: false }))),
@@ -985,10 +1017,10 @@ function updateCover() {
 // black but for the Station button and comms.
 // Engineering is the exception: its Power grid stays usable too, to bring the ship up from cold iron.
 function renderDarkness() {
-  const grid = lastNav?.own?.grid, here = me && grid?.ls?.[me.station];
-  const unpowered = me && (me.station === 'Engineering' ? grid?.consoleOk?.Engineering === false : consoleDark);
+  const grid = lastNav?.own?.grid, here = me && grid?.ls?.[myPlace()];
+  const unpowered = me && (myPlace() === 'Engineering' ? grid?.consoleOk?.Engineering === false : consoleDark);
   const dark = !!(here && !here.lit && unpowered);
-  if (dark) document.body.dataset.blackout = me.station === 'Engineering' ? 'engineering' : 'all';
+  if (dark) document.body.dataset.blackout = myPlace() === 'Engineering' ? 'engineering' : 'all';
   else delete document.body.dataset.blackout;
 }
 window.addEventListener('screenchange', updateCover);
@@ -1016,17 +1048,19 @@ function renderCombat() {
   bc.setAlert('selfdestruct', grid.selfDestruct ? `Self-destruct in ${grid.selfDestruct.seconds} s · ordered by ${grid.selfDestruct.by}` : null);
 
   // This console goes dark when its bus has no power (comms still work).
-  const tied = grid.ties[`console:${me.station}`] || [];
+  const tied = grid.ties[`console:${myPlace()}`] || [];
   const bus = tied.length ? tied.map((n) => `Bus ${n}`).join(' or ') : 'its bus (not tied in)';
-  const fielded = grid.fieldsUp && grid.forcefields.includes(me.station);
-  bc.setAlert('isolated', fielded ? `A Security force field isolates ${me.station}: nobody walks in or out` : null, { level: 'yellow' });
-  const dark = grid.consoleOk[me.station] === false;
+  const fielded = grid.fieldsUp && grid.forcefields.includes(myPlace());
+  bc.setAlert('isolated', fielded ? `A Security force field isolates ${myPlace()}: nobody walks in or out` : null, { level: 'yellow' });
+  const held = !!comms.users.find((u) => u.id === me.id)?.fielded;
+  bc.setAlert('held', held ? `A Security force field holds you at ${myPlace()}` : null, { level: 'yellow' });
+  const dark = grid.consoleOk[myPlace()] === false;
   // Engineering's power grid runs on emergency power, so it's never covered.
-  const emergency = dark && me.station === 'Engineering';
+  const emergency = dark && myPlace() === 'Engineering';
   bc.setAlert('emergency', emergency ? `Console on emergency power (no power on ${bus}): Power grid controls only` : null, { level: 'yellow' });
   consoleDark = dark && !emergency;
   // Off the optical data network: no station controls; Comms, the log, the library and Station still work.
-  const odnOff = me && grid.odn && grid.odn[me.station === 'Operations' ? 'Operations' : me.station] === false && me.station !== 'Engineering';
+  const odnOff = me && grid.odn && grid.odn[myPlace()] === false && myPlace() !== 'Engineering';
   if (odnOff !== document.body.hasAttribute('data-odn-off')) {
     document.body.toggleAttribute('data-odn-off', odnOff);
     const shown = [...document.querySelectorAll('[data-screen]')].find((x) => !x.hidden);
@@ -1863,14 +1897,14 @@ async function onMessage(msg) {
       if (stationView) setHeader(stationView.code, `${me.title || me.name} · ${me.ship}`, me.station);
       break;
     case 'registered':
-      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, title: msg.title };
+      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, console: msg.console || null, title: msg.title };
       if (msg.profile) setProfile(msg.profile, false);
       token = msg.token;
       if (ops) hideOps();
       queueMicrotask(() => comms.radio?.render());
       if (msg.beamedFrom) log(`beamed from the ${msg.beamedFrom} to the ${me.ship}`);
       if (msg.walkedFrom) log(`crossed the dock from the ${msg.walkedFrom} to the ${me.ship}`);
-      document.title = `LCARS: ${me.station} · ${me.ship}`;
+      document.title = `LCARS: ${me.console ? `${me.console} · ` : ''}${me.station} · ${me.ship}`;
       $('home').hidden = false;
       $('comms-button').hidden = false;
       $('log-tab').hidden = false;
@@ -1878,7 +1912,7 @@ async function onMessage(msg) {
       $('library-tab').hidden = false;
       log(msg.beamedFrom || msg.walkedFrom ? `${me.name} now aboard the ${me.ship}: ${me.station}` : `${me.name} reporting for duty aboard the ${me.ship}: ${me.station}`);
       showStation();
-      try { localStorage.setItem('voice-reg', JSON.stringify({ name: me.name, ship: me.ship, station: me.station })); } catch {}
+      try { localStorage.setItem('voice-reg', JSON.stringify({ name: me.name, ship: me.ship, station: myPlace() })); } catch {}
       break;
     case 'register-failed':
       $('register-error').textContent = msg.reason;
@@ -1888,6 +1922,7 @@ async function onMessage(msg) {
       me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station };
       token = msg.token;
       document.title = `LCARS: Ops · ${me.ship}`;
+      renderConsoleBar();
       $('home').hidden = false;
       $('comms-button').hidden = false;
       $('log-tab').hidden = false;

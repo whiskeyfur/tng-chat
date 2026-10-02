@@ -448,7 +448,8 @@
     ] }),
   };
 
-  window.STATION_NAMES = Object.keys(STATIONS);
+  // (and the bridge consoles: each runs one of the stations above, picked by its top buttons)
+  window.STATION_NAMES = [...Object.keys(STATIONS), 'Bridge 1', 'Bridge 2', 'Bridge 3', 'Bridge 4', 'Bridge 5'];
   // The ship's real speed (warp factor; impulse 0.25), for the forward view.
   let navSpeed = 0;
   // Shield strength (0..1) for the shield grid.

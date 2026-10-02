@@ -153,6 +153,12 @@
     .vessel-bar { position: absolute; top: 4px; right: 8px; z-index: 6; display: flex; gap: 6px; }
     .vessel-bar[hidden] { display: none; }
     .vessel-bar .tr-tap { min-height: 28px; font-size: 12px; }
+    /* A bridge console's top buttons: what it runs. */
+    .lcars-header { position: relative; }
+    .console-bar { position: absolute; top: 44px; left: calc(var(--side) + 40px); z-index: 6; display: flex; gap: 6px; align-items: center; }
+    .console-bar[hidden] { display: none; }
+    .console-bar .tr-tap { min-height: 28px; font-size: 12px; }
+    .console-bar__name { color: var(--lcars-orange); font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 4px; }
     /* A console without power */
     .lcars-content { position: relative; }
     #console-dark { position: absolute; inset: 0; z-index: 5; background: rgba(0, 0, 0, 0.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-transform: uppercase; }
@@ -351,6 +357,7 @@
         <span class="lcars-bar__seg lcars-bar__seg--b"></span>
         <h1 class="lcars-header__title" id="station-title">Report aboard</h1>
       </div>
+      <div id="console-bar" class="console-bar" role="group" aria-label="what this bridge console runs" hidden></div>
     </header>
 
     <nav class="lcars-sidebar" aria-label="Console">

@@ -137,7 +137,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(await early.$$eval('#ship option:not([disabled])', (os) => os.map((o) => o.value)), ['Deep Space 4', 'Starbase 12', 'Starbase 47', 'Starbase 74', 'Utopia Planitia']);
     // The station picker comes from the relay and includes every station.
     await early.waitForSelector('#station option[value="Transporter"]', { state: 'attached' });
-    assert.equal(await early.locator('#station option:not([disabled])').count(), 14); // 13 (the Shuttle Bay and the Brig too) + Operations
+    assert.equal(await early.locator('#station option:not([disabled])').count(), 19); // 18 (the Shuttle Bay, the Brig and the five bridge consoles too) + Operations
     step("without a ship's computer there is no ship, not even for ops: only the four automated starbases");
 
     // Ship's computers bring the ships into existence.
@@ -1828,6 +1828,43 @@ const audioBytes = (page) => page.evaluate(async () => {
       lorca.close(); detmer.close();
       await stopComputer(dc);
       step('the spore drive: the Discovery (Crossfield class) was refused a jump until black alert, which powered nonessential systems down; then it jumped from 200,200 to 800,300 at once, spent 20 spores and cooled down (a second jump refused); condition green put the systems back');
+    }
+
+    // The bridge consoles: Bridge 1 runs Science to start; its top buttons switch it to Engineering
+    // (saru stays at Bridge 1). Its own console tie: untied, it goes dark. Bridge 4 runs Security,
+    // which holds saru in a force field on the bridge: he can't walk off until it's down.
+    {
+      const saru = await crewWs('saru', 'Enterprise', 'Bridge 1');
+      const at = () => [...saru.msgs].reverse().find((m) => m.type === 'registered');
+      assert.deepEqual([at().station, at().console], ['Science', 'Bridge 1']);
+      saru.send({ type: 'console-mode', mode: 'Engineering' });
+      await waitFor(() => at().station === 'Engineering' && at().console === 'Bridge 1');
+      saru.send({ type: 'grid', ls: { sys: 'lights', loc: 'Bridge 1', on: false } });
+      await waitFor(() => laforge.nav()?.own.grid.ls['Bridge 1'].on.lights === false);
+      saru.send({ type: 'grid', ls: { sys: 'lights', loc: 'Bridge 1', on: true } });
+      await waitFor(() => laforge.nav()?.own.grid.ls['Bridge 1'].on.lights === true);
+      const was = laforge.nav().own.grid.ties['console:Bridge 1'];
+      assert.deepEqual(was, ['A'], 'a bridge console is tied to Bus A');
+      laforge.send({ type: 'grid', ties: { 'console:Bridge 1': [] } });
+      await waitFor(() => laforge.nav()?.own.grid.consoleOk['Bridge 1'] === false);
+      saru.send({ type: 'console-mode', mode: 'Medical' });
+      await waitFor(() => saru.msgs.some((m) => m.type === 'notice' && /console offline/.test(m.text)));
+      laforge.send({ type: 'grid', ties: { 'console:Bridge 1': ['A'] } });
+      await waitFor(() => laforge.nav()?.own.grid.consoleOk['Bridge 1'] !== false);
+      saru.send({ type: 'console-mode', mode: 'Science' });
+      await waitFor(() => at().station === 'Science');
+      const tuvok = await crewWs('tuvok', 'Enterprise', 'Bridge 4');
+      assert.equal([...tuvok.msgs].reverse().find((m) => m.type === 'registered').station, 'Security');
+      tuvok.send({ type: 'person-field', who: at().id, on: true });
+      await waitFor(() => saru.msgs.some((m) => m.type === 'notice' && /a force field holds you at Bridge 1/.test(m.text)));
+      saru.send({ type: 'change-station', station: 'Crew' });
+      await waitFor(() => saru.msgs.some((m) => m.type === 'station-failed' && /force field holds you at Bridge 1/.test(m.reason)));
+      tuvok.send({ type: 'person-field', who: at().id, on: false });
+      await waitFor(() => saru.msgs.some((m) => m.type === 'notice' && /the force field around you is down/.test(m.text)));
+      saru.send({ type: 'change-station', station: 'Crew' });
+      await waitFor(() => at().station === 'Crew' && !at().console);
+      saru.close(); tuvok.close();
+      step('the bridge consoles: Bridge 1 ran Science, its top buttons switched it to Engineering (saru stayed at Bridge 1 and ran its life support); untied from Bus A it went dark; Bridge 4 ran Security and held saru in a force field on the bridge until it dropped it');
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;
