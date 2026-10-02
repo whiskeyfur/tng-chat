@@ -121,6 +121,11 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
       d.places.push({ name: 'Sensor Pod', deck: 2, stations: [], rows: ['system:lateral'] });
       d.fuel = { ...d.fuel, antimatter: 300, tanks: { ...d.fuel.tanks, 'deu:core': 60 } }; // (its fuel storage, from its file)
       fs.writeFileSync(file, JSON.stringify(d, null, 2));
+      // (Its save given things its design doesn't have, as a hand-made one-off: a Security console,
+      // the brig's force field, replicators, and a system that doesn't exist at all.)
+      const navFile = path.join(SHIPS, 'Designship', '.nav.json'), nav = JSON.parse(fs.readFileSync(navFile, 'utf8'));
+      Object.assign(nav.eng.ties, { 'console:Security': ['B'], 'sub:brigField': ['B'], 'system:replicators': ['B'], 'system:warpBubble': ['B'] });
+      fs.writeFileSync(navFile, JSON.stringify(nav));
       rp = run(['server.js'], env);
       await wait(1000);
       sc = run(['tools/shipcore.js', '--relay', `ws://localhost:${P}`, '--data', SHIPS, 'Designship'], env);
@@ -133,9 +138,11 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
       assert.equal(own.grid.fuelCaps.antimatter, 300, 'its antimatter pods: the size its design gives');
       assert.equal(own.grid.fuel.deu.tanks.find((t) => t.name === 'core').cap, 60, "its warp core's deuterium tank: the size its design gives");
       assert.ok(own.grid.antimatter <= 300, 'no more antimatter than the pods hold');
+      const extras = ['console:Security', 'sub:brigField', 'system:replicators', 'system:warpBubble'];
+      assert.deepEqual(extras.filter((x) => own.grid.tieNodes[x] || (own.grid.ties[x] || []).length), [], 'what its design doesn\'t have never appears, whatever its save says');
       await kill(sc); await kill(rp);
       fs.rmSync(ED, { recursive: true, force: true }); fs.rmSync(SHIPS, { recursive: true, force: true });
-      step('a design edited: the shuttle kept its class across restarts (saved with it), came up warm with its design\'s ties, then took the new bus limit (90), its lateral sensors\' new place (Sensor Pod, tied on Bus C) with its own ties kept, and its file\'s fuel storage (pods 300, the core\'s deuterium tank 60)');
+      step('a design edited: the shuttle kept its class across restarts (saved with it), came up warm with its design\'s ties, then took the new bus limit (90), its lateral sensors\' new place (Sensor Pod, tied on Bus C) with its own ties kept, and its file\'s fuel storage (pods 300, the core\'s deuterium tank 60); a Security console, brig field, replicators and a made-up system put in its save never appeared');
     }
     // A Galaxy made a runabout (Admin → Fleet): its engineering rebuilt from the runabout's design,
     // nothing of the Galaxy's left (no Security console, brig, crew services) on its grid or tied.

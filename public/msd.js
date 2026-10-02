@@ -243,7 +243,10 @@
         bar('Fusion', `${Math.round(fusion)}`, fusion / 300, 'var(--lcars-tan)'),
         bar('Battery charge', `${battPct}%`, battPct / 100, 'var(--lcars-peach)', battPct < 25),
         bar('Readiness', `${Math.round((ready / 10) * 100)}%`, ready / 10, '#66cc66'));
-      tiles.replaceChildren(...TILES.filter(([k]) => !starbase || !['prop', 'defl', 'impulse'].includes(k)).map(([k, name]) => {
+      // (Only what this vessel's design has: a tile's system must be on its grid.)
+      const TILE_KEY = { shld: 'system:shields', defl: 'system:deflector', prop: 'system:engines', impulse: 'impulsePort', trans: 'system:transporter', tractor: 'system:tractor', warp: 'core', fuel: 'containment', lrs: 'system:sensors', sens: 'system:lateral', fusion: 'aux1', sif: 'system:sif', idf: 'system:idf' };
+      const has = (k) => !TILE_KEY[k] || !g.tieNodes || !!g.tieNodes[TILE_KEY[k]] || (k === 'fusion' && !!g.tieNodes.impulsePort);
+      tiles.replaceChildren(...TILES.filter(([k]) => (!starbase || !['prop', 'defl', 'impulse'].includes(k)) && has(k)).map(([k, name]) => {
         const [s, text] = st[k] || ['off', ''];
         const b = h('button', { type: 'button', className: 'msd-tile' }, h('span', { textContent: name }), h('span', { className: 'msd-pill', textContent: text }));
         b.querySelector('.msd-pill').dataset.state = s;

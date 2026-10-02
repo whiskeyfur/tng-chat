@@ -2079,6 +2079,15 @@ function classSystems(k) {
 const sysGone = (k, x) => (BASE_ONLY.includes(x) && !isBase(k)) || PHASER_ARRAYS.indexOf(x) >= arraysOf(k) || (x === 'transporter' && !isBase(k) && !classOf(k).transporter)
   || (WARP_DRIVE.includes(x) && (isBase(k) || !classOf(k).maxWarp)) || (x === 'spore' && (isBase(k) || !classOf(k).spore));
 function aboardKey(k, key) {
+  // (Sources, by the design: solar arrays with an output, emergency batteries it lists (all three
+  // unless it says), fusion reactors unless "fusion": false, a warp core (and what holds its
+  // antimatter) unless "warpCore": false or "antimatter": false, docking power with docking ports.)
+  const dz = designOf(k), noCore = dz.warpCore === false || dz.antimatter === false;
+  if (key === 'solar') return (dz.solar?.output || 0) > 0;
+  if (EMERG.names.includes(key)) return (dz.emergency || ['A', 'B', 'C']).includes(EMERG.bus[key]);
+  if (['impulsePort', 'impulseStarboard', 'aux1', 'aux2'].includes(key)) return dz.fusion !== false;
+  if (['core', 'containment', 'sub:constriction', 'sub:amConduit', 'sub:injector', ...Object.values(AM_CONTAIN)].includes(key)) return !noCore || (key === 'contain:amTorpedo' && dz.antimatter !== false && (dz.torpedoes || 0) > 0);
+  if (['dock', 'dockEps', 'ship', 'shipEps'].includes(key)) return isBase(k) || dz.ports !== 0;
   if (key.startsWith('console:')) return hasStation(k, key.slice(8));
   if (key.startsWith('place:')) return placesOf(k).some((pl) => `place:${pl.name}` === key);
   // (a row the design names itself: in one of its places, or its ties with nodes)
@@ -2100,7 +2109,7 @@ function aboardKey(k, key) {
 function pruneLoads(k) {
   const e = eng.get(k);
   if (!e) return;
-  for (const x of Object.keys(e.ties)) if (/^(console|system|sub):/.test(x) && !CONDUITS.includes(x) && e.ties[x].length && !aboardKey(k, x)) e.ties[x] = [];
+  for (const x of Object.keys(e.ties)) if (!CONDUITS.includes(x) && x !== 'crosslink' && e.ties[x].length && !aboardKey(k, x)) e.ties[x] = [];
   flowCache.delete(k);
 }
 // What each console's grid rows list: a starbase has no warp drive, and has its drydock connections and industrial replicators.
@@ -2463,6 +2472,7 @@ const engOf = (k) => {
     eng.set(k, { ...freshEng(kept, { k }), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
     for (const c of CONDUITS) eng.get(k).ties[c] ||= [];
     designReactors(k, !kept); // (what its design has: its reactors, its antimatter, its wiring)
+    pruneLoads(k); // (and nothing it doesn't)
     if ((isBase(k) || isRelay(k)) && !eng.get(k).conduits) deriveConduits(k);
     reconcileConduits(k);
   }
@@ -4256,6 +4266,7 @@ function engineeringSteps(k, mode) {
   const defaults = { ...DEFAULT_LOAD_TIES, ...(isBase(k) ? {} : classOf(k).ties || {}) };
   // (What this vessel has: its class's systems and stations; a starbase's own.)
   const has = (x) => {
+    if (!aboardKey(k, x)) return false; // (only what its design has)
     if (x.startsWith('console:')) return hasStation(k, x.slice(8));
     if (!x.startsWith('system:')) return true;
     const sys = x.slice(7);
