@@ -882,7 +882,8 @@ const LOCATIONS = [...STATIONS, OPS_STATION, ...new Set([...Object.values(CLASSE
 const locationsOf = (k) => {
   const places = [...placesOf(k)].sort((a, b) => a.deck - b.deck), has = (st) => hasStation(k, st) || st === OPS_STATION;
   const listed = places.flatMap((p) => (p.stations.length ? p.stations.filter(has) : [p.name]));
-  return [...new Set([...listed, ...[...STATIONS, OPS_STATION].filter((st) => has(st) && !listed.includes(st))])];
+  // (Only places life support knows: a design naming a station this relay doesn't have is skipped.)
+  return [...new Set([...listed, ...[...STATIONS, OPS_STATION].filter((st) => has(st) && !listed.includes(st))])].filter((l) => LOCATIONS.includes(l));
 };
 const LS_SYSTEMS = ['atmosphere', 'thermal', 'gravity', 'lights'];
 const lsShare = (k, sys) => { const ls = engOf(k).ls, here = locationsOf(k); return here.filter((l) => ls[l]?.[sys] !== false).length / here.length; };
@@ -1103,6 +1104,8 @@ function coreNav(c, key, nav) {
   if (!combat.get(key)?.loaded) {
     combat.set(key, { ...freshCombat(nav.combat, torpedoesOf(key)), loaded: true });
     eng.set(key, freshEng(nav.eng, { cold: !nav.eng && !nav.warm }));
+    for (const c of CONDUITS) engOf(key).ties[c] ||= [];
+    if (!engOf(key).conduits) deriveConduits(key); // (a cold ship's are untied: its loads are)
     restoreLinks(key, nav.eng?.links);
     if (!classOf(key).warpCore) Object.assign(engOf(key), { core: 'ejected', antimatter: 0 }); // (a shuttle has no warp core: impulse and batteries)
     // A small craft brought up ready to go: wiring that fits its buses, and EPS taps no wider than they are.
@@ -1797,7 +1800,7 @@ const SOURCE_NODES = { ship: ['B'], shipEps: ['EPS'], solar: ['B'], dock: ['B'],
 // Low-power loads and sources may tie to several of Bus A, B and C (a load
 // split evenly over them, a source's output shared evenly); so may the
 // crosslink (the buses checked are one pool). EPS ties are one.
-const isMulti = (k) => k === 'crosslink' || ((['containment', 'solar'].includes(k) || /^(console|system|sub|contain):/.test(k)) && !tieNodes(k).includes('EPS'));
+const isMulti = (k) => k === 'crosslink' || CONDUITS.includes(k) || ((['containment', 'solar'].includes(k) || /^(console|system|sub|contain):/.test(k)) && !tieNodes(k).includes('EPS'));
 const SHIP_FEED_MAX = 100; // the power that goes across a ship-to-ship connection, per row (export to an importing ship)
 // Connections: everything we're docked with (the starbase; the ships at our
 // ports). Per connection: Deuterium, Antimatter and Power, each with Import
@@ -1948,7 +1951,48 @@ const DEFAULT_LOAD_TIES = {
   ...Object.fromEntries(Object.values(AM_CONTAIN).map((k) => [k, ['A']])),
 };
 const loadNodes = (key) => (key.startsWith('console:') || key.startsWith('sub:') || key.startsWith('contain:') ? AB : LOAD_NODES[key.slice(7)] || []);
-const tieNodes = (key) => SOURCE_NODES[key] || loadNodes(key);
+const tieNodes = (key) => SOURCE_NODES[key] || (key.startsWith('place:') ? NODES : key === 'system:lifeSupport' ? AB : loadNodes(key));
+// --- power paths ------------------------------------------------------------------------
+// On each bus, power runs source → location → system → subsystem: a load's tie
+// carries power only if every conduit on its way is tied to that bus too: its
+// place (and any place it's reached through, its "via"), and its parent system
+// (life support for its systems, the warp coils for the plasma injectors). Untie
+// one and everything past it is cut off from that bus (its demand doesn't count).
+// Conduits draw nothing. Antimatter containment is never cut off this way.
+const PLACE_NAMES = [...new Set([...Object.values(CLASSES), BASE_DESIGN].flatMap((c) => (c.places || []).map((pl) => pl.name)))];
+const CONDUITS = [...PLACE_NAMES.map((n) => `place:${n}`), 'system:lifeSupport'];
+const PARENT_SYSTEM = { injectors: 'system:engines', ...Object.fromEntries(LIFE_SUPPORT.map((x) => [x, 'system:lifeSupport'])) };
+const conduitMemo = new Map();
+function conduitsOf(k, key) {
+  const design = isBase(k) ? 'starbase' : classId(k), memo = `${design}|${key}`;
+  if (conduitMemo.has(memo)) return conduitMemo.get(memo);
+  let out = [];
+  const places = placesOf(k);
+  if (places.length && (/^(console|system|sub):/.test(key) || key.startsWith('place:'))) {
+    const named = (n) => places.find((pl) => pl.name === n);
+    const parent = key.startsWith('system:') ? PARENT_SYSTEM[key.slice(7)] : null;
+    const at = key.startsWith('place:') ? named(key.slice(6))
+      : key.startsWith('console:') ? places.find((pl) => pl.stations.includes(key.slice(8)))
+      : places.find((pl) => (pl.rows || []).includes(parent || key)) || places.find((pl) => pl.default);
+    const chain = [];
+    for (let q = at, n = 0; q && n < 8; q = q.via && named(q.via), n++) chain.push(`place:${q.name}`);
+    out = [...chain.filter((c) => c !== key), ...(parent ? [parent] : [])];
+  }
+  conduitMemo.set(memo, out);
+  return out;
+}
+// A load's ties that carry power: those its conduits are all tied to as well.
+const effTies = (k, e, key) => { const t = e.ties[key] || [], via = conduitsOf(k, key); return via.length ? t.filter((X) => via.every((c) => (e.ties[c] || []).includes(X))) : t; };
+// A vessel from before power paths (or a warm start): each conduit tied wherever its loads are.
+function deriveConduits(k) {
+  const e = engOf(k);
+  for (const c of CONDUITS) e.ties[c] = [];
+  const loads = Object.keys(e.ties).filter((x) => /^(console|system|sub):/.test(x) && !CONDUITS.includes(x));
+  for (const key of loads) for (const c of conduitsOf(k, key)) e.ties[c] = NODES.filter((n) => e.ties[c].includes(n) || (e.ties[key] || []).includes(n));
+  // (a place reached through another: that one carries what it carries)
+  for (const c of CONDUITS.filter((x) => x.startsWith('place:'))) for (const up of conduitsOf(k, c)) e.ties[up] = NODES.filter((n) => e.ties[up].includes(n) || e.ties[c].includes(n));
+  e.conduits = true; e.dirty = true; flowCache.delete(k);
+}
 const NEVER_TRIP = new Set(['containment', 'sub:constriction', ...Object.values(AM_CONTAIN)]);
 // Starbases: dock to restock torpedoes, take dock power, repair faster and
 // refit a warp core. A destroyed ship comes back docked at one of them.
@@ -2046,6 +2090,7 @@ function freshEng(saved, { cold = false } = {}) {
   const oldThr = (d) => (Array.isArray(s.ties?.[`sub:${d}Thrusters`]) ? (s.ties[`sub:${d}Thrusters`].length ? ['EPS'] : []) : s.thrusters?.[d] === false ? [] : undefined);
   const ties = Object.fromEntries(Object.entries(DEFAULT_TIES).map(([k, d]) => [k, tiesOf(k, s.ties?.[k] ?? (k === 'crosslink' ? oldXl : k === 'thrustersPort' ? oldThr('port') : k === 'thrustersStarboard' ? oldThr('starboard') : s[k]), d)]));
   if (!chainOk(ties.crosslink)) ties.crosslink = []; // (A and C without B: older saves lose the crosslink)
+  for (const c of CONDUITS) ties[c] = Array.isArray(s.ties?.[c]) ? NODES.filter((n) => s.ties[c].includes(n) && tieNodes(c).includes(n)) : []; // (the power paths' conduits)
   // Older saves: antimatter was true/false (false: core ejected); tanks full.
   const amount = (v, cap) => (Number.isFinite(v) ? Math.max(0, Math.min(cap, v)) : v === false ? 0 : cap);
   const antimatter = amount(s.antimatter, FUEL.antimatter), deuterium = amount(s.deuterium, FUEL.deuterium);
@@ -2084,6 +2129,7 @@ function freshEng(saved, { cold = false } = {}) {
     spores: Number.isFinite(s.spores) ? Math.max(0, Math.min(SPORE.cap, s.spores)) : cold ? 0 : SPORE.cap, spore: { charging: false, t: 0, dest: null, ready: 0 },
     // The shuttle bay: its doors (Ops opens them), and the bay this craft has landed in (kept across restarts).
     brigField: s.brigField ?? true, // the brig's force field (up to start)
+    conduits: !!s.conduits, // (a save from before power paths: its conduits are tied where its loads are, on load)
     bridgeModes: s.bridgeModes && typeof s.bridgeModes === 'object' ? Object.fromEntries(BRIDGE_CONSOLES.filter((c) => CONSOLE_MODES.includes(s.bridgeModes[c])).map((c) => [c, s.bridgeModes[c]])) : {}, // what each bridge console runs
     bayOpen: !!s.bayOpen, landed: typeof s.landed === 'string' && s.landed ? shipKey(s.landed) : null,
     remoteBlock: !!s.remoteBlock, // ops refuse remote control by other vessels
@@ -2148,7 +2194,11 @@ function freshEng(saved, { cold = false } = {}) {
   return out;
 }
 const engOf = (k) => {
-  if (!eng.has(k)) eng.set(k, { ...freshEng(isBase(k) ? baseSettings[shipName(k)]?.eng : undefined), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
+  if (!eng.has(k)) {
+    eng.set(k, { ...freshEng(isBase(k) ? baseSettings[shipName(k)]?.eng : undefined), ...(isBase(k) ? { remoteBlock: baseSettings[shipName(k)]?.remoteBlock ?? true } : {}) });
+    for (const c of CONDUITS) eng.get(k).ties[c] ||= [];
+    if (isBase(k) && !eng.get(k).conduits) deriveConduits(k);
+  }
   return eng.get(k);
 };
 // Starbases have no ship's computer to keep their settings: the relay keeps
@@ -2183,7 +2233,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores), brigField: !!e.brigField, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores), brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
@@ -2322,7 +2372,7 @@ function flow(k) {
   const reactorStarting = (key) => { const m = /^sub:(port|starboard|aux\d)(Chamber)$/.exec(key); return m && reactorsOf(e).find(([r]) => r === m[1])[1].state === 'starting'; };
   const sustained = (key, amt) => (key === 'sub:constriction' && e.core === 'starting' ? GRID.constriction.run : reactorStarting(key) ? 0 : amt);
   // Power for a docked ship goes out the way it comes in.
-  const tiesFor = (key) => e.ties[feedTie(key)] || [];
+  const tiesFor = (key) => effTies(k, e, feedTie(key));
   // A load tied to several buses is split evenly across them (each bus
   // serves its share); its cell row records where its power came from.
   // topUp: a second go at what a load is still short, once each source's even
@@ -2468,9 +2518,9 @@ function flow(k) {
   const delivered = Object.fromEntries(SYSTEMS.map((sys) => [sys, ((got[`system:${sys}`] || 0) * 100) / ratingOf(sys)]));
   const tractorOk = !e.towing || full('system:tractor');
   for (const X of BUSES) {
-    const sys = SYSTEMS.filter((x) => e.ties[`system:${x}`]?.includes(X));
+    const sys = SYSTEMS.filter((x) => effTies(k, e, `system:${x}`).includes(X));
     const want = sys.reduce((n, x) => n + demand[x], 0);
-    Object.assign(buses[X], { consolesOk: Object.keys(CONSOLE_BUS).every((st) => !e.ties[`console:${st}`]?.includes(X) || consoleOk[st]), fraction: want ? Math.min(1, sys.reduce((n, x) => n + delivered[x], 0) / want) : 1 });
+    Object.assign(buses[X], { consolesOk: Object.keys(CONSOLE_BUS).every((st) => !effTies(k, e, `console:${st}`).includes(X) || consoleOk[st]), fraction: want ? Math.min(1, sys.reduce((n, x) => n + delivered[x], 0) / want) : 1 });
   }
   const used = Object.fromEntries(Object.entries(STORES).map(([name, node]) => [node, usedOf(name)]));
   const drawn = SOURCES.reduce((n, name, i) => n + ((srcs[i].ties.length ? cap[name] : 0) - srcs[i].left), 0); // charging included
@@ -2614,7 +2664,10 @@ function gridView(k) {
     towing: e.towing ? shipName(e.towing) : null, towedBy: tower ? shipName(tower) : null,
     selfDestruct: e.selfDestruct ? { seconds: Math.max(0, Math.ceil((e.selfDestruct.at - Date.now()) / 1000)), by: e.selfDestruct.by } : null,
     buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: Math.round(b.need), have: Math.round(b.have), src: r(b.src), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
-    consoleOk: f.consoleOk, systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, brigField: !!e.brigField, brigSealed: brigSealed(k), stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
+    consoleOk: f.consoleOk,
+    // Ties that carry nothing: a conduit on their way untied from that bus (key -> the buses cut off).
+    cutOff: Object.fromEntries(Object.keys(e.ties).map((x) => [x, (e.ties[x] || []).filter((X) => !effTies(k, e, x).includes(X))]).filter(([, v]) => v.length)),
+    conduits: CONDUITS.filter((c) => c === 'system:lifeSupport' || placesOf(k).some((pl) => `place:${pl.name}` === c)), systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, brigField: !!e.brigField, brigSealed: brigSealed(k), stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
     tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: BUS_MAX,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
   };
@@ -3858,11 +3911,22 @@ function engineeringSteps(k, mode) {
     if (isBase(k)) return !WARP_DRIVE.includes(sys);
     return (!BASE_ONLY.includes(sys) || (sys === 'phaser2' && arraysOf(k) >= 2)) && (sys !== 'transporter' || classOf(k).transporter) && (!WARP_DRIVE.includes(sys) || classOf(k).maxWarp);
   };
+  // What each conduit carries once the ship's loads are tied as usual (its places reached through too).
+  const conduitWant = () => {
+    const want = {};
+    const add = (c, nodes) => { want[c] = NODES.filter((n) => (want[c] || []).includes(n) || nodes.includes(n)); };
+    for (const [x, d] of Object.entries({ ...defaults, containment: [] })) if (has(x)) for (const c of conduitsOf(k, x)) add(c, d || []);
+    for (const c of Object.keys(want).filter((x) => x.startsWith('place:'))) for (const up of conduitsOf(k, c)) add(up, want[c]);
+    return want;
+  };
   const loadKeys = Object.keys(DEFAULT_LOAD_TIES).filter((x) => x !== 'console:Engineering' && !/^sub:computer/.test(x) && (defaults[x] || []).length && has(x));
   const startup = [
     { what: 'dock power on Bus B, imported', done: () => !docked || e.core === 'online' || (e.ties.dock.includes('B') && connOf(e, 'station').power.imp), /* (with the warp core running, the ship doesn't need it) */ act: () => g({ ties: { dock: ['B'] }, conn: { with: 'station', res: 'power', imp: true } }) },
     { what: "the batteries' breakers closed", done: () => BUSES.every((X) => e.breakers[X]), act: () => g({ breaker: { bus: BUSES.find((X) => !e.breakers[X]), on: true } }) },
     { what: 'the A-B crosslink', done: () => ['A', 'B'].every((X) => e.ties.crosslink.includes(X)), act: () => g({ ties: { crosslink: [...new Set([...e.ties.crosslink, 'A', 'B'])] } }) },
+    // (The power paths first: each location and parent system tied to the buses its loads will use.)
+    { what: 'the power paths: each location and parent system tied in', done: () => Object.entries(conduitWant()).every(([c, w]) => w.every((n) => (e.ties[c] || []).includes(n))),
+      act: () => g({ ties: Object.fromEntries(Object.entries(conduitWant()).map(([c, w]) => [c, NODES.filter((n) => w.includes(n) || (e.ties[c] || []).includes(n))])) }) },
     { what: 'the Engineering console and the computer cores tied in', done: () => tied('console:Engineering') && COMPUTERS.every((x) => tied(`sub:${x}`)), act: () => g({ ties: { 'console:Engineering': ['A'], 'sub:computer1': ['A'], 'sub:computer2': ['B'], 'sub:computer3': ['C'] } }) },
     { what: 'antimatter containment fed', done: () => tied('containment'), act: () => g({ ties: { containment: ['A'] } }) },
     { what: 'the fuel buses up, and supplies coming aboard', done: () => tied('sub:deuTransfer') && tied('sub:amTransfer') && tied('system:amBus') && Object.values(AM_CONTAIN).every((x) => tied(x)) && Object.entries(e.tankCfg).every(([n, c]) => c.tied && (n.endsWith(':main') ? c.drain : c.fill)) && (!docked || (e.connTies.deu && e.connTies.am && connOf(e, 'station').deu.imp && connOf(e, 'station').am.imp)),

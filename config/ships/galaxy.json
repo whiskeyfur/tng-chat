@@ -259,8 +259,7 @@
         "sub:constriction",
         "sub:amConduit",
         "sub:injector",
-        "eps-taps",
-        "system:spore"
+        "eps-taps"
       ],
       "default": true
     },
@@ -271,7 +270,8 @@
       "rows": [
         "system:engines",
         "system:bussard"
-      ]
+      ],
+      "via": "Main Engineering"
     }
   ],
   "seats": {

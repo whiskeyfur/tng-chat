@@ -1266,6 +1266,8 @@ function renderCombat() {
     // + for supply, − for draw.
     const SOURCE_ROWS = new Set(['ship', 'shipEps', 'solar', 'dock', 'dockEps', 'emergA', 'emergB', 'emergC', 'impulsePort', 'impulseStarboard', 'core', 'stores']);
     const ties = (key, label, cellKey = key, { level = 0, note = '', controls = [], sign } = {}) => {
+      const cut = grid.cutOff?.[key];
+      if (cut?.length) note = `${note ? `${note} · ` : ''}CUT OFF (${cut.map((n) => NODE_NAMES[n]).join(', ')}): a conduit above isn't tied`;
       const th = el('th', { scope: 'row' }, el('span', { textContent: label }), ...(note ? [el('small', { className: 'grid-note', textContent: note })] : []));
       if (level) th.className = `grid-indent grid-indent--${level}`;
       const tr = el('tr', { id: `ties-${key.replace(':', '-')}` }, th, ctlCell(controls));
@@ -1522,7 +1524,9 @@ function renderCombat() {
           // A parent (Life support): no ties of its own, its systems under it.
           if (grid.systemParents?.[sys]) {
             const kids = grid.systemChildren[sys] || [];
-            rows.push(parentRow(`ties-system-${sys}`, grid.systemParents[sys], level, kids.some((x) => grid.delivered[x] < grid.demand[x]) ? 'SHORT' : ''));
+            // (A parent system is a conduit too: its ties carry power on to its systems.)
+            const short = kids.some((x) => grid.delivered[x] < grid.demand[x]) ? 'SHORT' : '';
+            rows.push(grid.tieNodes[`system:${sys}`] ? ties(`system:${sys}`, grid.systemParents[sys], `system:${sys}`, { level, note: short || 'conduit: draws nothing' }) : parentRow(`ties-system-${sys}`, grid.systemParents[sys], level, short));
             for (const child of kids) sysRow(child, level + 1);
             return;
           }
@@ -1544,7 +1548,13 @@ function renderCombat() {
         return rows;
       };
       // A place aboard: a sub-heading over its consoles' rows.
-      const placeRow = (label) => el('tr', { className: 'grid-place' }, el('th', { scope: 'rowgroup', colSpan: COLS.length + 2, textContent: label }));
+      // (A place is a conduit on each bus: its ties carry power on to everything in it.)
+      const placeRow = (label, name) => {
+        if (!name || !grid.tieNodes[`place:${name}`]) return el('tr', { className: 'grid-place' }, el('th', { scope: 'rowgroup', colSpan: COLS.length + 2 }, el('span', { textContent: label })));
+        const tr = ties(`place:${name}`, label, `place:${name}`, { note: 'conduit: draws nothing' });
+        tr.classList.add('grid-place');
+        return tr;
+      };
       const header = (text, extra = []) => { const tr = el('tr', { className: 'grid-section' }, el('th', { scope: 'rowgroup', colSpan: COLS.length + 2 }, el('span', { textContent: text }), ...extra)); return tr; };
       const divide = (rows) => { rows[rows.length - 1]?.classList.add('grid-crosslink'); return rows; };
       const xl = () => { const r = crosslinkRow(); r.querySelector('th').className = ''; return withFlows(r); };
@@ -1582,7 +1592,7 @@ function renderCombat() {
         const order = (p, id) => { const list = [...p.stations.map((st) => `ties-console-${st}`), ...(p.rows || []).map(rowId)]; return list.indexOf(id) + 1 || 999; };
         for (const p of [...places].sort((a, b) => a.deck - b.deck)) {
           const mine = segments.filter((g) => g.place === p).sort((a, b) => order(p, a.head) - order(p, b.head));
-          if (mine.length) rows.push(placeRow(`Deck ${p.deck} · ${p.name}`), ...mine.flatMap((g) => g.rows));
+          if (mine.length) rows.push(placeRow(`Deck ${p.deck} · ${p.name}`, p.name), ...mine.flatMap((g) => g.rows));
         }
         if (!places.length) rows.push(...segments.flatMap((g) => g.rows)); // (no design yet)
       } else {
@@ -1622,7 +1632,7 @@ function renderCombat() {
             on: () => (!grid.epsLive ? `the EPS isn't energized: the manifold charges from ${grid.epsChargeGen}+ of EPS generation` : !(grid.computers || []).some((x) => x.state === 'online') ? 'the EPS taps need a computer core online' : epsOn ? '' : 'the EPS taps need the EPS energized') },
           { title: 'Warp core', rows: coreRows, state: () => ({ online: 'Online', starting: 'Startup', ejected: 'Ejected' })[grid.core] || 'Cold',
             on: () => (grid.core === 'ejected' ? 'no warp core: install one at a starbase' : !grid.antimatter ? 'the warp core needs antimatter aboard' : busOn ? '' : 'the constriction needs Bus A, B or C energized') },
-          { title: 'Consoles and systems', rows: () => byPlace(others).flatMap((g) => [placeRow(g.label), ...g.items.flatMap((st) => consoleRows(st))]), state: () => { const manned = others.filter((st) => crewAt(st)); const tied = others.filter((st) => grid.ties[`console:${st}`].length); return manned.length && manned.every((st) => grid.consoleOk[st]) ? 'Online' : tied.length ? 'Startup' : 'Cold'; },
+          { title: 'Consoles and systems', rows: () => byPlace(others).flatMap((g) => [placeRow(g.label, g.name), ...g.items.flatMap((st) => consoleRows(st))]), state: () => { const manned = others.filter((st) => crewAt(st)); const tied = others.filter((st) => grid.ties[`console:${st}`].length); return manned.length && manned.every((st) => grid.consoleOk[st]) ? 'Online' : tied.length ? 'Startup' : 'Cold'; },
             on: () => (busOn ? '' : 'the consoles need Bus A, B or C energized') },
         ];
         const list = gridOrder === 'shutdown' ? [...steps].reverse() : steps;

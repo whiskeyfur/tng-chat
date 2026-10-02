@@ -126,6 +126,8 @@ A light bar per system is a **limiter**: the most that system may draw, 0–150 
 
 Three low-power buses, **A**, **B** and **C** (300 each at most), and the high-power **EPS** (1000) carry the ship's power. The Power grid screen is a table: a row for each station's console, with the systems it controls indented under it (Engineering's rows hold every power source, the EPS taps and the crosslink, each with its subsystems a level deeper); a column each for Bus A, B, C and the EPS; each cell a tie checkbox with the power through it (+ supply, − draw); and a footer with each column's used / available / max.
 
+**Power paths.** On each bus, power runs **source → bus → place → system → subsystem**. Every place (the class's locations, a conduit each: Main Engineering, the nacelles, the Computer Core...) and every parent system (life support for its systems, the warp coils for the plasma injectors) has its own ties on the grid, and draws nothing. A load's tie carries power only if everything above it is tied to that bus too; untie one and everything past it is **CUT OFF** from that bus (its tie stays, it draws nothing, its demand doesn't count). The nacelles are reached through Main Engineering: reactor → power transfer conduits → Main Engineering → nacelle → plasma injectors. Antimatter containment is never cut off this way. A save from before power paths (and a warm start) has each place and parent tied wherever its loads are; a cold ship has them untied with everything else. Startup automation ties them first; bus All on / All off covers them.
+
 | Source | Gives | Ties |
 | --- | --- | --- |
 | Solar collectors | 25 | Bus B |

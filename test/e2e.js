@@ -1393,13 +1393,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.ok(await geordi.locator('#grid-table td.grid-controls #tank-deu-main-fill').count() === 1, 'Fill is in the Controls column');
     // Then the fuel storage (the buses, the main tanks), then the consoles.
     // (The consoles under a heading for each place: the bridge first, Helm forward.)
-    const firstPlace = sections.indexOf('', sections.indexOf('ties-crosslink'));
+    const firstPlace = sections.findIndex((x, i) => i > sections.indexOf('ties-crosslink') && (x === '' || x.startsWith('ties-place-'))); // (a place's row: its conduit ties)
     // (Then everything by where it is aboard, the bridge first: the fuel storage is in its own places now.)
     assert.deepEqual(sections.slice(sections.indexOf('ties-crosslink') + 1, firstPlace), []);
     assert.equal(sections[firstPlace + 1], 'ties-console-Helm', 'the bridge first, Helm forward');
     // Every system in its place aboard (the class's config): the warp coils in the nacelles, the pods in
     // antimatter storage, the computer cores in the computer core; each system's subsystems under it.
-    const placed = await geordi.$$eval('#grid-table tbody tr', (rs) => { let at = null; const out = {}; for (const r of rs) { if (r.classList.contains('grid-place')) at = r.textContent.trim(); else if (at && r.id) (out[r.id] = at); } return out; });
+    const placed = await geordi.$$eval('#grid-table tbody tr', (rs) => { let at = null; const out = {}; for (const r of rs) { if (r.classList.contains('grid-place')) at = r.querySelector('th > span').textContent.trim(); else if (at && r.id) (out[r.id] = at); } return out; });
     assert.equal(placed['ties-system-engines'], 'Deck 38 · Warp Nacelles (port and starboard)');
     assert.equal(placed['tank-am-main'], 'Deck 34 · Antimatter Storage');
     assert.equal(placed['ties-sub-computer2'], 'Deck 16 · Computer Core');
@@ -1495,7 +1495,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(heads[0], 'Deck 1 - Bridge');
     assert.equal(heads[heads.length - 1], 'Deck 36 - Main Engineering');
     assert.deepEqual(await geordi.evaluate(() => [...document.querySelector('#station-taps .place-bar').querySelectorAll('button')].slice(0, 2).map((x) => x.dataset.station)), ['Helm', 'Operations'], 'the bridge by seat, forward first');
-    assert.ok(await geordi.evaluate(() => [...document.querySelectorAll('#grid-table tr.grid-place th')].some((x) => x.textContent === 'Deck 12 · Sickbay')), 'the grid groups its consoles by place');
+    assert.ok(await geordi.evaluate(() => [...document.querySelectorAll('#grid-table tr.grid-place th > span')].some((x) => x.textContent === 'Deck 12 · Sickbay')), 'the grid groups its consoles by place');
     step('consoles listed by where they are aboard: the Station menu from Deck 1 (the bridge, Helm and Ops first) to Deck 36 (Main Engineering); the grid with place sub-headings');
     // A refresh comes back signed in, at the same station, on the same screen.
     await geordi.reload();
@@ -1746,7 +1746,7 @@ const audioBytes = (page) => page.evaluate(async () => {
       await waitFor(() => [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.some((x) => x.name === 'Lexington'), 15000);
       const scotty3 = await crewWs('scotty3', 'Lexington', 'Engineering');
       await waitFor(() => scotty3.nav()?.own?.grid);
-      scotty3.send({ type: 'grid', conn: { with: 'station', res: 'power', imp: true }, ties: { dock: ['B'], 'sub:computer2': ['B'] } });
+      scotty3.send({ type: 'grid', conn: { with: 'station', res: 'power', imp: true }, ties: { dock: ['B'], 'place:Computer Core': ['B'], 'sub:computer2': ['B'] } }); // (its path: the Computer Core's conduit too)
       await waitFor(() => scotty3.nav()?.own.grid.computers[1].state === 'online', 30000);
       const lops = new (require('ws'))(`ws://localhost:${process.env.PORT}`);
       const lopsMsgs = [];
@@ -1854,6 +1854,25 @@ const audioBytes = (page) => page.evaluate(async () => {
       lorca.close(); detmer.close();
       await stopComputer(dc);
       step('the spore drive: the Discovery (Crossfield class) was refused a jump until black alert, which powered nonessential systems down; then it jumped from 200,200 to 800,300 at once, spent 20 spores and cooled down (a second jump refused); condition green put the systems back');
+    }
+
+    // Power paths: untie Main Engineering from the EPS and the nacelles beyond it (reached through it)
+    // are cut off: the plasma injectors get nothing though they're tied; tied again, they're back.
+    {
+      const g0 = laforge.nav().own.grid;
+      assert.deepEqual(g0.cutOff, {}, 'a warm ship: nothing cut off');
+      assert.ok(g0.ties['system:injectors'].includes('EPS') && g0.ties['place:Main Engineering'].includes('EPS'));
+      laforge.send({ type: 'grid', ties: { 'place:Main Engineering': g0.ties['place:Main Engineering'].filter((n) => n !== 'EPS') } });
+      await waitFor(() => { const g = laforge.nav()?.own.grid; return ['system:injectors', 'system:engines', 'place:Warp Nacelles (port and starboard)'].every((x) => g.cutOff[x]?.includes('EPS')); }, 15000);
+      laforge.send({ type: 'grid', ties: { 'place:Main Engineering': g0.ties['place:Main Engineering'] } });
+      await waitFor(() => !laforge.nav()?.own.grid.cutOff['system:injectors'], 15000);
+      // (And power itself: the structural integrity field, cut off with its place, draws nothing.)
+      assert.ok(laforge.nav().own.grid.delivered.sif > 0);
+      laforge.send({ type: 'grid', ties: { 'place:Structural Integrity': [] } });
+      await waitFor(() => { const g = laforge.nav()?.own.grid; return g.cutOff['system:sif'] && !g.delivered.sif; }, 15000);
+      laforge.send({ type: 'grid', ties: { 'place:Structural Integrity': g0.ties['place:Structural Integrity'] } });
+      await waitFor(() => laforge.nav()?.own.grid.delivered.sif > 0, 15000);
+      step('power paths: Main Engineering untied from the EPS cut off the nacelles beyond it (the warp coils and plasma injectors, though tied); the structural integrity field cut off with its place drew nothing; tied again, all back');
     }
 
     // The bridge consoles: Bridge 1 runs Science to start; its top buttons switch it to Engineering
@@ -2042,6 +2061,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     await screen(op, 'status');
     await op.waitForSelector('#console-dark:not([hidden])', { state: 'attached' });
     // (Cold iron: nothing tied in, consoles, sensors and comms included.)
+    // (Its power paths first: rebuilt cold, every place untied too.)
+    { const g = laforge.nav().own.grid; laforge.send({ type: 'grid', ties: Object.fromEntries(g.conduits.map((c) => [c, g.tieNodes[c]])) }); }
     laforge.send({ type: 'grid', conn: { with: 'station', res: 'power', imp: true }, ties: { dock: ['B'], crosslink: ['A', 'B'], 'console:Operations': ['A'], 'console:Engineering': ['A'], 'system:lateral': ['A'], 'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'sub:computer1': ['A'] } });
     // (Computer core 1, tied to a powered bus, boots by itself: texts need a core.)
     await op.waitForSelector('#console-dark', { state: 'hidden' });
@@ -2233,13 +2254,17 @@ const audioBytes = (page) => page.evaluate(async () => {
     // ties: solar alone runs the atmospheric processors (10) and thermal regulation (8) with
     // 7 over to charge Battery B (empty on a new ship).
     assert.deepEqual(cold.tieNodes?.solar ?? ['B'], ['B'], 'solar ties to Bus B only');
+    // (A cold ship's power paths are untied too: life support's place and its parent row first.)
+    assert.deepEqual(['place:Environmental Control', 'system:lifeSupport'].map((c) => cold.ties[c]), [[], []], 'a cold ship: its conduits untied');
+    barclay.send({ type: 'grid', ties: { 'place:Environmental Control': ['B'], 'system:lifeSupport': ['B'] } });
     barclay.send({ type: 'grid', ties: { solar: ['B'], 'system:atmosphere': ['B'], 'system:thermal': ['B'] }, breaker: { bus: 'B', on: true } });
     await waitFor(() => { const g = barclay.nav()?.own.grid; return g?.stores.B.charging > 0 && g.cells['system:atmosphere'].B === 10 && g.cells['system:thermal'].B === 8 && g.cells.solar.B === 25; });
     assert.deepEqual(unbalanced(barclay.nav().own.grid), [], 'solar 25 = atmosphere 10 + thermal 8 + Battery B charging 7');
     assert.equal(barclay.nav().own.power.lifeSupport, 100, 'atmosphere and thermal at full: life support 100%');
     barclay.send({ type: 'grid', ties: { 'system:atmosphere': [], 'system:thermal': [] }, breaker: { bus: 'B', on: false } });
     step('life support as several systems: solar alone (Bus B) ran the atmospheric processors (10) and thermal regulation (8) with 7 over to charge the empty Battery B');
-    // Engineering ties in the loads (a usual layout) before bringing anything up.
+    // Engineering ties in the power paths (every place, and life support), then the loads (a usual layout), before bringing anything up.
+    { const g = barclay.nav().own.grid; barclay.send({ type: 'grid', ties: Object.fromEntries(g.conduits.map((c) => [c, g.tieNodes[c]])) }); }
     barclay.send({ type: 'grid', ties: {
       'console:Engineering': ['A'], 'console:Tactical': ['A'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'system:gravity': ['A'], 'system:lighting': ['A'], 'system:lateral': ['A'],
       'system:replicators': ['B'], 'system:recreation': ['B'], 'system:transporter': ['B'], 'sub:constriction': ['A'], 'sub:injector': ['A'], 'sub:amConduit': ['A'], 'contain:amCore': ['A'], 'contain:amTorpedo': ['A'], 'sub:portChamber': ['B'], 'sub:starboardChamber': ['B'], 'sub:aux1Chamber': ['A'], aux1: ['EPS'],

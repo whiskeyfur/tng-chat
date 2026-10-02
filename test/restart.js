@@ -68,6 +68,10 @@ async function look() {
     assert.ok(g.totals.B.condition >= 50 && g.totals.B.condition < 70, `Bus B condition ${g.totals.B.condition}`);
     assert.ok(Math.abs(g.totals.B.max - 3 * g.totals.B.condition) <= 3, 'a damaged bus carries its condition share of its max');
     assert.equal(g.totals.A.max, 300);
+    // A save from before power paths: its places and life support tied where its loads are (nothing cut off).
+    assert.deepEqual(g.cutOff, {}, `an older save: nothing cut off (${JSON.stringify(g.cutOff)})`);
+    assert.ok(g.ties['place:Bridge'].includes('A') && g.ties['place:Main Engineering'].length, 'its conduits tied where its loads are');
+    step('an older save from before power paths: its places tied where their loads are, nothing cut off');
     step(`a damaged Bus B (saved at 50%, now ${g.totals.B.condition}%) carries ${g.totals.B.max} of its 300`);
 
     // A data link with Starbase 12 (it accepts by itself), to see it come back after the restart.

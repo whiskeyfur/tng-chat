@@ -142,6 +142,17 @@
       ]
     },
     {
+      "name": "Spore Propulsion Laboratory",
+      "deck": 6,
+      "stations": [
+        "Spore Lab"
+      ],
+      "rows": [
+        "system:sporeGrow",
+        "system:spore"
+      ]
+    },
+    {
       "name": "Crew Quarters",
       "deck": 7,
       "stations": [
@@ -259,8 +270,7 @@
         "sub:constriction",
         "sub:amConduit",
         "sub:injector",
-        "eps-taps",
-        "system:spore"
+        "eps-taps"
       ],
       "default": true
     },
@@ -271,7 +281,8 @@
       "rows": [
         "system:engines",
         "system:bussard"
-      ]
+      ],
+      "via": "Main Engineering"
     }
   ],
   "seats": {
