@@ -165,16 +165,27 @@ document.getElementById('link')?.addEventListener('click', (ev) => {
   clearInterval(adminTimer);
   adminTimer = setInterval(() => send({ type: 'admin', action: 'status' }), 2000);
 });
+// The admin panel: the supervisor's status (refreshed every 2 s) above, and
+// Create ship below (built once per opening, so typing isn't interrupted).
+let adminBases = [];
+const createDraft = { name: '', cls: null, at: null, x: null, y: null };
+const CREATE_CLASSES = [['galaxy', 'Galaxy'], ['dreadnought', 'Dreadnought'], ['intrepid', 'Intrepid'], ['runabout', 'Runabout'], ['shuttle', 'Shuttle'], ['starbase', 'Starbase']];
 function renderAdmin(st) {
   const d = adminDialog();
   if (!d.open) return;
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   const btn = (text, id, onclick, alert) => el('button', { type: 'button', className: `lcars-button lcars-button--pill${alert ? ' lcars-button--alert' : ''}`, id, textContent: text, onclick });
   const ago = (t) => (t ? `${Math.round((Date.now() - t) / 1000)} s` : '');
-  if (st.error) { d.replaceChildren(el('h2', { textContent: 'Relay admin' }), el('p', { className: 'ops-notice', textContent: st.error }), btn('Close', 'admin-close', () => d.close())); return; }
-  d.replaceChildren(
-    el('h2', { textContent: `Relay admin · ${st.relayName || ''}` }),
-    el('p', { className: 'ops-hint', textContent: 'No access control yet: localhost only.' }),
+  if (st.bases) adminBases = st.bases;
+  if (!d.querySelector('#admin-status-box')) {
+    d.replaceChildren(el('h2', { id: 'admin-title', textContent: 'Relay admin' }), el('p', { className: 'ops-hint', textContent: 'No access control yet: localhost only.' }),
+      el('div', { id: 'admin-status-box' }), el('section', { id: 'admin-create' }), btn('Close', 'admin-close', () => d.close()));
+    renderCreate(d.querySelector('#admin-create'));
+  }
+  d.querySelector('#admin-title').textContent = `Relay admin · ${st.relayName || ''}`;
+  const box = d.querySelector('#admin-status-box');
+  if (st.error) { box.replaceChildren(el('p', { className: 'ops-notice', textContent: st.error })); renderCreate(d.querySelector('#admin-create'), true); return; }
+  box.replaceChildren(
     el('p', { className: 'st-state', id: 'admin-relay', textContent: `Relay: ${st.relay?.up ? 'up' : 'down'} on port ${st.relay?.port} · pid ${st.relay?.pid} · ${ago(st.relay?.since)}${st.note ? ` · ${st.note}` : ''}` }),
     el('div', { className: 'ops-form' }, btn('Restart the relay', 'admin-restart-relay', () => { if (confirm('Restart the relay? Every console reloads and signs back in; calls end.')) send({ type: 'admin', action: 'restart-relay' }); }, true),
       btn("Restart every ship's computer", 'admin-restart-ships', () => send({ type: 'admin', action: 'restart-ships' }))),
@@ -184,9 +195,44 @@ function renderAdmin(st) {
     el('h3', { textContent: 'Connected consoles' }),
     el('ul', { className: 'st-list', id: 'admin-consoles' }, ...(st.consoles?.length ? st.consoles.map((u) => el('li', { textContent: `${u.name} · ${u.ship} · ${u.station}` })) : [el('li', { className: 'empty', textContent: 'none' })])),
     el('h3', { textContent: 'Supervisor log' }),
-    el('pre', { className: 'admin-log', id: 'admin-log', textContent: (st.log || []).join('\n') }),
-    btn('Close', 'admin-close', () => d.close()));
-  const pre = d.querySelector('#admin-log'); pre.scrollTop = pre.scrollHeight;
+    el('pre', { className: 'admin-log', id: 'admin-log', textContent: (st.log || []).join('\n') }));
+  const pre = box.querySelector('#admin-log'); pre.scrollTop = pre.scrollHeight;
+  renderCreate(d.querySelector('#admin-create'), true);
+}
+// Create ship: a name; a class (taps, none to start); for a ship, the starbase
+// it's parked at (taps); for a starbase, a spot on the map. Create stays off
+// until it's all there; the relay refuses a name in use.
+function renderCreate(box, refresh = false) {
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const tap = (text, value, on, onclick) => { const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: text, onclick }); b.dataset.value = value; b.setAttribute('aria-pressed', String(!!on)); return b; };
+  if (!box.querySelector('#create-name')) {
+    const name = el('input', { className: 'ops-input', id: 'create-name', placeholder: 'Name', autocomplete: 'off', ariaLabel: 'new vessel name', value: createDraft.name });
+    name.oninput = () => { createDraft.name = name.value; renderCreate(box, true); };
+    box.replaceChildren(el('h3', { textContent: 'Create ship' }), el('div', { className: 'ops-form' }, name),
+      el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Class' }), el('div', { className: 'tr-taps', id: 'create-class' })),
+      el('div', { id: 'create-where' }),
+      el('div', { className: 'ops-form' }, el('button', { type: 'button', className: 'lcars-button lcars-button--pill', id: 'create-go', textContent: 'Create', onclick: () => {
+        send({ type: 'admin', action: 'create', name: createDraft.name.trim(), cls: createDraft.cls, ...(createDraft.cls === 'starbase' ? { x: createDraft.x, y: createDraft.y } : { at: createDraft.at }) });
+      } }), el('span', { className: 'ops-hint', id: 'create-status' })));
+  }
+  if (!refresh && box.dataset.built) return;
+  box.dataset.built = '1';
+  box.querySelector('#create-class').replaceChildren(...CREATE_CLASSES.map(([v, n]) => tap(n, v, createDraft.cls === v, () => { createDraft.cls = v; renderCreate(box, true); })));
+  const where = box.querySelector('#create-where');
+  if (createDraft.cls === 'starbase') {
+    // A map of the sector (1000 x 1000): click where the new starbase goes.
+    const NS = 'http://www.w3.org/2000/svg', node = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; };
+    const svg = node('svg', { viewBox: '0 0 1000 1000', width: 300, height: 300, id: 'create-map', role: 'img', 'aria-label': 'click where the new starbase goes', style: 'background:#000;border:2px solid var(--lcars-orange);cursor:crosshair' });
+    for (const b of adminBases) svg.append(node('circle', { cx: b.x, cy: b.y, r: 12, fill: 'var(--lcars-sky)' }), node('text', { x: b.x + 18, y: b.y + 8, fill: 'var(--lcars-sky)', 'font-size': 36 }, b.name));
+    if (createDraft.x != null) svg.append(node('circle', { cx: createDraft.x, cy: createDraft.y, r: 16, fill: 'var(--lcars-gold)', id: 'create-spot' }));
+    svg.addEventListener('click', (ev) => { const r = svg.getBoundingClientRect(); createDraft.x = Math.round(((ev.clientX - r.left) / r.width) * 1000); createDraft.y = Math.round(((ev.clientY - r.top) / r.height) * 1000); renderCreate(box, true); });
+    where.replaceChildren(el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Where' }), svg, el('span', { className: 'ops-hint', textContent: createDraft.x != null ? `at ${createDraft.x}, ${createDraft.y}` : 'click the map' })));
+  } else if (createDraft.cls) {
+    where.replaceChildren(el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Parked at' }), el('div', { className: 'tr-taps', id: 'create-at' },
+      ...adminBases.map((b) => tap(b.name, b.name, createDraft.at === b.name, () => { createDraft.at = b.name; renderCreate(box, true); })))));
+  } else where.replaceChildren();
+  const ready = createDraft.name.trim() && createDraft.cls && (createDraft.cls === 'starbase' ? createDraft.x != null : createDraft.at);
+  box.querySelector('#create-go').disabled = !ready;
 }
 
 // Rank, species and gender: picked by taps at sign-in or on the Station
@@ -1801,6 +1847,12 @@ async function onMessage(msg) {
     case 'admin-status':
       renderAdmin(msg);
       break;
+    case 'admin-created': {
+      const st = document.getElementById('create-status');
+      if (st) st.textContent = msg.text;
+      if (msg.ok) { Object.assign(createDraft, { name: '', cls: null, at: null, x: null, y: null }); const n = document.getElementById('create-name'); if (n) n.value = ''; const box = document.getElementById('admin-create'); if (box) renderCreate(box, true); }
+      break;
+    }
     case 'nav':
       lastNav = msg;
       // The Communications console's subspace bands follow the subspace relay.

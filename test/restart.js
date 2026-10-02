@@ -107,6 +107,13 @@ async function look() {
     await until(() => got.some((m) => m.type === 'admin-status' && m.ships?.find((x) => x.ship === 'Oldship')?.since > before));
     await until(() => got.filter((m) => m.type === 'admin-status').pop().log.some((l) => /restarting the ship's computer for Oldship/.test(l)));
     step("the admin panel: the supervisor reported the relay, the ship's computers and the consoles, and restarted Oldship's computer");
+    // Create ship: the supervisor starts the new ship's computer at once (its class), docked where it was parked.
+    ws.send(JSON.stringify({ type: 'admin', action: 'create', name: 'Newship', cls: 'runabout', at: 'Starbase 12' }));
+    await until(() => got.some((m) => m.type === 'admin-created' && m.ok));
+    ws.send(JSON.stringify({ type: 'admin', action: 'status' }));
+    await until(() => { ws.send(JSON.stringify({ type: 'admin', action: 'status' })); return got.filter((m) => m.type === 'admin-status').pop()?.ships?.some((x) => x.ship === 'Newship' && x.connected); });
+    await until(() => got.filter((m) => m.type === 'ships').pop()?.ships.some((x) => x.name === 'Newship' && x.class === 'Runabout'));
+    step('the admin panel created the Newship (a runabout, parked at Starbase 12): the supervisor started its computer at once');
     // A change to the ship's computers' code reloads them here, in the supervisor (the relay stays up).
     fs.writeFileSync(path.join(WATCH, 'code', 'shipcore.js'), '// changed');
     await wait(1500);

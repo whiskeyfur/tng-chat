@@ -1432,6 +1432,26 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Shift-click the relay's name at the foot: the admin panel (here the relay runs without the supervisor).
     await geordi.click('#link', { modifiers: ['Shift'] });
     await geordi.waitForSelector('#admin-dialog:has-text("no supervisor")');
+    // Create ship: a name, a class (taps, none picked to start), and for a starbase a spot on the map.
+    // Create stays off until it's all there. (A ship needs the supervisor to start its computer.)
+    await geordi.fill('#create-name', 'Starbase 99');
+    assert.equal(await geordi.isDisabled('#create-go'), true, 'Create should wait for a class');
+    await geordi.click('#create-class button[data-value="starbase"]');
+    assert.equal(await geordi.isDisabled('#create-go'), true, 'Create should wait for a spot on the map');
+    const mapBox = await geordi.locator('#create-map').boundingBox();
+    await geordi.mouse.click(mapBox.x + mapBox.width * 0.3, mapBox.y + mapBox.height * 0.6);
+    await geordi.click('#create-go');
+    await geordi.waitForSelector('#create-status:has-text("Starbase 99 created at")');
+    await waitFor(() => [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.some((x) => x.name === 'Starbase 99' && x.starbase));
+    await geordi.fill('#create-name', 'Starbase 99');
+    await geordi.click('#create-class button[data-value="runabout"]');
+    await geordi.click('#create-at button[data-value="Starbase 12"]');
+    await geordi.click('#create-go');
+    await geordi.waitForSelector('#create-status:has-text("already a vessel called Starbase 99")');
+    await geordi.fill('#create-name', 'Rubicon2');
+    await geordi.click('#create-go');
+    await geordi.waitForSelector('#create-status:has-text("no supervisor")');
+    step('the admin panel created Starbase 99 where its map was clicked (Create waited for a class and a spot), refused the name again, and needs the supervisor to create a ship');
     await geordi.click('#admin-close');
     step('shift-clicking the relay name opened the admin panel (no supervisor here, and it said so)');
     await geordi.close();
@@ -1597,7 +1617,7 @@ const audioBytes = (page) => page.evaluate(async () => {
       const conn = laforge.nav().own.grid.connections.find((x) => x.name === 'Galileo');
       assert.ok(conn && conn.port === 'shuttle bay' && !conn.power.imp && !conn.power.exp, 'the landed shuttle is a connection with nothing tied');
       pilot.send({ type: 'helm', dest: { x: 10, y: 10 }, warp: 0.25 });
-      await waitFor(() => pilot.msgs.some((m) => m.type === 'notice' && /take off first/.test(m.text)));
+      await waitFor(() => pilot.msgs.some((m) => m.type === 'notice' && /take off first|console offline/.test(m.text))).catch(() => { throw new Error(`Helm wasn't held: ${JSON.stringify(pilot.msgs.filter((m) => m.type === 'notice').slice(-4).map((m) => m.text))}`); });
       pilot.send({ type: 'change-station', station: 'Shuttle Bay', ship: 'Enterprise' });
       await waitFor(() => pilot.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && m.station === 'Shuttle Bay'));
       pilot.send({ type: 'change-station', station: 'Helm', ship: 'Galileo' });

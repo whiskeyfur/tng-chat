@@ -1052,7 +1052,7 @@ function coreNav(c, key, nav) {
     combat.set(key, { ...freshCombat(nav.combat), loaded: true });
     eng.set(key, freshEng(nav.eng, { cold: !nav.eng && !nav.warm }));
     if (!classOf(key).warpCore) Object.assign(engOf(key), { core: 'ejected', antimatter: 0 }); // (a shuttle has no warp core: impulse and batteries)
-    if (!nav.eng && nav.spawn) { spawnAt = SPAWN_BASES[Math.floor(Math.random() * SPAWN_BASES.length)]; engOf(key).docked = spawnAt.name; }
+    if (!nav.eng && nav.spawn) { spawnAt = STARBASES.find((b) => b.name === pendingSpawn.get(key)) || SPAWN_BASES[Math.floor(Math.random() * SPAWN_BASES.length)]; pendingSpawn.delete(key); engOf(key).docked = spawnAt.name; }
     flowCache.delete(key);
   }
   const current = primaryCore.get(key);
@@ -1929,6 +1929,11 @@ const engOf = (k) => {
 const BASE_SETTINGS_FILE = process.env.STARBASES_FILE || path.join(__dirname, 'data', 'starbases.json');
 let baseSettings = {};
 try { baseSettings = JSON.parse(fs.readFileSync(BASE_SETTINGS_FILE, 'utf8')); } catch {}
+// Starbases created from the admin panel come back.
+for (const [name, sv] of Object.entries(baseSettings)) if (sv?.created && Number.isFinite(sv.nav?.x) && !STARBASES.some((b) => b.name === name)) {
+  STARBASES.push({ name, x: sv.nav.x, y: sv.nav.y, created: true });
+  const k = registerShip(name); BASE_KEYS.add(k); navState.set(k, { x: sv.nav.x, y: sv.nav.y, heading: 0, warp: 0, dest: null });
+}
 // Where each starbase was left (it can move: impulse, or a tow), and its limiters.
 for (const b of STARBASES) {
   const sv = baseSettings[b.name], k = shipKey(b.name);
@@ -1937,7 +1942,7 @@ for (const b of STARBASES) {
 }
 function saveBaseSettings() {
   // Each starbase: its settings, its grid, its condition, where it is and its limiters.
-  for (const k of BASE_KEYS) { const n = navState.get(k); baseSettings[shipName(k)] = { remoteBlock: !!engOf(k).remoteBlock, eng: savedEng(k), combat: savedCombat(k), nav: n ? { x: n.x, y: n.y, heading: n.heading } : undefined, power: n?.power }; }
+  for (const k of BASE_KEYS) { const n = navState.get(k); baseSettings[shipName(k)] = { ...(STARBASES.find((b) => shipKey(b.name) === k)?.created ? { created: true } : {}), remoteBlock: !!engOf(k).remoteBlock, eng: savedEng(k), combat: savedCombat(k), nav: n ? { x: n.x, y: n.y, heading: n.heading } : undefined, power: n?.power }; }
   try { fs.mkdirSync(path.dirname(BASE_SETTINGS_FILE), { recursive: true }); fs.writeFileSync(BASE_SETTINGS_FILE, JSON.stringify(baseSettings, null, 2)); } catch (err) { console.warn(`could not save starbase settings: ${err.message}`); }
 }
 const savedEng = (k) => {
@@ -4281,11 +4286,47 @@ server.listen(PORT, () => console.log(`${RELAY_NAME} on http://localhost:${PORT}
 const adminWaiting = new Map(); // request id -> socket
 let adminSeq = 0;
 function adminRequest(ws, msg) {
-  if (!process.send) return send(ws, { type: 'admin-status', error: 'no supervisor: the relay was started on its own (npm start runs the supervisor)' });
+  if (msg.action === 'create') return adminCreate(ws, msg);
+  if (!process.send) return send(ws, { type: 'admin-status', error: 'no supervisor: the relay was started on its own (npm start runs the supervisor)', bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
   const reqId = ++adminSeq;
   adminWaiting.set(reqId, ws);
   setTimeout(() => adminWaiting.delete(reqId), 10000);
   process.send({ type: 'admin', reqId, action: ['status', 'restart-ship', 'restart-ships', 'restart-relay'].includes(msg.action) ? msg.action : 'status', ship: typeof msg.ship === 'string' ? msg.ship : undefined });
+}
+// Create a ship (the supervisor starts its computer: --class, docked cold at
+// the starbase picked) or a starbase (here, at the spot picked on the map; kept
+// in the starbase file). Names must be new.
+const pendingSpawn = new Map(); // ship key -> the starbase a new ship comes up docked at
+function adminCreate(ws, msg) {
+  const reply = (ok, text) => send(ws, { type: 'admin-created', ok, text });
+  const name = clean(msg.name), cls = String(msg.cls || '').toLowerCase();
+  if (!NAME_RE.test(name)) return reply(false, 'name: use 1-32 letters, digits, spaces, \' . -');
+  if (ships.has(shipKey(name))) return reply(false, `there's already a vessel called ${shipName(shipKey(name))}`);
+  if (cls === 'starbase') {
+    const x = Number(msg.x), y = Number(msg.y);
+    if (!(x >= 0 && x <= 1000 && y >= 0 && y <= 1000)) return reply(false, 'pick a spot on the map');
+    createStarbase(name, Math.round(x), Math.round(y));
+    saveBaseSettings();
+    console.log(`admin: starbase ${name} created at ${Math.round(x)}, ${Math.round(y)}`);
+    return reply(true, `${name} created at ${Math.round(x)}, ${Math.round(y)}`);
+  }
+  if (!CLASSES[cls]) return reply(false, 'pick a class');
+  const at = STARBASES.find((b) => b.name === msg.at);
+  if (!at) return reply(false, 'pick where it is parked');
+  if (!process.send) return reply(false, "no supervisor: the relay was started on its own (npm start runs the supervisor, which starts the new ship's computer)");
+  pendingSpawn.set(shipKey(name), at.name);
+  process.send({ type: 'admin', reqId: ++adminSeq, action: 'create-ship', ship: name, cls });
+  console.log(`admin: ${name} (${CLASSES[cls].name} class) created, parked at ${at.name}`);
+  return reply(true, `the ${name} (${CLASSES[cls].name} class) is being created, parked at ${at.name}: its computer is starting`);
+}
+function createStarbase(name, x, y) {
+  STARBASES.push({ name, x, y, created: true });
+  const k = registerShip(name);
+  BASE_KEYS.add(k);
+  navState.set(k, { x, y, heading: 0, warp: 0, dest: null });
+  engOf(k);
+  broadcastShips();
+  broadcastAllOps();
 }
 process.on('message', (m) => {
   if (m?.type !== 'admin-reply') return;
@@ -4293,7 +4334,7 @@ process.on('message', (m) => {
   adminWaiting.delete(m.reqId);
   if (!ws) return;
   const consoles = [...users.values()].map((u) => ({ name: u.name, ship: shipName(u.shipKey), station: u.station }));
-  send(ws, { type: 'admin-status', ...m.status, note: m.note, consoles, relayName: RELAY_NAME });
+  send(ws, { type: 'admin-status', ...m.status, note: m.note, consoles, relayName: RELAY_NAME, bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
 });
 process.on('message', (m) => {
   if (m?.type !== 'reload') return;

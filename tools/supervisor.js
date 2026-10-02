@@ -52,11 +52,11 @@ const ships = () => {
 const computers = new Map(); // ship -> { core, since }
 const loadShipcore = () => { delete require.cache[require.resolve(SHIPCORE)]; return require(SHIPCORE); };
 let shipcoreModule = null;
-function startComputer(ship) {
+function startComputer(ship, extra = {}) {
   stopComputer(ship);
   shipcoreModule ||= loadShipcore();
   const shipLog = (...a) => { const line = `${new Date().toISOString().slice(11, 19)} [${ship}] ${a.join(' ')}`; console.log(line); recent.push(line); recent.splice(0, Math.max(0, recent.length - 200)); };
-  const core = shipcoreModule.createShipcore({ relay: RELAY_URL, data: DATA, key: process.env.OPERATOR_KEY || '', ships: [ship] }, { log: shipLog, onFail: (why) => log(`the ship's computer for ${ship} was refused: ${why}`) });
+  const core = shipcoreModule.createShipcore({ relay: RELAY_URL, data: DATA, key: process.env.OPERATOR_KEY || '', ships: [ship], ...extra }, { log: shipLog, onFail: (why) => log(`the ship's computer for ${ship} was refused: ${why}`) });
   computers.set(ship, { core, since: Date.now() });
 }
 function stopComputer(ship) { const c = computers.get(ship); if (c) { c.core.stop(); computers.delete(ship); } }
@@ -118,6 +118,11 @@ async function onRelayMessage(m) {
   const reply = (extra = {}) => { if (relay?.connected) relay.send({ type: 'admin-reply', reqId: m.reqId, status: status(), ...extra }); };
   if (m.action === 'restart-ship' && computers.has(m.ship)) { log(`admin: restarting the ship's computer for ${m.ship}`); startComputer(m.ship); }
   else if (m.action === 'restart-ships') { log("admin: restarting every ship's computer"); stopComputers(); startComputers(); }
+  else if (m.action === 'create-ship' && typeof m.ship === 'string' && !computers.has(m.ship)) {
+    // A new ship from the admin panel: its computer starts now (a folder in shipcore-data from here on).
+    log(`admin: creating the ${m.ship}${m.cls ? ` (${m.cls})` : ''}`);
+    startComputer(m.ship, m.cls ? { class: m.cls } : {});
+  }
   else if (m.action === 'restart-relay') { log('admin: restarting the relay'); reply({ note: 'restarting the relay' }); restartRelay(); return; }
   reply();
 }
