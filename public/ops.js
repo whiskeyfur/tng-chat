@@ -8,6 +8,21 @@
 // ops.handle(msg)  // ops messages from the relay; true if handled
 // ops.render()     // redraw (call state changed, directory changed)
 (function () {
+  // A tap keypad for a 5-digit command prefix (no text field): digits, Clear and
+  // the action button; the entry shows masked. onEnter(code) with 5 digits.
+  window.makeKeypad = function makeKeypad(id, action, onEnter) {
+    let code = '';
+    const shown = Object.assign(document.createElement('span'), { className: 'keypad-shown', id: `${id}-shown`, textContent: '-----' });
+    const key = (text, onclick, cls = '') => Object.assign(document.createElement('button'), { type: 'button', className: `lcars-button lcars-button--pill tr-tap ${cls}`, textContent: text, onclick });
+    const show = () => { shown.textContent = '•'.repeat(code.length) + '-'.repeat(5 - code.length); go.disabled = code.length !== 5; };
+    const go = key(action, () => { if (code.length === 5) { onEnter(code); code = ''; show(); } });
+    go.id = `${id}-enter`;
+    const pad = Object.assign(document.createElement('div'), { className: 'keypad', id });
+    pad.append(shown, ...'1234567890'.split('').map((d) => { const b = key(d, () => { if (code.length < 5) code += d; show(); }); b.dataset.digit = d; return b; }), key('Clear', () => { code = ''; show(); }), go);
+    show();
+    pad.reset = () => { code = ''; show(); };
+    return pad;
+  };
   window.createOps = function createOps({ send, comms, me: getMe }) {
     const $ = (id) => document.getElementById(id);
     const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
@@ -44,6 +59,7 @@
           remoteBlock = !!msg.remoteBlock;
           renderDrydock(msg.drydock, msg.berths);
           renderBayDoors(msg.bay);
+          renderPrefix(msg.prefix);
           render();
           return true;
         case 'op-ok':
@@ -64,6 +80,21 @@
         }
       }
       return false;
+    }
+
+    // The command prefix: masked (tap Show to see it), set on a keypad.
+    let prefix = null, revealed = false;
+    const prefixBox = document.getElementById('prefix-box');
+    if (prefixBox) {
+      prefixBox.querySelector('#prefix-pad-slot').replaceWith(makeKeypad('prefix-pad', 'Set prefix', (code) => send({ type: 'prefix', code })));
+      document.getElementById('prefix-reveal').onclick = () => { revealed = !revealed; renderPrefix(prefix); };
+    }
+    function renderPrefix(p) {
+      if (!prefixBox) return;
+      prefix = p ?? prefix;
+      prefixBox.hidden = prefix == null;
+      document.getElementById('prefix-show').textContent = prefix == null ? '' : revealed ? prefix : '•••••';
+      document.getElementById('prefix-reveal').textContent = revealed ? 'Hide' : 'Show';
     }
 
     // The shuttle bay's doors (with a bay): open or close them.

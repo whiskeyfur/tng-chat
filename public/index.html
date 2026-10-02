@@ -226,6 +226,8 @@
     .msd-log { list-style: none; margin: 0; padding: 0; max-height: 160px; overflow-y: auto; font-size: 13px; }
     .msd-log li[data-cls="bad"] { color: var(--lcars-red); } .msd-log li[data-cls="ok"] { color: #66cc66; } .msd-log li[data-cls="info"] { color: var(--lcars-sky); }
     .admin-dialog { max-width: min(900px, 95vw); width: 900px; }
+    .keypad { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+    .keypad-shown { font-size: 22px; letter-spacing: 6px; min-width: 7ch; color: var(--lcars-gold); }
     .admin-dialog .admin-log { max-height: 220px; overflow: auto; font-size: 12px; background: #111; padding: 8px; white-space: pre-wrap; }
     #link { cursor: default; }
     /* A dark room: everything black but the Station button and comms. */
@@ -389,6 +391,11 @@
                 <button type="button" class="lcars-button lcars-button--pill" id="remote-block" aria-pressed="false">Remote control: allowed</button>
                 <span class="ops-hint">Other vessels on a data link may run our unmanned stations; block it here.</span>
               </div>
+              <!-- The command prefix: needed by other vessels to take over our stations by remote control. -->
+              <div id="prefix-box" hidden><h3 class="ops-subhead">Command prefix</h3>
+                <div class="ops-form"><span class="lcars-readout__value" id="prefix-show">•••••</span><button type="button" class="lcars-button lcars-button--pill" id="prefix-reveal">Show</button></div>
+                <div id="prefix-pad-slot"></div>
+                <span class="ops-hint">Other vessels need it, on a data link, to run our stations remotely (manned or not). Three wrong tries lock them out for a minute.</span></div>
               <!-- The shuttle bay's doors (only with a bay): Ops opens and closes them. -->
               <div class="ops-form" id="bay-box" hidden><button type="button" class="lcars-button lcars-button--pill" id="bay-doors" aria-pressed="false">Shuttle bay doors: closed</button><span class="ops-hint" id="bay-note"></span></div>
               <!-- The shipyard's drydock (only at the shipyard): release a ship now, or hold it. -->

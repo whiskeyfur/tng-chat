@@ -51,7 +51,7 @@ const OPS_STATION = 'Operations';   // operators only
 const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay'];
 // Operator commands (everything else from an operator is handled as crew).
 const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-hail', 'cancel-hail', 'transfer',
-  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock', 'bay-doors']);
+  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock', 'bay-doors', 'prefix']);
 // Message types one user may send to another; the server adds `from` and forwards.
 const RELAYED = new Set(['call', 'accept', 'decline', 'hangup', 'signal']);
 const STATES = new Set(['idle', 'calling', 'ringing', 'in-call']);
@@ -206,7 +206,7 @@ function broadcastOps(key) {
     broadcasts: [...broadcasts.values()].filter((b) => b.ships.has(key) || users.get(b.speaker)?.shipKey === key)
       .map((b) => ({ id: b.bid, speaker: peerInfo(b.speaker), label: b.label, since: b.since })),
   };
-  for (const op of ops) if (!op.controlling) send(op, msg); // (one running another vessel's ops sees that one's)
+  for (const op of ops) if (!op.controlling) send(op, { ...msg, prefix: engOf(key).prefix }); // (one running another vessel's ops sees that one's; only our own ops see our prefix)
   // An ops console remote-controlling this vessel's ops gets its picture too.
   for (const u of users.values()) if (u.operator && u.controlling === key) send(u, msg);
   // Communications runs data links too: it gets the link picture.
@@ -457,6 +457,18 @@ function operatorMessage(op, msg) {
       opLog(other, msg.type === 'link-decline' ? `the ${shipName(op.shipKey)} declined the data link` : `the ${shipName(op.shipKey)} withdrew its data link request`);
       broadcastAllOps();
       return ok(msg.type === 'link-decline' ? `declined the data link from the ${shipName(other)}` : `withdrew the data link request to the ${shipName(other)}`);
+    }
+    case 'prefix': {
+      // Ops sets the vessel's command prefix (5 digits, tapped in on a keypad).
+      const code = String(msg.code ?? '');
+      if (!/^\d{5}$/.test(code)) return fail('a command prefix is 5 digits');
+      const e = engOf(op.shipKey);
+      e.prefix = code; e.dirty = true;
+      if (isBase(op.shipKey)) saveBaseSettings();
+      opLog(op.shipKey, `${op.name}: command prefix changed`);
+      checkRemotes(); // (sessions on the old one end)
+      broadcastOps(op.shipKey);
+      return ok('command prefix set');
     }
     case 'bay-doors': {
       // Ops opens or closes the shuttle bay doors (they need power to move, and the containment field holds the air in).
@@ -1852,6 +1864,7 @@ function freshEng(saved, { cold = false } = {}) {
     // The shuttle bay: its doors (Ops opens them), and the bay this craft has landed in (kept across restarts).
     bayOpen: !!s.bayOpen, landed: typeof s.landed === 'string' && s.landed ? shipKey(s.landed) : null,
     remoteBlock: !!s.remoteBlock, // ops refuse remote control by other vessels
+    prefix: /^\d{5}$/.test(s.prefix) ? s.prefix : PREFIX.factory, // the command prefix (kept in .nav.json)
     forcefields: Array.isArray(s.forcefields) ? s.forcefields.filter((st) => STATIONS.includes(st)) : [], // stations Security has isolated
     // Docked with another ship: kept across restarts (it's checked once both are back).
     // Two docking ports. A starbase takes one (docked, dockedPort); ships dock
@@ -1935,7 +1948,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, prefix: e.prefix, drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
   };
 };
@@ -3500,10 +3513,15 @@ function stationCommand(ws, msg) {
 // Remote control. Like controls like: a console can run the same station
 // aboard another vessel over a working data link while that station there is
 // unmanned (whoever else is aboard), unless that vessel's ops have blocked it.
+// Command prefixes: each vessel's 5-digit code (Ops sets it; 00000 from the
+// factory), needed to take over one of its stations by remote control, manned
+// or not. Three wrong tries lock that vessel out for 60 s (its Ops are told).
+// A new prefix ends every remote session that used the old one.
+const PREFIX = { tries: 3, lockMs: (Number(process.env.PREFIX_LOCK_SECS) || 60) * 1000, factory: '00000' };
+const prefixFails = new Map(); // "fromKey|toKey" -> { n, until }
 function remoteOk(ws, t) {
   if (!t || t === ws.shipKey || !present(t) || !links.has(linkKey(ws.shipKey, t))) return false;
   if (ws.station === 'Crew') return false;
-  if (crewOf(t).some((u) => u.station === ws.station)) return false; // manned there (ops included)
   if ([...users.values()].some((u) => u !== ws && u.controlling === t && u.station === ws.station)) return false; // someone else has it
   // Blocked by that vessel's ops; a starbase's block holds even with nobody at its ops.
   return !(engOf(t).remoteBlock && (opsOf(t).length || isBase(t)));
@@ -3517,30 +3535,55 @@ function actorFor(ws) {
   a.send = (data) => ws.send(data);
   return a;
 }
+// The crew at a station someone's overriding from another vessel are told (and when it ends).
+const tellOverride = (ws, t, on) => { for (const u of crewOf(t)) if (u.station === ws.station && u !== ws) send(u, { type: 'override', by: on ? ws.ship : null, station: ws.station }); };
+function endRemote(ws, why) {
+  const t = ws.controlling;
+  if (!t) return;
+  tellOverride(ws, t, false);
+  ws.controlling = null; ws.remotePrefix = null;
+  send(ws, { type: 'notice', text: `Remote control of the ${shipName(t)} ended${why ? `: ${why}` : ''}` });
+  if (ws.operator) broadcastOps(ws.shipKey);
+}
 function controlCommand(ws, msg) {
   const t = msg.ship ? shipKey(clean(msg.ship)) : null;
   if (!t || t === ws.shipKey) {
-    if (ws.controlling) { opLog(ws.controlling, `${ws.name} (${ws.ship}) released remote control of ${ws.station}`); send(ws, { type: 'notice', text: `Remote control of the ${shipName(ws.controlling)} ended` }); }
-    ws.controlling = null;
-    if (ws.operator) broadcastOps(ws.shipKey);
+    if (ws.controlling) opLog(ws.controlling, `${ws.name} (${ws.ship}) released remote control of ${ws.station}`);
+    endRemote(ws);
   } else {
-    if (!remoteOk(ws, t)) return send(ws, { type: 'notice', text: `Remote control: can't run the ${shipName(t)}'s ${ws.station} (needs a data link, the station unmanned there, and its ops not blocking)` });
-    ws.controlling = t;
+    if (!remoteOk(ws, t)) return send(ws, { type: 'notice', text: `Remote control: can't run the ${shipName(t)}'s ${ws.station} (needs a data link, and its ops not blocking)` });
+    // The command prefix, entered on the keypad.
+    const fk = `${ws.shipKey}|${t}`, fails = prefixFails.get(fk);
+    if (fails?.until > Date.now()) return send(ws, { type: 'notice', text: `Remote control: locked out of the ${shipName(t)} for ${Math.ceil((fails.until - Date.now()) / 1000)} s (wrong command prefix)` });
+    if (String(msg.prefix ?? '') !== engOf(t).prefix) {
+      const n = (fails && !(fails.until > 0) ? fails.n : 0) + 1;
+      prefixFails.set(fk, { n: n >= PREFIX.tries ? 0 : n, until: n >= PREFIX.tries ? Date.now() + PREFIX.lockMs : 0 });
+      if (n >= PREFIX.tries) {
+        opLog(t, `the ${ws.ship} entered a wrong command prefix ${PREFIX.tries} times: locked out for ${PREFIX.lockMs / 1000} s`);
+        tellStations(t, ['Captain', 'Communications'], `Security: the ${ws.ship} tried our command prefix ${PREFIX.tries} times: locked out`);
+        return send(ws, { type: 'notice', text: `Remote control: wrong command prefix (${PREFIX.tries} tries): locked out of the ${shipName(t)} for ${PREFIX.lockMs / 1000} s` });
+      }
+      return send(ws, { type: 'notice', text: `Remote control: wrong command prefix for the ${shipName(t)} (${PREFIX.tries - n} ${PREFIX.tries - n === 1 ? 'try' : 'tries'} left)` });
+    }
+    prefixFails.delete(fk);
+    if (ws.controlling && ws.controlling !== t) endRemote(ws);
+    ws.controlling = t; ws.remotePrefix = engOf(t).prefix;
     if (ws.operator) broadcastOps(t);
-    opLog(t, `${ws.name} of the ${ws.ship} took remote control of ${ws.station} over the data link`);
-    send(ws, { type: 'notice', text: `Remote control: running the ${shipName(t)}'s ${ws.station}` });
+    const manned = crewOf(t).some((u) => u.station === ws.station);
+    opLog(t, `${ws.name} of the ${ws.ship} took remote control of ${ws.station} over the data link${manned ? ' (override)' : ''}`);
+    if (manned) tellOverride(ws, t, true);
+    send(ws, { type: 'notice', text: `Remote control: running the ${shipName(t)}'s ${ws.station}${manned ? ' (override: it was manned)' : ''}` });
   }
   scheduleNav();
 }
 // Consoles whose remote control no longer holds go back to their own ship.
 function checkRemotes() {
   for (const u of users.values()) {
-    if (!u.controlling || remoteOk(u, u.controlling)) continue;
     const t = u.controlling;
-    const why = !links.has(linkKey(u.shipKey, t)) ? 'the data link dropped' : crewOf(t).some((x) => x.station === u.station) ? `someone took ${u.station} there` : engOf(t).remoteBlock ? 'its ops blocked remote control' : 'it is no longer available';
-    u.controlling = null;
-    send(u, { type: 'notice', text: `Remote control of the ${shipName(t)} ended: ${why}` });
-    if (u.operator) broadcastOps(u.shipKey);
+    if (!t) continue;
+    const prefixChanged = u.remotePrefix !== engOf(t).prefix;
+    if (remoteOk(u, t) && !prefixChanged) continue;
+    endRemote(u, !links.has(linkKey(u.shipKey, t)) ? 'the data link dropped' : prefixChanged ? 'its command prefix changed' : engOf(t).remoteBlock ? 'its ops blocked remote control' : 'it is no longer available');
   }
 }
 

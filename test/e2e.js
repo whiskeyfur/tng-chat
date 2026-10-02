@@ -15,6 +15,7 @@ process.env.PORT = process.env.PORT || '8099';
 process.env.BEAM_SECS = process.env.BEAM_SECS || '2'; // the transporter energizes this long (5 s in play)
 process.env.RESERVE_SECS = process.env.RESERVE_SECS || '3';
 process.env.STARBASES_FILE = process.env.STARBASES_FILE || require('path').join(require('os').tmpdir(), `tng-chat-starbases-${process.pid}.json`); // (never the live file)
+process.env.PREFIX_LOCK_SECS = process.env.PREFIX_LOCK_SECS || '2'; // a wrong command prefix three times locks out this long (60 s in play)
 process.env.DRYDOCK_RELEASE_SECS = process.env.DRYDOCK_RELEASE_SECS || '3'; // release from drydock (30 s in play)
 process.env.DIAG_SECS = process.env.DIAG_SECS || '2'; // the transporter's level-3 diagnostic (16 s in play) // antimatter containment's internal reserve (9 minutes in play)
 // Ship's computers keep their libraries in a scratch folder for the test.
@@ -1753,7 +1754,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     // from its own console, over the data link.
     const data = await crewWs('data', 'Enterprise', 'Helm');
     await waitFor(() => data.nav()?.remote?.vessels?.includes('Reliant'));
-    data.send({ type: 'control', ship: 'Reliant' });
+    // The Reliant's command prefix (still the factory 00000): three wrong ones lock us out for a while.
+    for (let i = 0; i < 3; i++) data.send({ type: 'control', ship: 'Reliant', prefix: '12345' });
+    await waitFor(() => data.msgs.some((m) => m.type === 'notice' && /wrong command prefix \(3 tries\): locked out of the Reliant/.test(m.text)));
+    data.send({ type: 'control', ship: 'Reliant', prefix: '00000' });
+    await waitFor(() => data.msgs.some((m) => m.type === 'notice' && /locked out of the Reliant for/.test(m.text)));
+    await new Promise((r) => setTimeout(r, 2200)); // (the lockout: 2 s in the test)
+    data.send({ type: 'control', ship: 'Reliant', prefix: '00000' });
     await waitFor(() => data.nav()?.remote?.controlling === 'Reliant' && data.nav().own?.name === 'Reliant');
     // Autopilot follow: the Reliant tails the Enterprise at 25 units; then matches it.
     data.send({ type: 'autopilot', target: 'Enterprise', mode: 'follow', range: 25, warp: 1 });
@@ -1764,10 +1771,14 @@ const audioBytes = (page) => page.evaluate(async () => {
     data.send({ type: 'autopilot', target: null });
     data.send({ type: 'control', ship: null });
     await waitFor(() => !data.nav()?.remote?.controlling && data.nav().own?.name === 'Enterprise');
-    step("the Enterprise forced a data link onto the crewless Reliant; its Helm console ran the Reliant's Helm by remote control, then switched back");
+    step("the Enterprise forced a data link onto the crewless Reliant; three wrong command prefixes locked its Helm out for a while; with the right one it ran the Reliant's Helm by remote control, then switched back");
     // Ops runs the Reliant's (unmanned) ops the same way.
     await op.waitForSelector('#vessel-bar button[data-vessel="Reliant"]', { state: 'attached' });
     await op.click('#vessel-bar button[data-vessel="Reliant"]');
+    // (The prefix, on the keypad.)
+    await op.waitForSelector('#prefix-dialog[open] #prefix-entry');
+    for (let i = 0; i < 5; i++) await op.click('#prefix-entry button[data-digit="0"]');
+    await op.click('#prefix-entry-enter');
     await op.waitForFunction(() => window.__operator.roster && document.querySelector('#vessel-bar button[data-vessel="Reliant"][aria-pressed="true"]'));
     await op.click('#vessel-bar button[data-vessel=""]'); // our own ship
     await op.waitForSelector('#vessel-bar button[data-vessel=""][aria-pressed="true"]', { state: 'attached' });
@@ -1792,8 +1803,25 @@ const audioBytes = (page) => page.evaluate(async () => {
     await sbOps.close();
     await op.click(`#links li:has-text("${reborn.base}") button`);
     step(`${reborn.base}, linked, offered no remote control (starbases start blocked); its ops allowed it (the Enterprise's Helm got its button), then blocked it again`);
+    // A manned station can be taken over with the prefix: its crew see the override.
+    const reliantHelm = await crewWs('sulu2', 'Reliant', 'Helm');
+    data.send({ type: 'control', ship: 'Reliant', prefix: '00000' });
+    await waitFor(() => data.nav()?.remote?.controlling === 'Reliant');
+    await waitFor(() => reliantHelm.msgs.some((m) => m.type === 'override' && m.by === 'Enterprise'));
+    // The Reliant's ops change its prefix (on the keypad): the session on the old one ends.
+    const rOps = await openOps(browser, 'Reliant', 'reliant ops', 'hikaru');
+    await rOps.waitForSelector('#prefix-box:not([hidden])');
+    for (const d of '24680') await rOps.click(`#prefix-pad button[data-digit="${d}"]`);
+    await rOps.click('#prefix-pad-enter');
+    await waitFor(() => data.msgs.some((m) => m.type === 'notice' && /Remote control of the Reliant ended: its command prefix changed/.test(m.text)));
+    await waitFor(() => reliantHelm.msgs.some((m) => m.type === 'override' && m.by === null));
+    await rOps.click('#prefix-reveal');
+    await rOps.waitForSelector('#prefix-show:has-text("24680")');
+    await rOps.close();
+    reliantHelm.close();
+    step('with the prefix the Enterprise took over the Reliant\'s manned Helm (its crew saw the override); the Reliant\'s ops set a new prefix on the keypad, which ended that session');
     // The link closes: remote control snaps back.
-    data.send({ type: 'control', ship: 'Reliant' });
+    data.send({ type: 'control', ship: 'Reliant', prefix: '24680' });
     await waitFor(() => data.nav()?.remote?.controlling === 'Reliant');
     await screen(op, 'link');
     await op.click('#links li:has-text("Reliant") button');

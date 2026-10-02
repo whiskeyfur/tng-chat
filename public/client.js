@@ -819,6 +819,18 @@ function renderCrewPanels() {
 // this console can run the same station aboard (over a data link, that
 // station unmanned there); our own ship at the far right.
 let vesselSig = '';
+// The command prefix for taking over another vessel's station: a keypad in a dialog.
+function askPrefix(ship) {
+  let d = document.getElementById('prefix-dialog');
+  if (!d) {
+    d = Object.assign(document.createElement('dialog'), { id: 'prefix-dialog', className: 'lcars-modal' });
+    document.body.append(d);
+  }
+  const title = Object.assign(document.createElement('h3'), { className: 'ops-subhead', textContent: `The ${ship}'s command prefix` });
+  const cancel = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill', id: 'prefix-cancel', textContent: 'Cancel', onclick: () => d.close() });
+  d.replaceChildren(title, makeKeypad('prefix-entry', 'Take control', (code) => { send({ type: 'control', ship, prefix: code }); d.close(); }), cancel);
+  if (!d.open) d.showModal();
+}
 function renderVesselBar(remote) {
   const bar = $('vessel-bar');
   controllingVessel = remote?.controlling || null;
@@ -832,7 +844,8 @@ function renderVesselBar(remote) {
     const x = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: label });
     x.dataset.vessel = ship || '';
     x.setAttribute('aria-pressed', String(pressed));
-    x.onclick = () => send({ type: 'control', ship });
+    // Another vessel: its command prefix first, on a keypad.
+    x.onclick = () => (ship && ship !== remote?.controlling ? askPrefix(ship) : send({ type: 'control', ship }));
     return x;
   };
   bar.replaceChildren(...vessels.map((v) => b(v, v, remote.controlling === v)), b(remote?.home || me?.ship || 'Own ship', null, !remote?.controlling));
@@ -1823,6 +1836,11 @@ async function onMessage(msg) {
     case 'order':
       log(`Captain's orders (${msg.from.title || msg.from.name}): ${msg.text}`);
       bc.addOrder(msg.from, msg.text, msg.id, msg.reassign);
+      break;
+    case 'override':
+      // Someone on another vessel has taken over our station with our command prefix.
+      bc.setAlert('override', msg.by ? `Remote override by the ${msg.by} (${msg.station})` : null, { level: 'yellow' });
+      if (msg.by) log(`Remote override by the ${msg.by}: they are running ${msg.station}`, 'warn');
       break;
     case 'destroyed':
       log(`The ${msg.ship} was destroyed (${msg.cause}). Rebuilt and docked at ${msg.base}.`, 'warn');
