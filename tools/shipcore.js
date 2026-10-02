@@ -14,6 +14,9 @@
 // Files live in <data>/<ship>/ (default ./shipcore-data, next to where you run
 // it), with an index (.index.json) that also remembers deletions, so a file
 // deleted elsewhere isn't brought back by this computer. Reconnects by itself.
+//
+// Also a module: the supervisor (npm start) runs ship's computers in its own
+// process with createShipcore(opts), and reloads them when this file changes.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -37,12 +40,10 @@ function parseArgs(argv) {
   return opts;
 }
 
-const opts = parseArgs(process.argv.slice(2));
-if (opts.help || !opts.ships.length) {
-  console.log('usage: node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] [--position x,y] [--warm] <ship> [ship...]');
-  process.exit(opts.help ? 0 : 1);
-}
-const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+// A ship's computer for opts.ships. log: where its messages go; onFail(reason):
+// the relay refused it. Returns { stop(), status() }.
+function createShipcore(opts, { log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a), onFail = () => {} } = {}) {
+let stopped = false;
 
 // --- storage: <data>/<ship>/<file> plus .index.json ------------------------------
 
@@ -116,7 +117,7 @@ const sendNav = (store) => ws?.readyState === WebSocket.OPEN && ws.send(JSON.str
 
 // Fly the ships this computer is primary for: 4 times a second, report once a second.
 let tick = 0;
-setInterval(() => {
+const flying = setInterval(() => {
   tick++;
   for (const store of stores.values()) {
     if (!store.primary) continue;
@@ -246,7 +247,8 @@ function onMessage(raw, isBinary) {
     }
     case 'shipcore-failed':
       log(`refused: ${msg.reason}`);
-      process.exit(1);
+      onFail(msg.reason);
+      stop();
       break;
     case 'core-put': {
       // A file is arriving (an upload, or a copy from another computer).
@@ -303,6 +305,7 @@ function onMessage(raw, isBinary) {
 
 let delay = 1000;
 function connect() {
+  if (stopped) return;
   ws = new WebSocket(opts.relay);
   ws.on('open', () => {
     delay = 1000;
@@ -312,6 +315,7 @@ function connect() {
   ws.on('close', () => {
     for (const p of puts.values()) { p.out.destroy(); fs.rmSync(p.tmp, { force: true }); }
     puts.clear();
+    if (stopped) return;
     log(`relay connection lost; retrying in ${Math.round(delay / 1000)}s`);
     setTimeout(connect, delay);
     delay = Math.min(delay * 2, 30000);
@@ -321,7 +325,31 @@ function connect() {
 
 log(`ship's computer for ${opts.ships.join(', ')}; library in ${opts.data}; relay ${opts.relay}`);
 connect();
-// Save where the ships are before stopping.
-const shutdown = () => { for (const s of stores.values()) s.saveNav(); process.exit(0); };
-process.on('SIGINT', () => { log('shutting down'); shutdown(); });
-process.on('SIGTERM', shutdown);
+// Stopping: save where the ships are, and let go of the relay.
+function stop() {
+  if (stopped) return;
+  stopped = true;
+  clearInterval(flying);
+  for (const st of stores.values()) st.saveNav();
+  try { ws?.close(); } catch {}
+}
+return {
+  stop,
+  status: () => ({ ships: opts.ships, connected: ws?.readyState === WebSocket.OPEN, primary: [...stores.values()].filter((st) => st.primary).map((st) => st.ship), stopped }),
+};
+}
+
+module.exports = { createShipcore, parseArgs };
+
+if (require.main === module) {
+  const opts = parseArgs(process.argv.slice(2));
+  if (opts.help || !opts.ships.length) {
+    console.log('usage: node tools/shipcore.js [--relay ws://host:port] [--data folder] [--key operator-key] [--position x,y] [--warm] <ship> [ship...]');
+    process.exit(opts.help ? 0 : 1);
+  }
+  const core = createShipcore(opts, { onFail: () => process.exit(1) });
+  // Save where the ships are before stopping.
+  const shutdown = () => { core.stop(); process.exit(0); };
+  process.on('SIGINT', () => { console.log('shutting down'); shutdown(); });
+  process.on('SIGTERM', shutdown);
+}

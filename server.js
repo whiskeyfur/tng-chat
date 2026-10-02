@@ -3232,6 +3232,7 @@ wss.on('connection', (ws) => {
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'shipcore' && !ws.id && !ws.operator) return coreSignIn(ws, msg);
+    if (msg.type === 'admin') return adminRequest(ws, msg);
 
     if (msg.type === 'operator' && !ws.id && !ws.operator) {
       // The ops station is aboard as crew at the Operations station.
@@ -3453,6 +3454,26 @@ server.listen(PORT, () => console.log(`${RELAY_NAME} on http://localhost:${PORT}
 
 // Run by tools/supervisor.js: before a restart (or after the pages change)
 // every console is told to reload; they rejoin as who and where they were.
+// The admin panel (shift-click the relay's name at the foot of a console): it
+// asks the supervisor (npm start) what it runs, and to restart things.
+// TODO: no access control yet (fine on localhost): add it before this goes live.
+const adminWaiting = new Map(); // request id -> socket
+let adminSeq = 0;
+function adminRequest(ws, msg) {
+  if (!process.send) return send(ws, { type: 'admin-status', error: 'no supervisor: the relay was started on its own (npm start runs the supervisor)' });
+  const reqId = ++adminSeq;
+  adminWaiting.set(reqId, ws);
+  setTimeout(() => adminWaiting.delete(reqId), 10000);
+  process.send({ type: 'admin', reqId, action: ['status', 'restart-ship', 'restart-ships', 'restart-relay'].includes(msg.action) ? msg.action : 'status', ship: typeof msg.ship === 'string' ? msg.ship : undefined });
+}
+process.on('message', (m) => {
+  if (m?.type !== 'admin-reply') return;
+  const ws = adminWaiting.get(m.reqId);
+  adminWaiting.delete(m.reqId);
+  if (!ws) return;
+  const consoles = [...users.values()].map((u) => ({ name: u.name, ship: shipName(u.shipKey), station: u.station }));
+  send(ws, { type: 'admin-status', ...m.status, note: m.note, consoles, relayName: RELAY_NAME });
+});
 process.on('message', (m) => {
   if (m?.type !== 'reload') return;
   for (const ws of sockets) if (!ws.shipcore) send(ws, { type: 'reload', restart: !!m.restart });

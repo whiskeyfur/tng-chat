@@ -97,6 +97,23 @@ async function look() {
     await until(() => got.some((m) => m.type === 'reload' && m.restart === false));
     assert.equal(ws.readyState, WebSocket.OPEN, 'a page change should not restart the relay');
     step('the supervisor: a change to the pages told the consoles to reload, without restarting the relay');
+    // The admin panel's requests: what the supervisor runs, who's connected; restart a ship's computer.
+    ws.send(JSON.stringify({ type: 'admin', action: 'status' }));
+    await until(() => got.some((m) => m.type === 'admin-status' && m.relay?.up && m.ships?.some((x) => x.ship === 'Oldship' && x.connected) && m.consoles?.some((u) => u.name === 'kim')));
+    const before = got.filter((m) => m.type === 'admin-status').pop().ships.find((x) => x.ship === 'Oldship').since;
+    ws.send(JSON.stringify({ type: 'admin', action: 'restart-ship', ship: 'Oldship' }));
+    await until(() => got.some((m) => m.type === 'admin-status' && m.ships?.find((x) => x.ship === 'Oldship')?.since > before));
+    await until(() => got.filter((m) => m.type === 'admin-status').pop().log.some((l) => /restarting the ship's computer for Oldship/.test(l)));
+    step("the admin panel: the supervisor reported the relay, the ship's computers and the consoles, and restarted Oldship's computer");
+    // A change to the ship's computers' code reloads them here, in the supervisor (the relay stays up).
+    fs.writeFileSync(path.join(WATCH, 'code', 'shipcore.js'), '// changed');
+    await wait(1500);
+    assert.equal(ws.readyState, WebSocket.OPEN, "a ship's computer change should not restart the relay");
+    ws.send(JSON.stringify({ type: 'admin', action: 'status' }));
+    await until(() => got.filter((m) => m.type === 'admin-status').pop()?.log.some((l) => /reloading the ship's computers/.test(l)));
+    await wait(1500);
+    assert.equal((await look()).docked, 'Starbase 47');
+    step("a change to the ship's computers' code reloaded them in the supervisor; the relay stayed up and the ship stayed docked");
     const closed = new Promise((res) => ws.on('close', res));
     fs.writeFileSync(path.join(WATCH, 'code', 'server.js'), '// changed');
     await until(() => got.some((m) => m.type === 'reload' && m.restart === true));

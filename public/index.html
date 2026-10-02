@@ -221,6 +221,9 @@
     .msd-pill[data-state="ok"] { background: #66cc66; } .msd-pill[data-state="warn"] { background: var(--lcars-gold); } .msd-pill[data-state="bad"] { background: var(--lcars-red); } .msd-pill[data-state="busy"] { background: var(--lcars-sky); } .msd-pill[data-state="off"] { background: #444; color: #ccc; }
     .msd-log { list-style: none; margin: 0; padding: 0; max-height: 160px; overflow-y: auto; font-size: 13px; }
     .msd-log li[data-cls="bad"] { color: var(--lcars-red); } .msd-log li[data-cls="ok"] { color: #66cc66; } .msd-log li[data-cls="info"] { color: var(--lcars-sky); }
+    .admin-dialog { max-width: min(900px, 95vw); width: 900px; }
+    .admin-dialog .admin-log { max-height: 220px; overflow: auto; font-size: 12px; background: #111; padding: 8px; white-space: pre-wrap; }
+    #link { cursor: default; }
     button.lcars-back { border: 0; font: inherit; color: #000; cursor: pointer; display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 14px 6px 0; letter-spacing: 0.1em; }
     /* Dim: only the label, so the corner stays the colour of the bar it joins. */
     button.lcars-back:disabled { cursor: default; }

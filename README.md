@@ -12,7 +12,9 @@ npm run relay                              # the relay alone
 npm run shipcore -- Enterprise "K'Vatch"   # a ship's computer on its own: no ship's computer, no ship
 ```
 
-`npm start` runs `tools/supervisor.js`, which also restarts everything when the code changes: 5 seconds after the last change to `server.js`, `tools/*.js` or `data/*.json`, every console is told to reload, the relay and the ship's computers restart, and each console signs back in as who and where it was (calls aren't resumed: call or join again). A change to `public/*` only reloads the consoles. Ship state comes through in each ship's `.nav.json`. (With `npm start` running the ship's computers, there's no need to start them by hand as well.)
+`npm start` runs `tools/supervisor.js`: the relay in its own process, and the ship's computers inside the supervisor's. It keeps them up to date with the code, 5 seconds after the last change: to `server.js` or `data/*.json`, every console is told to reload, the relay restarts and each console signs back in as who and where it was (calls aren't resumed: call or join again), while the ship's computers reconnect; to `tools/shipcore.js`, the ship's computers reload in place; to `public/*`, the consoles reload. (A change to the supervisor itself needs `npm start` again.)
+
+**Admin panel:** shift-click the relay's name at the foot of any console: what the supervisor runs (the relay, each ship's computer), the connected consoles, a recent log, and buttons to restart one ship's computer, all of them, or the relay. **It has no access control yet (fine on localhost): add some before the relay goes live anywhere else.** Ship state comes through in each ship's `.nav.json`. (With `npm start` running the ship's computers, there's no need to start them by hand as well.)
 
 Everyone uses the same page, http://localhost:8085:
 

@@ -1291,6 +1291,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(await geordi.evaluate(() => [document.getElementById('name').value, document.getElementById('ship').value]), ['geordi', ''], 'the name kept, the ship forgotten');
     await op.waitForFunction(() => !window.__operator.roster.some((u) => u.name === 'geordi'));
     step('shift-clicking the name in the header signed geordi out to the sign-in screen, name kept, ship and station forgotten');
+    // Shift-click the relay's name at the foot: the admin panel (here the relay runs without the supervisor).
+    await geordi.click('#link', { modifiers: ['Shift'] });
+    await geordi.waitForSelector('#admin-dialog:has-text("no supervisor")');
+    await geordi.click('#admin-close');
+    step('shift-clicking the relay name opened the admin panel (no supervisor here, and it said so)');
     await geordi.close();
 
     // The Defiant comes alongside and tows the crippled Enterprise with a tractor beam.

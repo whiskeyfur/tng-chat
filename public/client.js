@@ -143,6 +143,52 @@ for (const corner of document.querySelectorAll('.lcars-elbow--top')) {
   corner.addEventListener('click', goHome);
   corner.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); goHome(); } });
 }
+// The admin panel: shift-click the relay's name at the foot of the console.
+// What the supervisor runs (the relay, the ship's computers), who's connected,
+// a recent log, and restarting a ship's computer, all of them, or the relay.
+// TODO: no access control yet (fine on localhost): add it before this goes live.
+let adminTimer = null;
+function adminDialog() {
+  let d = document.getElementById('admin-dialog');
+  if (d) return d;
+  d = Object.assign(document.createElement('dialog'), { id: 'admin-dialog', className: 'lcars-modal admin-dialog' });
+  d.addEventListener('close', () => { clearInterval(adminTimer); adminTimer = null; });
+  document.body.append(d);
+  return d;
+}
+document.getElementById('link')?.addEventListener('click', (ev) => {
+  if (!ev.shiftKey) return;
+  const d = adminDialog();
+  d.replaceChildren(Object.assign(document.createElement('p'), { className: 'ops-hint', textContent: 'Asking the supervisor…' }));
+  if (!d.open) d.showModal();
+  send({ type: 'admin', action: 'status' });
+  clearInterval(adminTimer);
+  adminTimer = setInterval(() => send({ type: 'admin', action: 'status' }), 2000);
+});
+function renderAdmin(st) {
+  const d = adminDialog();
+  if (!d.open) return;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const btn = (text, id, onclick, alert) => el('button', { type: 'button', className: `lcars-button lcars-button--pill${alert ? ' lcars-button--alert' : ''}`, id, textContent: text, onclick });
+  const ago = (t) => (t ? `${Math.round((Date.now() - t) / 1000)} s` : '');
+  if (st.error) { d.replaceChildren(el('h2', { textContent: 'Relay admin' }), el('p', { className: 'ops-notice', textContent: st.error }), btn('Close', 'admin-close', () => d.close())); return; }
+  d.replaceChildren(
+    el('h2', { textContent: `Relay admin · ${st.relayName || ''}` }),
+    el('p', { className: 'ops-hint', textContent: 'No access control yet: localhost only.' }),
+    el('p', { className: 'st-state', id: 'admin-relay', textContent: `Relay: ${st.relay?.up ? 'up' : 'down'} on port ${st.relay?.port} · pid ${st.relay?.pid} · ${ago(st.relay?.since)}${st.note ? ` · ${st.note}` : ''}` }),
+    el('div', { className: 'ops-form' }, btn('Restart the relay', 'admin-restart-relay', () => { if (confirm('Restart the relay? Every console reloads and signs back in; calls end.')) send({ type: 'admin', action: 'restart-relay' }); }, true),
+      btn("Restart every ship's computer", 'admin-restart-ships', () => send({ type: 'admin', action: 'restart-ships' }))),
+    el('h3', { textContent: "Ship's computers" }),
+    el('ul', { className: 'st-list', id: 'admin-ships' }, ...(st.ships?.length ? st.ships.map((x) => el('li', {}, el('span', { textContent: `${x.ship}: ${x.connected ? 'connected' : 'not connected'}${x.primary?.length ? ', flying it' : ''} · ${ago(x.since)}` }),
+      btn('Restart', `admin-restart-${x.ship}`, () => send({ type: 'admin', action: 'restart-ship', ship: x.ship })))) : [el('li', { className: 'empty', textContent: 'none' })])),
+    el('h3', { textContent: 'Connected consoles' }),
+    el('ul', { className: 'st-list', id: 'admin-consoles' }, ...(st.consoles?.length ? st.consoles.map((u) => el('li', { textContent: `${u.name} · ${u.ship} · ${u.station}` })) : [el('li', { className: 'empty', textContent: 'none' })])),
+    el('h3', { textContent: 'Supervisor log' }),
+    el('pre', { className: 'admin-log', id: 'admin-log', textContent: (st.log || []).join('\n') }),
+    btn('Close', 'admin-close', () => d.close()));
+  const pre = d.querySelector('#admin-log'); pre.scrollTop = pre.scrollHeight;
+}
+
 // Shift-click the name and ship in the header: sign out to the sign-in screen
 // to start somewhere new. Leaves the ship (and any call), and forgets the
 // ship, station, screen and menu so nothing signs back in; the name stays.
@@ -1515,6 +1561,9 @@ async function onMessage(msg) {
     case 'traffic':
       traffic = msg.calls;
       renderTraffic();
+      break;
+    case 'admin-status':
+      renderAdmin(msg);
       break;
     case 'nav':
       lastNav = msg;
