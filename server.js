@@ -1354,6 +1354,13 @@ const DFEED = { draw: 2.5, rise: 10, fall: 5 };
 // charges from 100 or more of EPS generation (about 10 s), and collapses
 // when the pressure runs out.
 const EPS_CHARGE_GEN = 100;
+// Antimatter containment is a field: held at strength (rising back to 100%)
+// while it has its 20, from its feeds or, when they fail, from its own
+// internal reserve (about 9 minutes; recharged from the feeds, 5 a second).
+// With neither it falls, 5% a second; below 20% the pods breach. The warp
+// core's antimatter transfer conduit only pressurizes with the field at 95%.
+const CONTAIN = { reserveSecs: Number(process.env.RESERVE_SECS) || 540, recharge: 5, rise: 10, fall: 5, breach: 20, conduit: 95 };
+const reserveCap = () => GRID.containment * CONTAIN.reserveSecs;
 const COMPUTER = { draw: 2, bootSecs: 14, stages: ['POST', 'LCARS kernel', 'ODN handshake', 'isolinear verification', 'subprocessor sync'] };
 const coresOnline = (k) => (isBase(k) || !eng.has(k) ? COMPUTERS.length : engOf(k).computers.filter((c) => c.state === 'online').length);
 // The crosslink is a chain, A–B–C: it joins A+B, B+C or all three (A and C only through B).
@@ -1389,6 +1396,7 @@ const SYSTEM_PARENTS = { lifeSupport: 'Life support' };
 const SUBSYSTEMS = {
   constriction: { parent: 'core', ties: ['A'], name: 'magnetic constriction' },
   corePump: { parent: 'core', ties: ['A'], name: 'deuterium pump' },
+  amConduit: { parent: 'core', ties: ['A'], name: 'antimatter transfer conduit' },
   injector: { parent: 'core', ties: ['A'], name: 'antimatter injector' },
   portChamber: { parent: 'impulsePort', ties: ['B'], name: 'fusion reaction chamber' },
   portPump: { parent: 'impulsePort', ties: ['B'], name: 'deuterium pump' },
@@ -1542,6 +1550,8 @@ function freshEng(saved, { cold = false } = {}) {
     })),
     docked: STARBASES.some((b) => b.name === s.docked) ? s.docked : null,
     breach: 0, selfDestruct: null, towing: null, dirty: false,
+    // Antimatter containment: the field's strength (%) and its internal reserve.
+    contain: { field: Number.isFinite(s.contain?.field) ? s.contain.field : 100, reserve: Number.isFinite(s.contain?.reserve) ? Math.min(reserveCap(), s.contain.reserve) : reserveCap() },
   };
 }
 const engOf = (k) => {
@@ -1563,7 +1573,7 @@ const savedEng = (k) => {
     core: e.core === 'starting' ? 'offline' : e.core,
     drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state === 'running' ? 'running' : 'off', epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear }]; })),
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state === 'running' ? 'running' : 'off', epsTap: e.aux[a].epsTap }])),
-    dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure) }, epsLive: e.epsLive,
+    dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure) }, epsLive: e.epsLive, contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     dockedPort: e.dockedPort, autoRefuel: e.autoRefuel,
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
@@ -1704,20 +1714,23 @@ function flow(k) {
   let contained = 0;
   if (e.antimatter > 0) {
     const row = cells.containment;
-    for (const n of e.ties.containment) { tied[n] += GRID.containment / e.ties.containment.length; if (contained < GRID.containment) { const t = take(n, GRID.containment - contained); row[n] += t; contained += t; } }
+    // Its 20, and recharging its internal reserve when that's down.
+    const want = GRID.containment + (e.contain.reserve < reserveCap() ? CONTAIN.recharge : 0);
+    for (const n of e.ties.containment) { tied[n] += want / e.ties.containment.length; if (contained < want) { const t = take(n, want - contained); row[n] += t; contained += t; } }
     // Short: the stores hold it (containment comes ahead of everything).
     storesOk = true;
-    for (const n of e.ties.containment) if (contained < GRID.containment) { const t = take(n, GRID.containment - contained, true); row[n] += t; contained += t; }
+    for (const n of e.ties.containment) if (contained < want) { const t = take(n, want - contained, true); row[n] += t; contained += t; }
     storesOk = false;
   }
   const containmentOk = e.antimatter <= 0 || contained >= GRID.containment;
+  const containFeed = contained; // (the tick shares it between the field and the reserve)
   // Every other load, in priority order: the reactors' subsystems, consoles,
   // Communications, power for a docked ship, then the systems.
   const coreOn = e.core === 'online' || e.core === 'starting';
   const crew = crewOf(k);
   const loads = [
     ['sub:constriction', !coreOn ? 0 : e.core === 'starting' ? GRID.constriction.start : GRID.constriction.run],
-    ['sub:corePump', coreOn ? GRID.corePump : 0], ['sub:injector', coreOn ? GRID.injector : 0],
+    ['sub:corePump', coreOn ? GRID.corePump : 0], ['sub:injector', coreOn ? GRID.injector : 0], ['sub:amConduit', coreOn ? 5 : 0],
     // A reactor's chamber and pump: on the buses while it starts, and while it
     // runs unless its EPS tap has it powering itself from the (energized) EPS.
     ...reactorsOf(e).flatMap(([r, x]) => {
@@ -1794,7 +1807,8 @@ function flow(k) {
   const full = (key) => (got[key] || 0) >= amtOf[key] - 1e-9;
   const subOk = {};
   for (const name of Object.keys(SUBSYSTEMS)) subOk[name] = full(`sub:${name}`) && (c.damage[name] || 0) < SUB_FAIL_DAMAGE;
-  const coreSubsOk = ['constriction', 'corePump', 'injector'].every((x) => subOk[x]);
+  subOk.amConduit = subOk.amConduit && e.contain.field >= CONTAIN.conduit; // pressurized only with the containment field up
+  const coreSubsOk = ['constriction', 'corePump', 'injector', 'amConduit'].every((x) => subOk[x]);
   const consoleOk = Object.fromEntries(Object.keys(CONSOLE_BUS).map((st) => [st, full(`console:${st}`)]));
   const fed = PORTS.reduce((n, p) => n + (got[`feed:${p}`] || 0), 0);
   for (const p of PORTS) e.fed[p] = got[`feed:${p}`] || 0;
@@ -1824,7 +1838,7 @@ function flow(k) {
     return [n, { used: Math.round(have), available: Math.round(Math.min(maxOf(n), have + direct + Math.min(epsLeft, tapRoom(n)))), max: Math.round(maxOf(n)), fullMax: BUS_MAX[n], condition: cond, tied: Math.round(tied[n]), tap: e.taps[n], pool: pool(n).join('') }];
   }));
   const f = {
-    cells, totals, buses, consoleOk, demand, capacity, delivered, containmentOk, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
+    cells, totals, buses, consoleOk, demand, capacity, delivered, containmentOk, containFeed, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
     crossflow, storeUsed: used, coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps, epsGen,
   };
   flowCache.set(k, { at: Date.now(), f });
@@ -1901,7 +1915,9 @@ function gridView(k) {
     start: e.start, startSecs: GRID.coreStartSecs, coreOutput: GRID.core,
     computers: e.computers.map((cc) => ({ state: cc.state, stage: cc.state === 'booting' ? COMPUTER.stages[Math.min(COMPUTER.stages.length - 1, Math.floor((cc.t * COMPUTER.stages.length) / COMPUTER.bootSecs))] : null, t: cc.t })), computerBootSecs: COMPUTER.bootSecs,
     crossflow: Object.fromEntries(Object.entries(f.crossflow).map(([x, v]) => [x, Math.round(v)]).filter(([, v]) => v)), taps: e.taps, ties: e.ties, tripped: Object.keys(e.tripped || {}), containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
-    breach: e.breach ? GRID.breachSecs - e.breach : null,
+    // Failing: seconds left before the field drops below 20% (the breach).
+    breach: e.breach && e.antimatter > 0 ? Math.max(0, Math.ceil((e.contain.field - CONTAIN.breach) / CONTAIN.fall)) : null,
+    contain: { field: Math.round(e.contain.field), reserve: Math.round((e.contain.reserve / reserveCap()) * 100), onReserve: !!e.onReserve, reserveSecs: Math.round(e.contain.reserve / GRID.containment) },
     // Each store: how full (%), charging, covering a shortfall.
     stores: Object.fromEntries(Object.entries(STORES).map(([name, node]) => [node, { name, breaker: node === 'EPS' ? null : e.breakers[node], level: Math.round((e.stores[name] / (node === 'EPS' ? GRID.epsCap : GRID.batteryCap)) * 100), charging: Math.round(f.charging[node]), supplying: Math.round(f.storeUsed[node]) }])),
     docked: e.docked, near: near?.name || null,
@@ -1925,7 +1941,7 @@ function gridCommand(ws, msg) {
   const feeds = (list) => (list.length ? list.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(' + ') : 'off');
   if (msg.eject) {
     if (e.core === 'ejected') return note('the warp core is already gone');
-    Object.assign(e, { core: 'ejected', antimatter: 0, start: 0, breach: 0 });
+    Object.assign(e, { core: 'ejected', antimatter: 0, start: 0, breach: 0, contain: { field: 100, reserve: reserveCap() } });
     if (e.transfer?.resource === 'antimatter') e.transfer = null;
     said.push('WARP CORE AND ANTIMATTER PODS EJECTED');
     for (const u of crewOf(key)) if (u !== ws) send(u, { type: 'notice', text: `Engineering: the warp core has been ejected (${ws.name})` });
@@ -1936,7 +1952,7 @@ function gridCommand(ws, msg) {
     if (!e.docked) return note('a warp core and antimatter pods can only be replaced at a starbase');
     if (e.core === 'online' || e.core === 'starting') return note('shut the warp core down before replacing it');
     const fill = e.ties.containment.length > 0;
-    Object.assign(e, { core: 'offline', start: 0, breach: 0, antimatter: fill ? FUEL.antimatter : 0 });
+    Object.assign(e, { core: 'offline', start: 0, breach: 0, antimatter: fill ? FUEL.antimatter : 0, contain: { field: 100, reserve: reserveCap() } });
     if (e.transfer?.resource === 'antimatter') e.transfer = null;
     said.push(`new warp core and ${fill ? 'full' : 'empty'} antimatter pods installed at ${e.docked} (offline: start it up${fill ? '' : '; set a containment feed and refuel first'})`);
   }
@@ -2522,14 +2538,25 @@ setInterval(() => {
 
     // Self-destruct: containment off, and the core goes.
     if (e.selfDestruct && now >= e.selfDestruct.at) { destroy(k, `self-destruct, by order of ${e.selfDestruct.by}`); changed = true; continue; }
-    // Containment: a few seconds on reserve, then the core breaches.
-    if (!f.containmentOk) {
-      e.breach++;
-      if (e.breach === 1) { opLog(k, 'antimatter containment failing: no power'); for (const u of crewOf(k)) send(u, { type: 'notice', text: 'Warning: antimatter containment failing (no power on its feeds): restore power or eject the core' }); }
-      if (e.breach >= GRID.breachSecs) { destroy(k, 'warp core breach: antimatter containment lost'); changed = true; continue; }
-    } else if (e.breach) { e.breach = 0; opLog(k, 'antimatter containment restored'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: antimatter containment restored'); }
+    // Containment: the feeds hold the field (and recharge the reserve); short
+    // of them, the reserve; with neither the field falls, and below 20% it breaches.
+    if (e.antimatter > 0) {
+      const ct = e.contain, wasReserve = e.onReserve;
+      const fromFeed = Math.min(GRID.containment, f.containFeed);
+      const fromReserve = Math.min(ct.reserve, GRID.containment - fromFeed);
+      ct.reserve = Math.min(reserveCap(), ct.reserve - fromReserve + Math.max(0, f.containFeed - GRID.containment));
+      e.onReserve = fromReserve > 0;
+      if (e.onReserve && !wasReserve) { opLog(k, 'antimatter containment on its internal reserve'); tellStations(k, ['Engineering', 'Captain'], `Engineering: antimatter containment on its internal reserve (${Math.round(ct.reserve / GRID.containment)} s): restore its feed`); }
+      const held = fromFeed + fromReserve >= GRID.containment - 1e-6;
+      const before = ct.field;
+      ct.field = Math.max(0, Math.min(100, ct.field + (held ? CONTAIN.rise : -CONTAIN.fall)));
+      if (!held && before >= 100 - 1e-6) { e.breach = 1; opLog(k, 'antimatter containment failing: no power, reserve exhausted'); for (const u of crewOf(k)) send(u, { type: 'notice', text: 'Warning: antimatter containment failing (no power, reserve exhausted): restore power or eject the core' }); }
+      if (ct.field < CONTAIN.breach) { destroy(k, 'warp core breach: antimatter containment lost'); changed = true; continue; }
+      if (held && e.breach && ct.field >= 100) { e.breach = 0; opLog(k, 'antimatter containment restored'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: antimatter containment restored'); }
+      if (!held) e.breach = 1;
+    } else { e.contain.field = 100; e.breach = 0; e.onReserve = false; }
     // The warp core: starting up, and running, need its constriction, pump and injector.
-    const coreWhy = () => ['constriction', 'corePump', 'injector'].filter((x) => !f.subOk[x]).map((x) => SUBSYSTEMS[x].name).join(', ');
+    const coreWhy = () => ['constriction', 'corePump', 'injector', 'amConduit'].filter((x) => !f.subOk[x]).map((x) => (x === 'amConduit' && e.contain.field < CONTAIN.conduit ? `antimatter transfer conduit (containment field ${Math.round(e.contain.field)}%, it needs ${CONTAIN.conduit}%)` : SUBSYSTEMS[x].name)).join(', ');
     if (e.core === 'starting') {
       if (!f.coreSubsOk) { e.core = 'offline'; e.start = 0; opLog(k, `warp core startup failed: no power to its ${coreWhy()}`); tellStations(k, ['Engineering'], `Engineering: warp core startup failed, no power to its ${coreWhy()}`); }
       else if (++e.start >= GRID.coreStartSecs) { e.core = 'online'; e.start = 0; e.dirty = true; opLog(k, 'warp core online'); tellStations(k, ['Engineering', 'Captain'], 'Engineering: warp core online'); }

@@ -690,7 +690,7 @@ function renderCombat() {
   // Warnings on every console aboard; a weapons lock on us for Tactical and the Captain.
   bc.setAlert('fire', c.underFire ? `Taking fire from the ${c.underFire} · shields ${ownShip()?.shields ? `${c.shield}%` : 'down'} · hull ${c.hull}%` : null);
   bc.setAlert('locked', c.lockedBy.length && ['Tactical', 'Captain'].includes(me.station) ? `Weapons lock: the ${c.lockedBy.join(', the ')} ${c.lockedBy.length > 1 ? 'have' : 'has'} locked on us` : null, { level: 'yellow' });
-  bc.setAlert('breach', grid.breach != null ? `Antimatter containment failing: core breach in ${grid.breach} s (no power from ${feeds(grid.ties.containment)})` : null);
+  bc.setAlert('breach', grid.breach != null ? `Antimatter containment failing: field ${grid.contain?.field}%, breach in ${grid.breach} s (no power from ${feeds(grid.ties.containment)}, reserve exhausted)` : null);
   bc.setAlert('tractor', grid.towedBy ? `Held in the ${grid.towedBy}'s tractor beam` : null, { level: 'yellow' });
   bc.setAlert('selfdestruct', grid.selfDestruct ? `Self-destruct in ${grid.selfDestruct.seconds} s · ordered by ${grid.selfDestruct.by}` : null);
 
@@ -880,11 +880,11 @@ function renderCombat() {
     const crosslinkRow = () => ties('crosslink', 'Bus crosslink', 'crosslink', { level: 1, note: grid.ties.crosslink.length >= 2 ? `Bus ${grid.ties.crosslink.join(' + ')} share one pool` : 'check two or more buses to join them' });
     // Engineering's own rows: life support, then every power source and its subsystems.
     const engineeringRows = () => [
-      ...(grid.core !== 'ejected' ? [ties('containment', grid.antimatter ? 'Antimatter containment' : 'Containment (no antimatter: may be off)', 'containment', { level: 1, sign: false, note: grid.antimatter ? (grid.containmentOk ? 'holding' : 'FAILING') : '' })] : []),
+      ...(grid.core !== 'ejected' ? [ties('containment', grid.antimatter ? 'Antimatter containment' : 'Containment (no antimatter: may be off)', 'containment', { level: 1, sign: false, note: grid.antimatter ? `field ${grid.contain?.field}% · reserve ${grid.contain?.reserve}% (${grid.contain?.reserveSecs} s)${grid.breach != null ? ` · FAILING: breach in ${grid.breach} s` : grid.contain?.onReserve ? ' · ON RESERVE: restore its feed' : ''}` : '' })] : []),
       parentRow('ties-core-parent', 'Warp core (M/ARC)', 1, grid.core === 'starting' ? `starting ${grid.start} of ${grid.startSecs} s` : grid.core,
         grid.core === 'ejected' ? [] : grid.core === 'offline' ? [small('Start', 'core-start', () => send({ type: 'grid', core: 'start' }))] : [small('Stop', 'core-stop', () => send({ type: 'grid', core: 'stop' }), true)]),
       ...(grid.core !== 'ejected' ? [
-        ...['constriction', 'corePump', 'injector'].map((x) => subRow(x, 2)),
+        ...['constriction', 'corePump', 'amConduit', 'injector'].map((x) => subRow(x, 2, x === 'amConduit' && grid.contain?.field < 95 ? 'not pressurized: the containment field must be at 95%' : undefined)),
         ties('core', 'Power transfer conduits', 'core', { level: 2, note: c.damage.conduits >= 50 ? 'DAMAGED: no output' : 'carry the core\'s output into the EPS' }),
       ] : []),
       ...feedRows(),
@@ -982,7 +982,7 @@ function renderCombat() {
         const engNoReactors = () => consoleRows('Engineering', { reactors: false });
         const containment = engineeringRows().filter((r) => r.id === 'ties-containment');
         // In Shutdown the core's rows run the other way under it (conduits first, constriction last).
-        const coreRows = () => { const [head, ...rest] = engineeringRows().filter((r) => /^ties-(core|sub-constriction|sub-corePump|sub-injector)/.test(r.id)); return [head, ...(gridOrder === 'shutdown' ? rest.reverse() : rest)]; };
+        const coreRows = () => { const [head, ...rest] = engineeringRows().filter((r) => /^ties-(core|sub-constriction|sub-corePump|sub-amConduit|sub-injector)/.test(r.id)); return [head, ...(gridOrder === 'shutdown' ? rest.reverse() : rest)]; };
         const driveRowsAll = () => [...driveRows('port'), ...driveRows('starboard')];
         // Startup fills a tank from the dock (once, to full); Shutdown empties it to the dock.
         const fuelButton = (r) => () => {
@@ -1123,7 +1123,7 @@ function renderCombat() {
       table(),
       feedControl(),
       supplies(),
-      el('p', { className: 'st-state grid-containment', id: 'containment-state', textContent: grid.core === 'ejected' ? 'Warp core ejected: no antimatter aboard' : !grid.antimatter ? 'No antimatter aboard: containment not needed' : grid.breach != null ? `CONTAINMENT FAILING: breach in ${grid.breach} s` : `Containment holding, fed from ${feeds(grid.ties.containment)}` }),
+      el('p', { className: 'st-state grid-containment', id: 'containment-state', textContent: grid.core === 'ejected' ? 'Warp core ejected: no antimatter aboard' : !grid.antimatter ? 'No antimatter aboard: containment not needed' : grid.breach != null ? `CONTAINMENT FAILING: field ${grid.contain?.field}%, breach in ${grid.breach} s` : grid.contain?.onReserve ? `Containment on its internal reserve: ${grid.contain.reserveSecs} s left` : `Containment holding (field ${grid.contain?.field}%), fed from ${feeds(grid.ties.containment)}` }),
 
       el('p', { className: 'ops-notice', id: 'grid-status', textContent: status }),
       el('p', { className: 'ops-hint', textContent: `The core burns antimatter and deuterium for the power it gives (the impulse reactor burns deuterium, and while it gives power the ship is held to slow impulse). Tie each source to any of Bus A, Bus B and the EPS; the EPS reaches a bus through its open tap. The core starts on Bus A power (${grid.startSecs} s). Antimatter containment must always have power from one of its feeds, or the core breaches in seconds (ejecting the core ends that). Power goes to containment first, then consoles, then is shared among systems. EPS carrying ${grid.eps}; total drawn ${grid.drawn} (that's what other ships' sensors see).` }));

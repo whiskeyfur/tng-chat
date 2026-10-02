@@ -13,6 +13,7 @@ const { chromium } = require('playwright');
 
 process.env.PORT = process.env.PORT || '8099';
 process.env.BEAM_SECS = process.env.BEAM_SECS || '2'; // the transporter energizes this long (5 s in play)
+process.env.RESERVE_SECS = process.env.RESERVE_SECS || '3'; // antimatter containment's internal reserve (9 minutes in play)
 // Ship's computers keep their libraries in a scratch folder for the test.
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-test-'));
 const computers = new Set();
@@ -1383,8 +1384,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     // (Battery B carries Bus B a while first.)
     laforge.send({ type: 'grid', ties: { containment: ['B'], core: ['EPS'], crosslink: [] } });
     laforge.send({ type: 'grid', tap: { bus: 'B', on: false } });
+    // Then containment's internal reserve, then its field falls: below 20% it breaches.
+    await waitFor(() => laforge.msgs.some((m) => m.type === 'notice' && /containment on its internal reserve/.test(m.text)), 40000);
     await bob.waitForSelector('.bcast--alert:has-text("containment failing")', { state: 'attached', timeout: 40000 });
-    await waitFor(() => suluMsgs.some((m) => m.type === 'destroyed' && /breach/.test(m.cause)), 15000);
+    assert.match(await bob.textContent('.bcast--alert:has-text("containment failing")'), /field \d+%, breach in \d+ s .*reserve exhausted/);
+    await waitFor(() => suluMsgs.some((m) => m.type === 'destroyed' && /breach/.test(m.cause)), 30000);
     const reborn = suluMsgs.find((m) => m.type === 'destroyed');
     await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last.own); return n.grid.docked === reborn.base && n.combat.hull === 100 && n.grid.core === 'offline' && n.grid.antimatter === 0 && n.grid.containmentOk; });
     await bob.waitForSelector(`.bcast--alert:has-text("Rebuilt and docked at ${reborn.base}")`, { state: 'attached' });
@@ -1533,7 +1537,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Engineering ties in the loads (a usual layout) before bringing anything up.
     barclay.send({ type: 'grid', ties: {
       'console:Engineering': ['A'], 'console:Tactical': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'system:gravity': ['A'], 'system:lighting': ['A'], 'system:lateral': ['A'],
-      'system:replicators': ['B'], 'system:recreation': ['B'], 'system:transporter': ['B'], 'sub:constriction': ['A'], 'sub:corePump': ['A'], 'sub:injector': ['A'], 'sub:portPump': ['B'], 'sub:starboardPump': ['B'], 'sub:portChamber': ['B'], 'sub:starboardChamber': ['B'], 'sub:cryoPumps': ['A'], 'sub:slushHeaters': ['B'], 'sub:aux1Chamber': ['A'], 'sub:aux1Pump': ['A'], aux1: ['EPS'],
+      'system:replicators': ['B'], 'system:recreation': ['B'], 'system:transporter': ['B'], 'sub:constriction': ['A'], 'sub:corePump': ['A'], 'sub:injector': ['A'], 'sub:amConduit': ['A'], 'sub:portPump': ['B'], 'sub:starboardPump': ['B'], 'sub:portChamber': ['B'], 'sub:starboardChamber': ['B'], 'sub:cryoPumps': ['A'], 'sub:slushHeaters': ['B'], 'sub:aux1Chamber': ['A'], 'sub:aux1Pump': ['A'], aux1: ['EPS'],
       'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'sub:forcefields': ['B'], 'sub:computer1': ['A'], 'sub:computer2': ['B'], 'sub:computer3': ['C'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'],
       ...Object.fromEntries(['sensors', 'sif', 'idf', 'engines', 'injectors', 'shields', 'weapons', 'deflector', 'tractor'].map((x) => [`system:${x}`, ['EPS']])) } });
     await waitFor(() => barclay.nav()?.own.grid.ties['system:sif'].join() === 'EPS'); assert.ok(Object.values(cold.drives).every((d) => d.state === 'off') && Object.values(cold.taps).every((t) => t === 0), 'drives off and taps closed');
