@@ -430,6 +430,10 @@
         live(readout('Emitter array', 'sky'), () => 'Online'),
         live(readout('Targeting scanners', 'gold'), () => `Locked: the ${ship}`)),
     ] }),
+    // The brig: a place, no console controls (who's held here, and the force field).
+    Brig: (ship) => ({ code: 'BRG 13', color: 'red', panels: [
+      panel('st-brig', 'Brig', 'red', true, h('div', { class: 'st-brig', 'data-brig': '' }, h('p', { class: 'st-brig-title' }, 'BRIG'))),
+    ] }),
     // The shuttle bay: where shuttles and runabouts land and crew board them (a bay status panel; Ops works the doors).
     'Shuttle Bay': (ship) => ({ code: 'SHB 12', color: 'peach', panels: [
       panel('st-bay', 'Hangar control', 'peach', true, h('div', { 'data-bay': '' })),

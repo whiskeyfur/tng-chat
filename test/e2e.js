@@ -137,7 +137,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(await early.$$eval('#ship option:not([disabled])', (os) => os.map((o) => o.value)), ['Deep Space 4', 'Starbase 12', 'Starbase 47', 'Starbase 74', 'Utopia Planitia']);
     // The station picker comes from the relay and includes every station.
     await early.waitForSelector('#station option[value="Transporter"]', { state: 'attached' });
-    assert.equal(await early.locator('#station option:not([disabled])').count(), 13); // 12 (the Shuttle Bay too) + Operations
+    assert.equal(await early.locator('#station option:not([disabled])').count(), 14); // 13 (the Shuttle Bay and the Brig too) + Operations
     step("without a ship's computer there is no ship, not even for ops: only the four automated starbases");
 
     // Ship's computers bring the ships into existence.
@@ -1042,6 +1042,28 @@ const audioBytes = (page) => page.evaluate(async () => {
     await worf.click('#sec-fields button[data-station="Helm"]');
     await worf.waitForSelector('#sec-fields button[data-station="Helm"][aria-pressed="false"]');
     step('Security isolated Helm with a force field: Helm could not walk out nor anyone walk in, but kept the console; then dropped it');
+
+    // The brig: its force field is up to start, so nobody walks in; Security drops it, rand walks
+    // in, Security raises it, and rand can't walk out until it's dropped again.
+    const randAt = () => [...randMsgs].reverse().find((m) => m.type === 'registered')?.station;
+    const randWas = randAt();
+    rand.send(JSON.stringify({ type: 'change-station', station: 'Brig' }));
+    await waitFor(() => randMsgs.some((m) => m.type === 'station-failed' && /force field isolates Brig: nobody walks in/.test(m.reason)));
+    await worf.click('[data-security] button:has-text("Drop brig field")');
+    await worf.waitForSelector('#brig-field-state:has-text("down")');
+    rand.send(JSON.stringify({ type: 'change-station', station: 'Brig' }));
+    await waitFor(() => randAt() === 'Brig');
+    await worf.click('[data-security] button:has-text("Raise brig field")');
+    await worf.waitForSelector('#brig-field-state:has-text("up")');
+    rand.send(JSON.stringify({ type: 'change-station', station: 'Crew' }));
+    await waitFor(() => randMsgs.some((m) => m.type === 'station-failed' && /force field isolates Brig: nobody walks out/.test(m.reason)));
+    await worf.click('[data-security] button:has-text("Drop brig field")');
+    await worf.waitForSelector('#brig-field-state:has-text("down")');
+    rand.send(JSON.stringify({ type: 'change-station', station: randWas }));
+    await waitFor(() => randAt() === randWas);
+    await worf.click('[data-security] button:has-text("Raise brig field")');
+    await worf.waitForSelector('#brig-field-state:has-text("up")');
+    step('the brig: its force field (up to start) kept rand out; Security dropped it and rand walked in; raised again, rand could not walk out; dropped, rand walked back');
 
     // Security confines alice to quarters: she can call Security, not the First Officer.
     const riker = await openAs(browser, 'riker', 'riker', 'Enterprise', 'First Officer');

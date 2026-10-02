@@ -48,7 +48,7 @@ const MAX_UPLOAD = Number(process.env.MAX_UPLOAD_MB || 200) * 1024 * 1024;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, ...
 const OPS_STATION = 'Operations';   // operators only
-const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay'];
+const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay', 'Brig'];
 // Operator commands (everything else from an operator is handled as crew).
 const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-hail', 'cancel-hail', 'transfer',
   'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock', 'prefix', 'automation']);
@@ -1497,6 +1497,15 @@ function crewCommand(ws, msg) {
       gridChanged(key); broadcastOps(key);
       return note(`Hangar control: shuttle bay doors ${open ? 'open' : 'closed'}`);
     }
+    case 'brig-field': {
+      // Security raises or drops the brig's force field.
+      if (ws.station !== 'Security') return note('Only Security controls the brig force field');
+      if (!hasStation(key, 'Brig')) return note('this vessel has no brig');
+      engOf(key).brigField = !!msg.on; engOf(key).dirty = true;
+      opLog(key, `Security (${ws.name}): brig force field ${msg.on ? 'up' : 'down'}`);
+      gridChanged(key); broadcastCrew(key);
+      return note(`Security: brig force field ${msg.on ? 'up' : 'down'}`);
+    }
     case 'forcefield': {
       // Seal a console (or release it): nobody can use it while the field holds.
       if (ws.station !== 'Security') return note('Only Security controls the force fields');
@@ -1764,7 +1773,7 @@ const bayLinks = (k) => {
 const partners = (k) => [...shipsDocked(k), ...bayLinks(k)];
 const slotFor = (o, k) => portFor(o, k) || (engOf(o).landed === k ? 'bay' : engOf(k).landed === o ? `bay:${k}` : null);
 const SYSTEM_BUS = { spore: 'EPS', phaser1: 'EPS', phaser2: 'EPS', phaser3: 'EPS', phaser4: 'EPS', drydock1: 'EPS', drydock2: 'EPS', drydock3: 'EPS', industrial: 'EPS', atmosphere: 'A', thermal: 'A', gravity: 'A', lights: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', bussard: 'EPS', amBus: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
-const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B', 'Shuttle Bay': 'B' };
+const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B', 'Shuttle Bay': 'B', Brig: 'B' };
 // Why this ship can't spore-jump now (null: it can).
 function sporeFault(k) {
   const e = engOf(k);
@@ -1852,6 +1861,8 @@ const SUBSYSTEMS = {
   // The fuel buses' transfer power (low buses): nothing moves on a bus without it.
   deuTransfer: { parent: 'fuel', ties: ['B'], name: 'Deu. bus transfer' },
   amTransfer: { parent: 'fuel', ties: ['B'], name: 'AM bus transfer' },
+  // The brig's force field (Security): while it's up, nobody walks into or out of the Brig.
+  brigField: { parent: 'Security', ties: ['B'], name: 'brig force field' },
   // The shuttle bay: its doors and the containment field that holds the air in while they're open.
   bayDoors: { parent: 'Shuttle Bay', ties: ['B'], name: 'shuttle bay doors' },
   bayField: { parent: 'Shuttle Bay', ties: ['B'], name: 'shuttle bay containment field' },
@@ -1999,6 +2010,7 @@ function freshEng(saved, { cold = false } = {}) {
     // The spore drive: its reserve, and a jump charging (lost on restart) and the cooldown.
     spores: Number.isFinite(s.spores) ? Math.max(0, Math.min(SPORE.cap, s.spores)) : cold ? 0 : SPORE.cap, spore: { charging: false, t: 0, dest: null, ready: 0 },
     // The shuttle bay: its doors (Ops opens them), and the bay this craft has landed in (kept across restarts).
+    brigField: s.brigField ?? true, // the brig's force field (up to start)
     bayOpen: !!s.bayOpen, landed: typeof s.landed === 'string' && s.landed ? shipKey(s.landed) : null,
     remoteBlock: !!s.remoteBlock, // ops refuse remote control by other vessels
     prefix: /^\d{5}$/.test(s.prefix) ? s.prefix : PREFIX.factory, // the command prefix (kept in .nav.json)
@@ -2096,7 +2108,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores), prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores), brigField: !!e.brigField, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
@@ -2292,6 +2304,7 @@ function flow(k) {
     ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => u.station === st).length * GRID.console]),
     ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
     ['sub:forcefields', e.forcefields.length * GRID.forcefield],
+    ['sub:brigField', e.brigField && hasStation(k, 'Brig') ? GRID.forcefield : 0],
     ['sub:bayDoors', e.bayOpen ? BAY.doors : 0], ['sub:bayField', e.bayOpen ? BAY.field : 0],
     ['sub:patternBuffers', TR.buffers], ['sub:targetingScanners', TR.small], ['sub:heisenberg', TR.small], ['sub:biofilter', TR.small],
     ['sub:energizingCoils', transporters.get(k)?.energizing ? TR.coils : 0],
@@ -2418,7 +2431,9 @@ const feedTie = (key) => ({ 'feed:station': 'dock', 'feedEps:station': 'dockEps'
 // A station Security has isolated with a force field (while the emitters have
 // power): nobody walks in or out (the Station menu, across a dock); whoever
 // is inside keeps using its console. Transporters get through.
-const sealed = (k, station) => engOf(k).forcefields.includes(station) && flow(k).subOk.forcefields !== false;
+const sealed = (k, station) => (engOf(k).forcefields.includes(station) && flow(k).subOk.forcefields !== false) || (station === 'Brig' && brigSealed(k));
+// The brig: sealed while its force field is up and powered.
+const brigSealed = (k) => !!engOf(k).brigField && hasStation(k, 'Brig') && flow(k).subOk.brigField !== false;
 const consoleDark = (ws) => { flowCache.delete(ws.shipKey); return flow(ws.shipKey).consoleOk[ws.station] === false; }; // fresh: who's aboard may have just changed
 const darkNote = (ws) => send(ws, { type: 'notice', text: `${ws.station}: console offline, no power on its bus` });
 // Communications' subsystems: local RF (calls aboard), radio (hails, calls
@@ -2521,7 +2536,7 @@ function gridView(k) {
     towing: e.towing ? shipName(e.towing) : null, towedBy: tower ? shipName(tower) : null,
     selfDestruct: e.selfDestruct ? { seconds: Math.max(0, Math.ceil((e.selfDestruct.at - Date.now()) / 1000)), by: e.selfDestruct.by } : null,
     buses: Object.fromEntries(BUSES.map((X) => { const b = f.buses[X]; return [X, { need: Math.round(b.need), have: Math.round(b.have), src: r(b.src), consolesOk: b.consolesOk, fraction: Math.round(b.fraction * 100) }]; })),
-    consoleOk: f.consoleOk, systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
+    consoleOk: f.consoleOk, systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, brigField: !!e.brigField, brigSealed: brigSealed(k), stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
     tieNodes: Object.fromEntries(Object.keys(e.ties).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter(isMulti), busMax: BUS_MAX,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
   };
@@ -3930,7 +3945,7 @@ function stationCommand(ws, msg) {
   { const p = !ws.automaton && panelOfCommand(ws.station, msg); if (p && autoOn(ws.shipKey, p)) setAuto(ws.shipKey, p, null, `${ws.name} took over`); }
   // Off the ODN, the station's controls do nothing (answering an order needs no console).
   const odnOff = !odnLinked(ws.shipKey, ws.operator ? OPS_STATION : ws.station) && !['order-ack', 'order-decline'].includes(t);
-  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'bay-doors', 'readiness', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
+  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'brig-field', 'bay-doors', 'readiness', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
     send(ws, { type: 'notice', text: 'Disconnected from the optical data network' });
     return true;
   }
@@ -3942,7 +3957,7 @@ function stationCommand(ws, msg) {
   if (['helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
-  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'bay-doors', 'readiness'].includes(t)) return gate(crewCommand);
+  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'brig-field', 'bay-doors', 'readiness'].includes(t)) return gate(crewCommand);
   if (['lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
   if (t === 'grid') return gridCommand(ws, msg), true; // emergency power: works with the console dark
   if (t === 'tractor') return gate(tractorCommand);

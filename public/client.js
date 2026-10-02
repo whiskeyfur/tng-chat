@@ -424,6 +424,8 @@ function fillReassign() {
     b.dataset.station = name;
     if (ship) b.dataset.ship = ship;
     if (!ship && name === me.station) { b.disabled = true; b.title = 'You are here'; b.setAttribute('aria-current', 'true'); }
+    // The brig's force field: nobody walks into the Brig, or out of it.
+    else if (!ship && lastNav?.own?.grid?.brigSealed && (name === 'Brig' || me.station === 'Brig')) { b.disabled = true; b.title = 'The brig force field is up'; b.textContent = `${name} · brig field up`; }
     b.onclick = () => {
       $('reassign-error').textContent = '';
       if (name === 'Operations' && opsKeyRequired) { $('reassign-form').hidden = false; $('reassign-form').dataset.ship = ship || ''; $('reassign-key').focus(); return; }
@@ -690,6 +692,19 @@ function openSystem(k) {
 }
 // Engineering's Life support panel: each place aboard, its atmosphere, heat,
 // gravity and lights (taps), and what it's actually getting.
+// The Brig's screen: the force field, and who's held here.
+function renderBrig(grid) {
+  const box = document.querySelector('[data-brig]');
+  if (!box || !grid) return;
+  const held = comms.users.filter((u) => u.ship.toLowerCase() === me?.ship.toLowerCase() && u.station === 'Brig');
+  const sig = JSON.stringify([grid.brigSealed, held.map((u) => u.id)]);
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  box.replaceChildren(el('p', { className: 'st-brig-title', textContent: 'BRIG' }),
+    el('p', { className: 'st-state', id: 'brig-state', textContent: grid.brigSealed ? 'Force field up: nobody walks in or out' : 'Force field down' }),
+    el('ul', { className: 'st-list', id: 'brig-held' }, ...(held.length ? held.map((u) => el('li', { textContent: u.title || u.name })) : [el('li', { className: 'empty', textContent: 'Nobody held' })])));
+}
 // Department readiness: call one department (or all) to report ready.
 window.__callReadiness = (dept) => send({ type: 'readiness', dept });
 // Hangar control (the Shuttle Bay's panel): the bay doors (tap to open or
@@ -816,7 +831,7 @@ function renderCrewPanels() {
   // Security: transporter lockout, confinement, beam-in alerts.
   const sec = document.querySelector('[data-security]');
   const fields = lastNav?.own?.grid?.forcefields || [];
-  if (sec && changed(sec, crewSig, !!lastNav?.own?.lockout, securityAlerts.length, fields, lastNav?.own?.grid?.fieldsUp)) {
+  if (sec && changed(sec, crewSig, !!lastNav?.own?.lockout, securityAlerts.length, fields, lastNav?.own?.grid?.fieldsUp, lastNav?.own?.grid?.brigField, lastNav?.own?.grid?.brigSealed)) {
     const lockout = !!lastNav?.own?.lockout;
     const keep = sec.querySelector('#sec-who')?.value;
     const others = crew.filter((u) => u.id !== me.id);
@@ -826,6 +841,9 @@ function renderCrewPanels() {
       el('div', { className: 'st-control' },
         el('p', { className: 'st-state', textContent: lockout ? 'Transporter lockout: force field up' : 'Transporter lockout: off' }),
         button(lockout ? 'Drop force field' : 'Raise force field', () => send({ type: 'lockout', on: !lockout }), lockout ? '' : 'lcars-button--alert')),
+      el('div', { className: 'st-control' },
+        el('p', { className: 'st-state', id: 'brig-field-state', textContent: lastNav?.own?.grid?.brigSealed ? 'Brig force field: up' : 'Brig force field: down' }),
+        button(lastNav?.own?.grid?.brigField ? 'Drop brig field' : 'Raise brig field', () => send({ type: 'brig-field', on: !lastNav?.own?.grid?.brigField }), lastNav?.own?.grid?.brigField ? '' : 'lcars-button--alert')),
       el('h3', { className: 'ops-subhead', textContent: 'Force fields (isolate a station)' }),
       el('div', { className: 'tr-taps', id: 'sec-fields' }, ...stations.map((st) => {
         const on = fields.includes(st);
@@ -1918,6 +1936,9 @@ async function onMessage(msg) {
       // An automated panel at this station: a bar says so (a tap here by hand takes it back).
       { const mine = Object.values(msg.own?.automation || {}).filter((a) => a.station === me?.station);
         bc.setAlert('automation', mine.length ? `Automation (Ops): ${mine.map((a) => `${a.name}${typeof a.mode === 'string' ? ` ${a.mode}` : ''}: ${a.status || 'running'}`).join(' · ')}. A tap here by hand takes it over.` : null, { level: 'yellow' }); }
+      // The brig's force field changes which stations can be walked to.
+      if (!!msg.own?.grid?.brigSealed !== !!window.__brigSealed) { window.__brigSealed = !!msg.own?.grid?.brigSealed; fillReassign(); }
+      renderBrig(msg.own?.grid);
       // Department readiness (Captain, First Officer): redraw when the answers change.
       if (JSON.stringify(msg.own?.readiness) !== JSON.stringify(window.__readiness)) { window.__readiness = msg.own?.readiness; stationView?.setCrew?.(comms.users); }
       // The Communications console's subspace bands follow the subspace relay.
