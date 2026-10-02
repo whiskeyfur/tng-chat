@@ -644,6 +644,20 @@ function openSystem(k) {
 }
 // Engineering's Life support panel: each place aboard, its atmosphere, heat,
 // gravity and lights (taps), and what it's actually getting.
+// The shuttle bay's status: its doors and containment field, room, and who's landed.
+function renderBay() {
+  const box = document.querySelector('[data-bay]');
+  const b = lastNav?.own?.grid?.bay;
+  if (!box || !b) return;
+  const sig = JSON.stringify(b);
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  box.replaceChildren(
+    el('p', { className: 'st-state', id: 'bay-doors-state', textContent: !b.capacity ? 'No shuttle bay aboard' : `Doors ${b.open ? 'open' : 'closed'}${b.open && !b.fieldOk ? ' · CONTAINMENT FIELD DOWN' : ''}${!b.doorsOk ? ' · doors have no power' : ''}` }),
+    el('p', { className: 'ops-hint', textContent: b.capacity ? `${b.landed.length} of ${b.capacity} landed · Ops opens and closes the doors` : '' }),
+    el('ul', { className: 'st-list', id: 'bay-landed' }, ...(b.landed.length ? b.landed.map((n) => el('li', { textContent: `The ${n}` })) : [el('li', { className: 'empty', textContent: 'Nothing landed' })])));
+}
 function renderLifeSupport() {
   const root = document.querySelector('[data-lifesupport]');
   const ls = lastNav?.own?.grid?.ls;
@@ -894,6 +908,7 @@ function renderCombat() {
   updateCover();
   renderDarkness();
   renderLifeSupport();
+  renderBay();
   document.body.toggleAttribute('data-console-dark', dark);
   if (!stationView) return;
 

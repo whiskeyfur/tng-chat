@@ -135,7 +135,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(await early.$$eval('#ship option:not([disabled])', (os) => os.map((o) => o.value)), ['Deep Space 4', 'Starbase 12', 'Starbase 47', 'Starbase 74', 'Utopia Planitia']);
     // The station picker comes from the relay and includes every station.
     await early.waitForSelector('#station option[value="Transporter"]', { state: 'attached' });
-    assert.equal(await early.locator('#station option:not([disabled])').count(), 12); // 11 + Operations
+    assert.equal(await early.locator('#station option:not([disabled])').count(), 13); // 12 (the Shuttle Bay too) + Operations
     step("without a ship's computer there is no ship, not even for ops: only the four automated starbases");
 
     // Ship's computers bring the ships into existence.
@@ -1564,6 +1564,39 @@ const audioBytes = (page) => page.evaluate(async () => {
       rb.close(); sh.close();
       await stopComputer(rc); await stopComputer(sc);
       step('ship classes: the Rubicon (Runabout: an EPS of 250, one docking port, warp 5 at most, no Captain station) and the Goddard (Shuttle: no warp core or warp, no transporter station)');
+    }
+
+    // The shuttle bay: Ops opens the doors; a shuttle alongside lands, connected to the Enterprise
+    // through Connections (nothing tied to start), its crew can walk into the bay; then it takes off.
+    {
+      const at = laforge.nav().own;
+      const gc = startComputer('gl', 'Galileo', { class: 'shuttle', position: `${Math.round(at.x) + 2},${Math.round(at.y)}` });
+      const listed = () => [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.some((x) => x.name === 'Galileo' && x.class === 'Shuttle');
+      await waitFor(listed, 15000);
+      const pilot = await crewWs('kim2', 'Galileo', 'Helm');
+      await waitFor(() => pilot.nav()?.own?.grid?.bays?.some((b) => b.name === 'Enterprise'));
+      assert.match(pilot.nav().own.grid.bays.find((b) => b.name === 'Enterprise').why, /doors are closed/);
+      await screen(op, 'status');
+      await op.waitForSelector('#bay-doors', { state: 'attached' });
+      await op.$eval('#bay-doors', (b) => b.click());
+      await waitFor(() => laforge.nav()?.own.grid.bay.open);
+      pilot.send({ type: 'dock', land: 'Enterprise' });
+      await waitFor(() => pilot.nav()?.own.grid.landed === 'Enterprise' && laforge.nav()?.own.grid.bay.landed.includes('Galileo'));
+      const conn = laforge.nav().own.grid.connections.find((x) => x.name === 'Galileo');
+      assert.ok(conn && conn.port === 'shuttle bay' && !conn.power.imp && !conn.power.exp, 'the landed shuttle is a connection with nothing tied');
+      pilot.send({ type: 'helm', dest: { x: 10, y: 10 }, warp: 0.25 });
+      await waitFor(() => pilot.msgs.some((m) => m.type === 'notice' && /take off first/.test(m.text)));
+      pilot.send({ type: 'change-station', station: 'Shuttle Bay', ship: 'Enterprise' });
+      await waitFor(() => pilot.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && m.station === 'Shuttle Bay'));
+      pilot.send({ type: 'change-station', station: 'Helm', ship: 'Galileo' });
+      await waitFor(() => pilot.msgs.filter((m) => m.type === 'registered' && m.ship === 'Galileo').length >= 2);
+      pilot.send({ type: 'dock', takeoff: true });
+      await waitFor(() => !pilot.nav()?.own.grid.landed && !laforge.nav()?.own.grid.bay.landed.length);
+      await op.$eval('#bay-doors', (b) => b.click());
+      await waitFor(() => !laforge.nav()?.own.grid.bay.open);
+      pilot.close();
+      await stopComputer(gc);
+      step('the shuttle bay: Enterprise ops opened the doors; the Galileo landed (a connection with nothing tied; Helm held), its pilot walked into the bay and back, and it took off');
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;

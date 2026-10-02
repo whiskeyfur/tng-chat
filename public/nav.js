@@ -155,7 +155,7 @@
     function renderDock() {
       const g = nav?.own?.grid;
       if (!g) return;
-      const sig = JSON.stringify([g.ports, g.near, g.nearShip, g.dockRequest, g.thrustersOk, dockPort, g.docked, g.drydock]);
+      const sig = JSON.stringify([g.ports, g.near, g.nearShip, g.dockRequest, g.thrustersOk, dockPort, g.docked, g.drydock, g.landed, g.bays]);
       if (sig === dockSig) return;
       dockSig = sig;
       const portTap = (pt) => {
@@ -175,10 +175,14 @@
       const dd = g.drydock;
       const undock = Object.entries(g.ports).filter(([pt, v]) => v && !(dd?.in && v.base)).map(([pt, v]) => button(`Undock ${pt} (${v.base || `the ${v.ship}`})`, `helm-undock-${pt}`, () => send({ type: 'dock', undock: true, port: pt }), true));
       if (dd?.shipyard && !dd.in) act.push(button('Enter drydock', 'helm-drydock', () => send({ type: 'dock', drydock: true })));
+      // A shuttle or runabout: land in a bay in range (greyed with why not), or take off.
+      const landTaps = (g.bays || []).map((b) => { const x = button(`Land in ${/^(Starbase|Deep Space|Utopia) /.test(b.name) ? b.name : `the ${b.name}`}'s bay${b.why ? ` · ${b.why}` : ''}`, '', () => send({ type: 'dock', land: b.name })); x.dataset.bay = b.name; x.disabled = !!b.why; return x; });
+      if (g.landed) act.push(button(`Take off from the ${g.landed}'s bay`, 'helm-takeoff', () => send({ type: 'dock', takeoff: true })));
       if (dd?.in) act.push(Object.assign(button(dd.release != null ? `Release in ${dd.release} s${dd.hold ? ' (held by the shipyard)' : ''}` : 'Request release', 'helm-release', () => send({ type: 'dock', release: true })), { disabled: dd.release != null }));
       dockBox.replaceChildren(
         el('div', { className: 'tr-taps' }, portTap('port'), portTap('starboard')),
         el('div', { className: 'ops-form' }, ...act, ...undock),
+        ...(landTaps.length ? [el('div', { className: 'ops-form', id: 'helm-bays' }, ...landTaps)] : []),
         el('span', { className: 'ops-hint', id: 'helm-dock-state', textContent: dd?.in ? `In drydock at ${g.docked}: Helm is held until the shipyard releases us` : why && act.length ? `Can't dock: ${why}` : act.length ? '' : (g.near || g.nearShip ? '' : 'Nothing in docking range') }),
         ...(g.dockRequest ? [el('div', { className: 'ops-form', id: 'dock-request' }, el('span', { textContent: `The ${g.dockRequest.from} requests to dock (${g.dockRequest.seconds} s)` }),
           button('Accept', 'dock-accept', () => send({ type: 'dock', answer: 'accept', port: dockPort })), button('Decline', 'dock-decline', () => send({ type: 'dock', answer: 'decline' }), true))] : []));

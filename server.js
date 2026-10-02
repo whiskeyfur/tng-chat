@@ -48,10 +48,10 @@ const MAX_UPLOAD = Number(process.env.MAX_UPLOAD_MB || 200) * 1024 * 1024;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, ...
 const OPS_STATION = 'Operations';   // operators only
-const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew'];
+const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay'];
 // Operator commands (everything else from an operator is handled as crew).
 const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-hail', 'cancel-hail', 'transfer',
-  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock']);
+  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock', 'bay-doors']);
 // Message types one user may send to another; the server adds `from` and forwards.
 const RELAYED = new Set(['call', 'accept', 'decline', 'hangup', 'signal']);
 const STATES = new Set(['idle', 'calling', 'ringing', 'in-call']);
@@ -200,6 +200,7 @@ function broadcastOps(key) {
     linkOutgoing: requests.filter((r) => r.from === key).map(({ id, toShip }) => ({ id, toShip })),
     graph: networkGraph(),
     remoteBlock: !!engOf(key).remoteBlock,
+    bay: bayCapacity(key) ? { open: !!engOf(key).bayOpen, capacity: bayCapacity(key), landed: landedIn(key).map(shipName) } : null,
     // The shipyard's drydock: the ships in it, any release under way, and holds.
     ...(isShipyard(shipName(key)) ? { drydock: drydocked().filter((o) => shipKey(engOf(o).docked || '') === key).map((o) => ({ ship: shipName(o), hold: !!engOf(o).hold, release: engOf(o).release ? Math.max(0, Math.ceil((engOf(o).release - Date.now()) / 1000)) : null, repair: combatOf(o).repair || null })), berths: DRYDOCK.berths } : {}),
     broadcasts: [...broadcasts.values()].filter((b) => b.ships.has(key) || users.get(b.speaker)?.shipKey === key)
@@ -456,6 +457,20 @@ function operatorMessage(op, msg) {
       opLog(other, msg.type === 'link-decline' ? `the ${shipName(op.shipKey)} declined the data link` : `the ${shipName(op.shipKey)} withdrew its data link request`);
       broadcastAllOps();
       return ok(msg.type === 'link-decline' ? `declined the data link from the ${shipName(other)}` : `withdrew the data link request to the ${shipName(other)}`);
+    }
+    case 'bay-doors': {
+      // Ops opens or closes the shuttle bay doors (they need power to move, and the containment field holds the air in).
+      const e = engOf(op.shipKey);
+      if (!bayCapacity(op.shipKey)) return fail('this vessel has no shuttle bay');
+      const open = !!msg.open;
+      if (open && !e.bayOpen) {
+        e.bayOpen = true; flowCache.delete(op.shipKey);
+        if (flow(op.shipKey).subOk.bayDoors === false) { e.bayOpen = false; flowCache.delete(op.shipKey); return fail('the shuttle bay doors have no power (Engineering: tie them in)'); }
+      } else e.bayOpen = open;
+      e.dirty = true;
+      opLog(op.shipKey, `${op.name}: shuttle bay doors ${open ? 'open' : 'closed'}`);
+      gridChanged(op.shipKey); broadcastOps(op.shipKey);
+      return ok(`shuttle bay doors ${open ? 'open' : 'closed'}`);
     }
     case 'drydock': {
       // The shipyard's ops: release a drydocked ship now, or hold it (or stop holding it).
@@ -1088,6 +1103,7 @@ function navCommand(ws, msg) {
   };
 
   if ((msg.type === 'autopilot' || msg.type === 'helm') && engOf(key).drydock && ws.station === 'Helm') return note(`Helm: in drydock at ${engOf(key).docked}: request release first`);
+  if ((msg.type === 'autopilot' || msg.type === 'helm') && engOf(key).landed && ws.station === 'Helm') return note(`Helm: landed in the ${shipName(engOf(key).landed)}'s shuttle bay: take off first`);
   if (msg.type === 'autopilot') {
     if (ws.station !== 'Helm') return note('Only Helm sets the autopilot');
     if (!msg.target) { autopilots.delete(key); return note('Helm: autopilot off (the ship keeps its course and speed)'); }
@@ -1438,11 +1454,11 @@ const BUS_MAX = { A: 300, B: 300, C: 300, EPS: 1000 };
 // transporter, which stations it has, and its docking ports.
 const ALL_STATIONS = null; // (every station)
 const CLASSES = {
-  galaxy: { name: 'Galaxy', bus: 300, eps: 1000, core: 1, maxWarp: 9, shields: 1, arrays: 1, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2 },
-  dreadnought: { name: 'Dreadnought', bus: 400, eps: 1500, core: 1.4, maxWarp: 9, shields: 1.5, arrays: 2, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2 },
-  intrepid: { name: 'Intrepid', bus: 250, eps: 700, core: 0.8, maxWarp: 9, shields: 0.8, arrays: 1, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2 },
-  runabout: { name: 'Runabout', bus: 100, eps: 250, core: 0.3, maxWarp: 5, shields: 0.4, arrays: 1, warpCore: true, refit: false, transporter: true, stations: ['Helm', 'Tactical', 'Engineering', 'Transporter'], ports: 1 },
-  shuttle: { name: 'Shuttle', bus: 60, eps: 80, core: 0, maxWarp: 0, shields: 0.2, arrays: 1, warpCore: false, refit: false, transporter: false, stations: ['Helm'], ports: 1 },
+  galaxy: { name: 'Galaxy', bus: 300, eps: 1000, core: 1, maxWarp: 9, shields: 1, arrays: 1, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2, bay: 4 },
+  dreadnought: { name: 'Dreadnought', bus: 400, eps: 1500, core: 1.4, maxWarp: 9, shields: 1.5, arrays: 2, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2, bay: 4 },
+  intrepid: { name: 'Intrepid', bus: 250, eps: 700, core: 0.8, maxWarp: 9, shields: 0.8, arrays: 1, warpCore: true, transporter: true, stations: ALL_STATIONS, ports: 2, bay: 2 },
+  runabout: { name: 'Runabout', bus: 100, eps: 250, core: 0.3, maxWarp: 5, shields: 0.4, arrays: 1, warpCore: true, refit: false, transporter: true, stations: ['Helm', 'Tactical', 'Engineering', 'Transporter'], ports: 1, bay: 0 },
+  shuttle: { name: 'Shuttle', bus: 60, eps: 80, core: 0, maxWarp: 0, shields: 0.2, arrays: 1, warpCore: false, refit: false, transporter: false, stations: ['Helm'], ports: 1, bay: 0 },
 };
 const shipClasses = new Map(); // ship key -> class id
 const classOf = (k) => CLASSES[shipClasses.get(k)] || CLASSES.galaxy;
@@ -1600,8 +1616,22 @@ const PORTS = ['port', 'starboard']; // docking ports (starbases take any number
 // The port a ship is docked to us at (or null), and the ships docked with us (both sides agreeing).
 const portFor = (k, other) => PORTS.find((p) => engOf(k).shipDocks[p] === other) || null;
 const shipsDocked = (k) => PORTS.map((p) => [p, engOf(k).shipDocks[p]]).filter(([, o]) => o && portFor(o, k));
+// The shuttle bay: a craft landed in a ship's bay is connected to it like a
+// docked ship (its own slot each side: 'bay' aboard the craft, 'bay:<craft>'
+// aboard the mothership). In a starbase's bay, it's docked at the starbase.
+const BAY = { doors: 3, field: 5 };
+const bayCapacity = (k) => (isBase(k) ? 8 : classOf(k).bay || 0);
+const landedIn = (k) => [...eng].filter(([o, oe]) => oe.landed === k && present(o)).map(([o]) => o);
+const bayLinks = (k) => {
+  const e = engOf(k);
+  if (e.landed && !isBase(e.landed)) return [['bay', e.landed]];
+  return isBase(k) ? [] : landedIn(k).map((o) => [`bay:${o}`, o]);
+};
+// Every ship we're connected to: at a docking port, or by the bay.
+const partners = (k) => [...shipsDocked(k), ...bayLinks(k)];
+const slotFor = (o, k) => portFor(o, k) || (engOf(o).landed === k ? 'bay' : engOf(k).landed === o ? `bay:${k}` : null);
 const SYSTEM_BUS = { phaser1: 'EPS', phaser2: 'EPS', phaser3: 'EPS', phaser4: 'EPS', drydock1: 'EPS', drydock2: 'EPS', drydock3: 'EPS', industrial: 'EPS', atmosphere: 'A', thermal: 'A', gravity: 'A', lights: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', bussard: 'EPS', amBus: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
-const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
+const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B', 'Shuttle Bay': 'B' };
 const STATION_SYSTEMS = { Helm: ['engines', 'deflector', 'bussard'], Tactical: ['shields', 'phaser1', 'weapons', 'tractor'], Science: ['sensors', 'lateral'], Engineering: ['sif', 'idf', 'amBus', 'lifeSupport'] /* a parent row: its systems carry the ties */, Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
 const LOAD_NODES = {
   atmosphere: AB, thermal: AB, gravity: AB, lights: AB, lighting: AB, lateral: AB, replicators: AB, recreation: AB, // low power
@@ -1675,6 +1705,9 @@ const SUBSYSTEMS = {
   // The fuel buses' transfer power (low buses): nothing moves on a bus without it.
   deuTransfer: { parent: 'fuel', ties: ['B'], name: 'Deu. bus transfer' },
   amTransfer: { parent: 'fuel', ties: ['B'], name: 'AM bus transfer' },
+  // The shuttle bay: its doors and the containment field that holds the air in while they're open.
+  bayDoors: { parent: 'Shuttle Bay', ties: ['B'], name: 'shuttle bay doors' },
+  bayField: { parent: 'Shuttle Bay', ties: ['B'], name: 'shuttle bay containment field' },
   computer1: { parent: 'computer', ties: ['A'], name: 'computer core 1' },
   computer2: { parent: 'computer', ties: ['B'], name: 'computer core 2' },
   computer3: { parent: 'computer', ties: ['C'], name: 'computer core 3' },
@@ -1816,6 +1849,8 @@ function freshEng(saved, { cold = false } = {}) {
 
     transfer: null, feed: { port: 0, starboard: 0 }, fed: { port: 0, starboard: 0 }, // power offered to a ship docked at each port, and what actually went (Power row: Bus B)
     feedEps: { port: 0, starboard: 0 }, fedEps: { port: 0, starboard: 0 }, // (and the EPS row's)
+    // The shuttle bay: its doors (Ops opens them), and the bay this craft has landed in (kept across restarts).
+    bayOpen: !!s.bayOpen, landed: typeof s.landed === 'string' && s.landed ? shipKey(s.landed) : null,
     remoteBlock: !!s.remoteBlock, // ops refuse remote control by other vessels
     forcefields: Array.isArray(s.forcefields) ? s.forcefields.filter((st) => STATIONS.includes(st)) : [], // stations Security has isolated
     // Docked with another ship: kept across restarts (it's checked once both are back).
@@ -1900,7 +1935,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, drydock: !!e.drydock, berth: e.berth, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
   };
 };
@@ -1954,8 +1989,8 @@ function flow(k) {
   // Each connection on its own: per port, whoever offers more sends the difference.
   // Each ship connection: power goes from the side exporting to the side importing.
   // (Two rows each: Power, Bus B to Bus B, and EPS, EPS to EPS.)
-  const conns = shipsDocked(k).map(([p, o]) => {
-    const theirs = portFor(o, k);
+  const conns = partners(k).map(([p, o]) => {
+    const theirs = slotFor(o, k);
     const row = (res) => { const me = connOf(e, o)[res], them = connOf(engOf(o), k)[res]; return (me.exp && them.imp ? SHIP_FEED_MAX : 0) - (them.exp && me.imp ? SHIP_FEED_MAX : 0); };
     const net = row('power'), netEps = row('eps');
     e.feed[p] = Math.max(0, net); e.feedEps[p] = Math.max(0, netEps);
@@ -2093,10 +2128,11 @@ function flow(k) {
     ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => u.station === st).length * GRID.console]),
     ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
     ['sub:forcefields', e.forcefields.length * GRID.forcefield],
+    ['sub:bayDoors', e.bayOpen ? BAY.doors : 0], ['sub:bayField', e.bayOpen ? BAY.field : 0],
     ['sub:patternBuffers', TR.buffers], ['sub:targetingScanners', TR.small], ['sub:heisenberg', TR.small], ['sub:biofilter', TR.small],
     ['sub:energizingCoils', transporters.get(k)?.energizing ? TR.coils : 0],
     ...COMPUTERS.map((x, i) => [`sub:${x}`, ['booting', 'online'].includes(e.computers[i].state) ? COMPUTER.draw : 0]),
-    ...PORTS.flatMap((p) => [[`feed:${p}`, Math.max(0, conns.find((cn) => cn.p === p)?.net || 0)], [`feedEps:${p}`, Math.max(0, conns.find((cn) => cn.p === p)?.netEps || 0)]]),
+    ...conns.flatMap((cn) => [[`feed:${cn.p}`, Math.max(0, cn.net)], [`feedEps:${cn.p}`, Math.max(0, cn.netEps)]]),
     // The fuel buses' transfer power: the deuterium bus's while it moves deuterium, the antimatter bus's always.
     ['sub:deuTransfer', e.busFlow.deu > 0 ? FUELBUS.transfer : 0], ['sub:amTransfer', FUELBUS.transfer],
     // Power exported to the starbase (it takes all it's given): last of all, below.
@@ -2168,13 +2204,14 @@ function flow(k) {
   for (const name of Object.keys(SUBSYSTEMS)) subOk[name] = full(`sub:${name}`) && (c.damage[name] || 0) < SUB_FAIL_DAMAGE;
   const coreSubsOk = ['constriction', 'injector', 'amConduit'].every((x) => subOk[x]);
   const consoleOk = Object.fromEntries(Object.keys(CONSOLE_BUS).map((st) => [st, full(`console:${st}`)]));
-  const fed = PORTS.reduce((n, p) => n + (got[`feed:${p}`] || 0) + (got[`feedEps:${p}`] || 0), 0);
-  for (const p of PORTS) { e.fed[p] = got[`feed:${p}`] || 0; e.fedEps[p] = got[`feedEps:${p}`] || 0; }
+  const slots = [...new Set([...PORTS, ...conns.map((cn) => cn.p)])];
+  const fed = slots.reduce((n, p) => n + (got[`feed:${p}`] || 0) + (got[`feedEps:${p}`] || 0), 0);
+  for (const p of slots) { e.fed[p] = got[`feed:${p}`] || 0; e.fedEps[p] = got[`feedEps:${p}`] || 0; }
   // Power down the EPS taps: out of the EPS column, into each bus's (so every column balances).
   cells.taps = blank();
   for (const X of BUSES) { cells.taps[X] = buses[X].tapUsed; cells.taps.EPS -= buses[X].tapUsed; }
   cells.feed = blank();
-  for (const p of PORTS) for (const n of NODES) cells.feed[n] += (cells[`feed:${p}`]?.[n] || 0) + (cells[`feedEps:${p}`]?.[n] || 0);
+  for (const p of slots) for (const n of NODES) cells.feed[n] += (cells[`feed:${p}`]?.[n] || 0) + (cells[`feedEps:${p}`]?.[n] || 0);
   const delivered = Object.fromEntries(SYSTEMS.map((sys) => [sys, ((got[`system:${sys}`] || 0) * 100) / ratingOf(sys)]));
   const tractorOk = !e.towing || full('system:tractor');
   for (const X of BUSES) {
@@ -2283,11 +2320,14 @@ function gridView(k) {
         ...(bus !== 'am' ? {} : n === 'main' ? { field: Math.round(e.contain.field), containKey: 'containment' } : { field: Math.round(e.tankContain[n].field), containKey: AM_CONTAIN[n], reserve: Math.round((100 * e.tankContain[n].reserve) / (tankContainDraw(n) * CONTAIN.reserveSecs)) }) })) }])),
     epsLive: e.epsLive, epsGen: Math.round(f.epsGen), epsChargeGen: EPS_CHARGE_GEN, impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
     // Connections: the starbase and each ship docked with us, with each resource's Import / Export and what moved.
-    connections: [...(e.docked ? [{ key: 'station', name: e.docked, kind: 'station', port: e.dockedPort, ties: e.connTies, hardLink: hardLinks.has(linkKey(k, shipKey(e.docked))) }] : []), ...shipsDocked(k).map(([p, o]) => ({ key: o, name: shipName(o), kind: 'ship', port: p }))]
+    connections: [...(e.docked ? [{ key: 'station', name: e.docked, kind: 'station', port: e.dockedPort, ties: e.connTies, hardLink: hardLinks.has(linkKey(k, shipKey(e.docked))) }] : []), ...partners(k).map(([p, o]) => ({ key: o, name: shipName(o), kind: 'ship', port: p.startsWith('bay') ? 'shuttle bay' : p }))]
       .map((x) => ({ ...x, ...Object.fromEntries(CONN_RES.map((r) => [r, { ...connOf(e, x.key)[r], ...(e.connFlow[`${x.key}:${r}`] || {}) }])), powerIn: x.kind === 'station' ? Math.round(Object.values(f.cells.dock || {}).reduce((a, b) => a + b, 0)) : Math.round(e.fed[x.port] ? -e.fed[x.port] : Object.values(f.cells.ship || {}).reduce((a, b) => a + b, 0)),
         epsIn: x.kind === 'station' ? Math.round(Object.values(f.cells.dockEps || {}).reduce((a, b) => a + b, 0)) : Math.round(e.fedEps[x.port] ? -e.fedEps[x.port] : Object.values(f.cells.shipEps || {}).reduce((a, b) => a + b, 0)) })),
     // The emergency batteries: charge, and a starbase can swap in a full one.
     emerg: EMERG.names.map((n) => ({ name: n, bus: EMERG.bus[n], level: Math.floor(e.emerg[n]), pct: Math.floor((100 * e.emerg[n]) / EMERG.cap), out: EMERG.out, supplying: Math.round(f.emergUsed[n] || 0) })), canReplace: !!e.docked,
+    // The shuttle bay: doors, room, who's landed; and for a craft, the bays in range to land in.
+    bay: { capacity: bayCapacity(k), open: !!e.bayOpen, doorsOk: f.subOk.bayDoors !== false, fieldOk: f.subOk.bayField !== false, landed: landedIn(k).map(shipName) },
+    landed: e.landed ? shipName(e.landed) : null, bays: baysNear(k),
     // The shipyard's drydock: whether we're docked there, in it, and any release under way.
     drydock: { shipyard: isShipyard(e.docked), in: !!e.drydock, berth: e.drydock ? e.berth : null, powered: e.drydock ? berthPowered(k) : null, release: e.release ? Math.max(0, Math.ceil((e.release - Date.now()) / 1000)) : null, hold: !!e.hold },
     dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName),
@@ -2512,6 +2552,33 @@ function dockCommand(ws, msg) {
     joinShips(r.from, r.port, key, tp);
     return;
   }
+  // The shuttle bay: land in a ship's (or starbase's) bay, or take off.
+  if (msg.land) {
+    const m = shipKey(clean(msg.land));
+    const why = landFault(key, m);
+    if (why) return note(why);
+    e.landed = m; e.dirty = true;
+    if (isBase(m)) { e.docked = shipName(m); e.dockedPort = 'port'; untieDock(e); } // (in a starbase's bay: docked at it)
+    else { connOf(e, m); connOf(engOf(m), key); for (const r of CONN_RES) { e.conn[m][r] = { imp: false, exp: false }; engOf(m).conn[key][r] = { imp: false, exp: false }; } } // (a new connection: nothing tied)
+    opLog(key, `Helm (${ws.name}): landed in the ${shipName(m)}'s shuttle bay`);
+    opLog(m, `the ${shipName(key)} landed in our shuttle bay`);
+    for (const u of crewOf(key)) send(u, { type: 'notice', text: `Helm: landed in the ${shipName(m)}'s shuttle bay` });
+    broadcastCrew(key); broadcastOps(m);
+    return gridChanged(key);
+  }
+  if (msg.takeoff) {
+    if (!e.landed) return note('not landed in a shuttle bay');
+    const m = e.landed;
+    if (present(m) && !engOf(m).bayOpen) return note(`the ${shipName(m)}'s shuttle bay doors are closed: ask their Ops to open them`);
+    e.landed = null; e.dirty = true;
+    if (isBase(m) && e.docked === shipName(m)) e.docked = null;
+    for (const slot of ['bay']) { e.feed[slot] = 0; e.fed[slot] = 0; e.feedEps[slot] = 0; e.fedEps[slot] = 0; }
+    opLog(key, `Helm (${ws.name}): took off from the ${shipName(m)}'s shuttle bay`);
+    opLog(m, `the ${shipName(key)} took off from our shuttle bay`);
+    for (const u of crewOf(key)) send(u, { type: 'notice', text: `Helm: took off from the ${shipName(m)}'s shuttle bay` });
+    broadcastCrew(key); broadcastOps(m);
+    return gridChanged(key);
+  }
   // The shipyard's drydock: enter it (docked there), or ask to be released.
   if (msg.drydock) {
     if (!isShipyard(e.docked)) return note(`drydock is only at the shipyard (${SHIPYARD.name}): dock there first`);
@@ -2537,6 +2604,7 @@ function dockCommand(ws, msg) {
     return gridChanged(key);
   }
   if (msg.undock) {
+    if (e.landed && isBase(e.landed)) return note(`landed in ${shipName(e.landed)}'s shuttle bay: take off instead`);
     if (e.drydock && (!PORTS.includes(msg.port) || msg.port === e.dockedPort)) return note(`in drydock at ${e.docked}: request release first`);
     // One port (or all of them).
     const ports = PORTS.includes(msg.port) ? [msg.port] : PORTS;
@@ -2582,6 +2650,26 @@ function dockCommand(ws, msg) {
   gridChanged(key);
 }
 
+// Why this craft can't land in m's bay now (null: it can). Shuttles and
+// runabouts land (runabouts only in a starbase's bay); within docking range,
+// both at all stop, the bay doors open, and room in the bay.
+function landFault(k, m) {
+  const c = classOf(k), e = engOf(k);
+  if (isBase(k) || !['runabout', 'shuttle'].includes(classId(k))) return 'only a shuttle or a runabout lands in a shuttle bay';
+  if (e.landed) return `already landed in the ${shipName(e.landed)}'s shuttle bay`;
+  if (!present(m) || m === k || !navState.has(m)) return `the ${shipName(m)} isn't here`;
+  if (!bayCapacity(m)) return `the ${shipName(m)} has no shuttle bay`;
+  if (classId(k) === 'runabout' && !isBase(m)) return `a ${c.name.toLowerCase()} only lands in a starbase's shuttle bay`;
+  if (distance(k, m) > DOCK_RANGE) return `the ${shipName(m)} is out of range (${Math.round(distance(k, m))} units; get within ${DOCK_RANGE})`;
+  if ((navState.get(k)?.warp || 0) > 0 || (navState.get(m)?.warp || 0) > 0) return 'come to all stop first (both of you)';
+  if (!engOf(m).bayOpen) return `the ${shipName(m)}'s shuttle bay doors are closed: ask their Ops to open them`;
+  if (landedIn(m).length >= bayCapacity(m)) return `the ${shipName(m)}'s shuttle bay is full (${bayCapacity(m)})`;
+  if (e.docked || shipsDocked(k).length) return 'undock first';
+  return null;
+}
+// The bays a craft could land in from here (for Helm's taps), with why not.
+const baysNear = (k) => (isBase(k) || !['runabout', 'shuttle'].includes(classId(k)) || engOf(k).landed ? [] : [...new Set([...cores.keys(), ...BASE_KEYS])]
+  .filter((m) => m !== k && navState.has(m) && bayCapacity(m) && distance(k, m) <= DOCK_RANGE * 3).map((m) => ({ name: shipName(m), why: landFault(k, m) })));
 // The ship in a shipyard's berth (1-3), and whether a drydocked ship's connection has its power.
 const berthShip = (yard, n) => drydocked().find((o) => shipKey(engOf(o).docked || '') === yard && engOf(o).berth === n) || null;
 function berthPowered(k) {
@@ -2654,7 +2742,7 @@ function untieDock(e) {
 function dockedWith(k) {
   const e = engOf(k), out = [];
   if (e.docked) out.push(shipKey(e.docked));
-  for (const [, o] of shipsDocked(k)) out.push(o);
+  for (const [, o] of partners(k)) out.push(o);
   if (isBase(k)) for (const [o, oe] of eng) if (oe.docked && shipKey(oe.docked) === k && cores.has(o)) out.push(o);
   return [...new Set(out)];
 }
@@ -2822,7 +2910,7 @@ function moveConnections(k, e, f) {
   const pct = (x, res) => (100 * x[BUS_RESOURCE[res]]) / FUEL[BUS_RESOURCE[res]];
   // Antimatter needs the pods' containment powered on the taking side, and the antimatter bus up on ours.
   const amOk = (x, kk) => (x.ties.containment || []).some((n) => flow(kk).totals[n]?.available >= GRID.containment) && !x.amBusDown && x.core !== 'ejected';
-  const others = [...(e.docked ? [['station', null]] : []), ...shipsDocked(k).map(([, o]) => [o, engOf(o)])];
+  const others = [...(e.docked ? [['station', null]] : []), ...partners(k).map(([, o]) => [o, engOf(o)])];
   for (const [key, them] of others) {
     for (const res of ['deu', 'am']) {
       const r = BUS_RESOURCE[res], mine = wants(connOf(e, key)[res], pct(e, res));
@@ -3334,6 +3422,15 @@ setInterval(() => {
       if (!cores.has(o) || !navState.has(o)) { if (!e.partnerGoneAt[p]) e.partnerGoneAt[p] = now; if (now - e.partnerGoneAt[p] > 30000) undockPort(k, p, 'lost contact'); continue; }
       e.partnerGoneAt[p] = 0;
       if (nav.warp > 0 || navState.get(o).warp > 0 || distance(k, o) > DOCK_RANGE) undockPort(k, p, 'moved apart');
+    }
+    // Landed in a bay: the craft rides along with its mothership.
+    if (e.landed && navState.has(e.landed) && navState.has(k)) {
+      const mn = navState.get(e.landed), n0 = navState.get(k);
+      if (Math.hypot(mn.x - n0.x, mn.y - n0.y) > 0.01 || n0.warp) {
+        Object.assign(n0, { x: mn.x, y: mn.y, heading: mn.heading, warp: 0, dest: null });
+        const core = primaryCore.get(k);
+        if (core) send(core, { type: 'core-set', ship: shipName(k), set: { moveTo: { x: mn.x, y: mn.y, heading: mn.heading } } });
+      }
     }
     // A docking request not answered in time lapses.
     const req = dockRequests.get(k);
