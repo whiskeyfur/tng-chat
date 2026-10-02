@@ -747,6 +747,15 @@ function setGridOrder(v) { gridOrder = v; try { localStorage.setItem('stchat-gri
 // --- Captain, First Officer, Security, Medical controls --------------------------
 const securityAlerts = []; // beam-ins Security has been told about
 const sentOrders = new Map(); // orders we gave, with acknowledgements
+// Orders: who's picked to send the next one to (nobody: all hands).
+const orderPick = new Set();
+function issueOrder(text) {
+  if (!text.value.trim()) return;
+  send({ type: 'order', text: text.value.trim(), ...(orderPick.size ? { to: [...orderPick] } : {}) });
+  text.value = '';
+  orderPick.clear();
+  renderCrewPanels();
+}
 
 function renderCrewPanels() {
   if (!me || !stationView) return;
@@ -770,7 +779,7 @@ function renderCrewPanels() {
     if (!cmd.firstChild) {
       const text = el('input', { className: 'ops-input', id: 'order-text', placeholder: 'Orders to all hands aboard', autocomplete: 'off' });
       const form = el('form', { className: 'ops-form' }, text, el('button', { className: 'lcars-button lcars-button--pill', id: 'order-send', textContent: 'Issue order' }));
-      form.onsubmit = (e) => { e.preventDefault(); if (text.value.trim()) send({ type: 'order', text: text.value.trim() }); text.value = ''; };
+      form.onsubmit = (e) => { e.preventDefault(); issueOrder(text); };
       cmd.append(
         el('p', { className: 'st-state', id: 'alert-state' }),
         el('div', { className: 'ops-form', id: 'alert-buttons' },
@@ -847,15 +856,53 @@ function renderCrewPanels() {
       })),
       el('p', { className: 'ops-hint', textContent: 'Crew in sickbay are off duty: they don\'t count in department readiness.' }));
   }
-  // Orders (Captain, First Officer): the form, and who has acknowledged each order given.
-  for (const box of document.querySelectorAll('[data-orders], [data-command], [data-reassign]')) {
-    let tally = box.querySelector('.order-tally');
+  // Orders (Captain, First Officer): the form; under it who to send them to
+  // (taps: a department's label for all of it, a name for one; nobody picked:
+  // all hands); and the orders given, newest first, each with who has
+  // acknowledged it (green) and who hasn't yet (amber).
+  for (const box of document.querySelectorAll('[data-orders], [data-command]')) {
     if (box.matches('[data-orders]') && !box.firstChild) {
       const text = el('input', { className: 'ops-input', id: 'order-text', placeholder: 'Orders to the crew aboard', autocomplete: 'off' });
       const form = el('form', { className: 'ops-form' }, text, el('button', { className: 'lcars-button lcars-button--pill', id: 'order-send', textContent: 'Issue order' }));
-      form.onsubmit = (e) => { e.preventDefault(); if (text.value.trim()) send({ type: 'order', text: text.value.trim() }); text.value = ''; };
+      form.onsubmit = (e) => { e.preventDefault(); issueOrder(text); };
       box.append(form, el('p', { className: 'ops-hint', textContent: 'Everyone aboard but you and the Captain is asked to acknowledge.' }));
     }
+    let targets = box.querySelector('.order-targets'), history = box.querySelector('.order-history');
+    if (!targets) { targets = el('div', { className: 'order-targets' }); box.querySelector('form')?.after(targets); }
+    if (!history) { history = el('div', { className: 'order-history' }); box.append(history); }
+    // Who could be sent orders: the crew aboard by station (not me; not the Captain; nor the First Officer for theirs).
+    const skip = me.station === 'First Officer' ? ['Captain', 'First Officer'] : ['Captain'];
+    const reachable = crew.filter((u) => u.id !== me.id && !skip.includes(u.station));
+    for (const id of [...orderPick]) if (!reachable.some((u) => u.id === id)) orderPick.delete(id);
+    const byDept = (list) => [...new Set(list.map((u) => u.station))].map((st) => [st, list.filter((u) => u.station === st)]);
+    const chip = (u, state, onclick) => { const b = el('button', { type: 'button', className: 'order-chip', textContent: u.name, onclick, disabled: !onclick }); b.dataset.state = state; b.dataset.who = u.id; return b; };
+    if (changed(targets, reachable.map((u) => [u.id, u.station]), [...orderPick])) {
+      targets.replaceChildren(el('p', { className: 'ops-hint', textContent: orderPick.size ? `To ${orderPick.size} picked · tap again to unpick` : 'To all hands · or tap a department or names to pick who' }),
+        ...byDept(reachable).map(([st, us]) => {
+          const all = us.every((u) => orderPick.has(u.id));
+          const label = el('button', { type: 'button', className: 'order-dept', textContent: st, onclick: () => { for (const u of us) if (all) orderPick.delete(u.id); else orderPick.add(u.id); renderCrewPanels(); } });
+          label.setAttribute('aria-pressed', String(all));
+          const row = el('div', { className: 'order-row' }, label, el('span', { className: 'order-chips' }, ...us.map((u) => { const c = chip(u, orderPick.has(u.id) ? 'picked' : 'idle', () => { if (orderPick.has(u.id)) orderPick.delete(u.id); else orderPick.add(u.id); renderCrewPanels(); }); c.setAttribute('aria-pressed', String(orderPick.has(u.id))); return c; })));
+          row.dataset.dept = st;
+          return row;
+        }));
+    }
+    const log = lastNav?.own?.orders || [];
+    if (changed(history, log)) {
+      history.replaceChildren(...log.map((o) => {
+        const waiting = o.to.filter((u) => !o.acked.includes(u.id) && !(o.declined && o.declined === u.name));
+        const sec = el('section', { className: 'order-entry' },
+          el('h4', { className: 'order-title', textContent: o.text }),
+          el('small', { className: 'grid-note', textContent: `${new Date(o.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${o.from.title || o.from.name}${o.declined ? ` · declined by ${o.declined}` : waiting.length ? ` · ${o.acked.length} acknowledged · waiting for ${waiting.map((u) => u.name).join(', ')}` : o.to.length ? ` · all ${o.acked.length} acknowledged` : ' · nobody to acknowledge'}` }),
+          ...byDept(o.to).map(([st, us]) => el('div', { className: 'order-row' }, el('span', { className: 'order-dept', textContent: st }), el('span', { className: 'order-chips' }, ...us.map((u) => chip(u, o.acked.includes(u.id) ? 'acked' : o.declined === u.name ? 'declined' : 'pending'))))));
+        sec.dataset.order = o.id;
+        return sec;
+      }));
+    }
+  }
+  // The First Officer's reassignments: who has moved.
+  for (const box of document.querySelectorAll('[data-reassign]')) {
+    let tally = box.querySelector('.order-tally');
     if (!tally) { tally = el('ul', { className: 'st-list order-tally' }); box.append(tally); }
     if (changed(tally, [...sentOrders.values()])) {
       tally.replaceChildren(...[...sentOrders.values()].slice(-5).reverse().map((o) => {

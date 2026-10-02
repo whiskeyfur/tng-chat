@@ -437,7 +437,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await martok.locator('#st-tactical canvas').count(), 1, 'captain console has a tactical plot');
     // Department readiness counts who is at each station aboard: kor
     // (Engineering) and the K'Vatch's operator are on duty; Medical isn't.
-    await martok.waitForSelector('#st-dept li[data-dept="Engineering"][data-manned]:has-text("1 on duty")', { state: 'attached' });
+    await martok.waitForSelector('#st-dept li[data-dept="Engineering"][data-manned] .st-chip:has-text("kor")', { state: 'attached' });
     await martok.waitForSelector('#st-dept li[data-dept="Operations"][data-manned]', { state: 'attached' });
     assert.match(await martok.textContent('#st-dept li[data-dept="Medical"]'), /Unmanned/);
     assert.equal(await martok.locator('#st-dept li[data-dept="Medical"][data-manned]').count(), 0);
@@ -1115,19 +1115,40 @@ const audioBytes = (page) => page.evaluate(async () => {
     await bob.waitForSelector('.bcast--order:has-text("prepare for first contact")', { state: 'attached' });
     assert.equal(await picard.locator('.bcast--order').count(), 0, 'the Captain is not asked to acknowledge his own order');
     await bob.click('.bcast--order:has-text("prepare for first contact") button');
-    await picard.waitForSelector('.order-tally li:has-text("prepare for first contact"):has-text("acknowledged")', { state: 'attached' });
-    assert.doesNotMatch(await picard.textContent('.order-tally li'), /waiting for [^·]*\bpicard\b/);
+    // Each order given: its section (text, when, who has acknowledged: green, and who hasn't: amber).
+    await picard.waitForSelector('.order-history .order-entry:has-text("prepare for first contact") .order-chip[data-state="acked"]:has-text("bob")', { state: 'attached' });
+    assert.equal(await picard.locator('.order-history .order-entry:has-text("prepare for first contact") .order-chip:has-text("picard")').count(), 0, 'the Captain was asked to acknowledge his own order');
     // The First Officer's orders: neither the First Officer nor the Captain is asked.
     await screen(riker, 'st-orders');
     await riker.fill('#order-text', 'Drill on deck 8');
     await riker.click('#order-send');
     await bob.waitForSelector('.bcast--order:has-text("Drill on deck 8")', { state: 'attached' });
-    await riker.waitForSelector('.order-tally li:has-text("Drill on deck 8")', { state: 'attached' });
+    await riker.waitForSelector('.order-history .order-entry:has-text("Drill on deck 8")', { state: 'attached' });
     assert.equal(await riker.locator('.bcast--order:has-text("Drill on deck 8")').count(), 0);
     assert.equal(await picard.locator('.bcast--order:has-text("Drill on deck 8")').count(), 0);
-    assert.doesNotMatch(await riker.textContent('.order-tally li'), /picard|riker/);
+    assert.doesNotMatch(await riker.textContent('.order-history .order-entry:has-text("Drill on deck 8") .order-chips'), /picard|riker/);
     await bob.click('.bcast--order:has-text("Drill on deck 8") button');
-    step("orders: the Captain and the First Officer aren't asked to acknowledge their own (nor the Captain the First Officer's); bob's acknowledgement showed in the tally");
+    // Orders to some of the crew: the Captain picks carol (Tactical) by name; only she is asked.
+    await screen(picard, 'st-command');
+    await picard.click('.order-targets .order-chip[data-who="carol@enterprise"]');
+    await picard.waitForSelector('.order-targets .order-chip[data-who="carol@enterprise"][aria-pressed="true"]');
+    await picard.fill('#order-text', 'Tactical, run a targeting drill');
+    await picard.click('#order-send');
+    await carol.waitForSelector('.bcast--order:has-text("targeting drill")', { state: 'attached' });
+    await picard.waitForSelector('.order-history .order-entry:has-text("targeting drill") .order-chip[data-state="pending"]:has-text("carol")', { state: 'attached' });
+    assert.equal(await picard.locator('.order-history .order-entry:has-text("targeting drill") .order-chip').count(), 1, 'only carol was sent it');
+    assert.equal(await bob.locator('.bcast--order:has-text("targeting drill")').count(), 0);
+    assert.equal(await picard.locator('.order-targets .order-chip[aria-pressed="true"]').count(), 0, 'the selection clears once sent');
+    await carol.click('.bcast--order:has-text("targeting drill") button');
+    await picard.waitForSelector('.order-history .order-entry:has-text("targeting drill") .order-chip[data-state="acked"]:has-text("carol")', { state: 'attached' });
+    // (Narrow: the history's rows stay inside.)
+    const vp2 = picard.viewportSize();
+    await picard.setViewportSize({ width: 480, height: 800 });
+    assert.ok((await picard.$$eval('.order-history .order-row, .order-targets .order-row', (rs) => rs.map((r) => r.getBoundingClientRect().right))).every((x) => x <= 480), 'the order rows run off the side');
+    await picard.setViewportSize(vp2);
+    // (Newest first.)
+    assert.match(await picard.textContent('.order-history .order-entry'), /targeting drill/);
+    step("orders: the Captain and the First Officer aren't asked to acknowledge their own (nor the Captain the First Officer's); each order given has its section (newest first) with acknowledgements green and waits amber; the Captain sent one to carol alone, picked by name");
     await picard.click('#alert-buttons button[data-level="red"]');
     await bob.waitForFunction(() => document.body.dataset.alert === 'red');
     await carol.waitForSelector('[data-shield-control] .st-state:has-text("Shields up")', { state: 'attached' });

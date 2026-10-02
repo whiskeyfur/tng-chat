@@ -929,7 +929,7 @@ function navMessage(key) {
   return {
     type: 'nav',
     own: own ? { name: shipName(key), ...own, class: isBase(key) ? null : classOf(key).name, power: powerOf(key), capacity: Object.fromEntries(Object.entries(capacityOf(key)).map(([x, v]) => [x, Math.floor(v)])), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
-      autopilot: autopilots.get(key)?.target || null, transporter: transporterView(key), readiness: readinessView(key),
+      autopilot: autopilots.get(key)?.target || null, transporter: transporterView(key), readiness: readinessView(key), orders: engOf(key).orderLog,
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
     bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
@@ -1306,6 +1306,22 @@ function readinessView(k) {
     return [d, { state: !pending.length && !ready.length ? 'nocrew' : pending.length ? 'pending' : 'ready', pending, ready, at: c.at }];
   }));
 }
+// The ship's order history: each order with when it was given and who has acknowledged it.
+const ORDER_LOG = 20;
+function logOrder(k, o, to) {
+  const e = engOf(k);
+  e.orderLog.unshift({ id: o.id, text: o.text, at: o.at, from: { name: o.from.name, title: o.from.title, station: o.from.station }, to: to.map((u) => ({ id: u.id, name: u.name, station: u.station })), acked: [] });
+  e.orderLog.splice(ORDER_LOG);
+  e.dirty = true;
+  scheduleNav();
+}
+function ackOrder(k, id, who, declined = false) {
+  const entry = engOf(k).orderLog.find((x) => x.id === id);
+  if (!entry) return;
+  if (declined) entry.declined = who.name; else if (!entry.acked.includes(who.id)) entry.acked.push(who.id);
+  engOf(k).dirty = true;
+  scheduleNav();
+}
 // Orders and who has acknowledged them, for whoever gave them.
 const orders = new Map(); // id -> { id, ship, by, from, text, at, pending, acked }
 function orderStatus(o) {
@@ -1343,11 +1359,14 @@ function crewCommand(ws, msg) {
       const text = clean(msg.text).slice(0, 200);
       if (!text) return;
       const skip = ws.station === 'First Officer' ? ['Captain', 'First Officer'] : ['Captain'];
-      const to = crewOf(key).filter((u) => u !== ws && !skip.includes(u.station) && !u.operator);
+      // To the crew picked (by department or by name), or nobody picked: all hands.
+      const picked = Array.isArray(msg.to) ? new Set(msg.to.filter((x) => typeof x === 'string')) : null;
+      const to = crewOf(key).filter((u) => u !== ws && !skip.includes(u.station) && !u.operator && (!picked?.size || picked.has(u.id)));
       const o = { id: newId('o-'), ship: key, by: ws.id, from: info(ws), text, at: Date.now(), pending: new Set(to.map((u) => u.id)), acked: new Set() };
       orders.set(o.id, o);
       for (const u of to) send(u, { type: 'order', id: o.id, from: o.from, text, at: o.at });
       orderStatus(o);
+      logOrder(key, o, to);
       opLog(key, `${ws.station === 'Captain' ? "Captain's" : "First Officer's"} orders: ${text}`);
       return;
     }
@@ -1389,6 +1408,7 @@ function crewCommand(ws, msg) {
       o.pending.delete(ws.id);
       o.acked.add(ws.id);
       orderStatus(o);
+      ackOrder(key, o.id, ws);
       return;
     }
     case 'reassign': {
@@ -1401,6 +1421,7 @@ function crewCommand(ws, msg) {
       // An order to the crewman: they move when they acknowledge (or decline it).
       const o = { id: newId('o-'), ship: key, by: ws.id, from: info(ws), text: `${u.name}: report to ${msg.station}`, at: Date.now(), pending: new Set([u.id]), acked: new Set(), reassign: { who: u.id, station: msg.station } };
       orders.set(o.id, o);
+      logOrder(key, o, [u]);
       send(u, { type: 'order', id: o.id, from: o.from, text: `Report to ${msg.station}`, at: o.at, reassign: msg.station });
       orderStatus(o);
       opLog(key, `${ws.name} ordered ${u.name} to report to ${msg.station}`);
@@ -1411,6 +1432,7 @@ function crewCommand(ws, msg) {
       if (!o || !o.reassign || !o.pending.delete(ws.id)) return;
       o.declined = ws.name;
       orderStatus(o);
+      ackOrder(key, o.id, ws, true);
       const by = users.get(o.by);
       if (by) send(by, { type: 'notice', text: `${ws.name} declined the order to report to ${o.reassign.station}` });
       opLog(key, `${ws.name} declined the order to report to ${o.reassign.station}`);
@@ -1920,6 +1942,8 @@ function freshEng(saved, { cold = false } = {}) {
     bayOpen: !!s.bayOpen, landed: typeof s.landed === 'string' && s.landed ? shipKey(s.landed) : null,
     remoteBlock: !!s.remoteBlock, // ops refuse remote control by other vessels
     prefix: /^\d{5}$/.test(s.prefix) ? s.prefix : PREFIX.factory, // the command prefix (kept in .nav.json)
+    // The orders given aboard (newest first, the last ORDER_LOG): text, when, by whom, to whom, who has acknowledged.
+    orderLog: Array.isArray(s.orderLog) ? s.orderLog.slice(0, ORDER_LOG).filter((o) => o && typeof o.text === 'string') : [],
     forcefields: Array.isArray(s.forcefields) ? s.forcefields.filter((st) => STATIONS.includes(st)) : [], // stations Security has isolated
     // Docked with another ship: kept across restarts (it's checked once both are back).
     // Two docking ports. A starbase takes one (docked, dockedPort); ships dock
@@ -2008,7 +2032,7 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, prefix: e.prefix, drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, prefix: e.prefix, orderLog: e.orderLog, drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
   };
 };

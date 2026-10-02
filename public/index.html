@@ -308,7 +308,17 @@
     .pw-effects { list-style: none; margin: 0; padding: 0; color: var(--lcars-tan); display: grid; gap: 2px; }
     /* One row per department: its label, its state, its Check tap (fixed columns, nothing overlaps). */
     .st-depts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 6px; text-transform: uppercase; max-width: 100%; overflow: hidden; }
-    .st-depts li { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; }
+    .st-depts li { display: grid; grid-template-columns: auto 150px minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; }
+    .st-chips, .order-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+    .st-chip, .order-chip { border-radius: 999px; padding: 2px 10px; font-size: 13px; background: #333; color: var(--lcars-text); border: 0; text-transform: none; }
+    .st-chip[data-state="ready"], .order-chip[data-state="acked"] { background: #66cc66; color: #000; }
+    .st-chip[data-state="pending"], .order-chip[data-state="pending"] { background: var(--lcars-gold); color: #000; }
+    .order-chip[data-state="declined"] { background: var(--lcars-red); color: #000; }
+    .order-chip[data-state="picked"], .order-dept[aria-pressed="true"] { background: var(--lcars-sky); color: #000; }
+    .order-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px; align-items: center; margin: 4px 0; }
+    .order-dept { border-radius: 999px 0 0 999px; padding: 3px 12px; background: var(--lcars-tan); color: #000; border: 0; text-align: right; text-transform: uppercase; }
+    .order-entry { border-top: 2px dotted #333; padding-top: 6px; margin-top: 8px; }
+    .order-title { margin: 0; color: var(--lcars-gold); }
     .st-depts li.st-dept-all { display: block; }
     .st-dept-count { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .st-dept-label { padding: 3px 12px; border-radius: 999px 0 0 999px; color: #000; text-align: right; background: var(--lcars-red); }

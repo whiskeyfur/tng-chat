@@ -495,10 +495,15 @@
             const n = aboard.filter((u) => u.station === d && !u.sickbay).length; // sickbay is off duty
             const r = rd[d] || { state: 'idle' };
             const said = r.state === 'ready' ? `Ready (${r.ready.length})` : r.state === 'pending' ? `Waiting: ${r.pending.join(', ')}` : r.state === 'nocrew' ? 'No crew' : n ? `${n} on duty` : 'Unmanned';
-            return h('li', { 'data-dept': d, 'data-manned': n > 0, 'data-ready': r.state },
+            // Its people as chips: green once checked in, amber while waiting (no check yet: plain).
+            const here = aboard.filter((u) => u.station === d && !u.sickbay).map((u) => u.name);
+            const chips = r.state === 'pending' || r.state === 'ready'
+              ? [...r.ready.map((nm) => h('span', { class: 'st-chip', 'data-state': 'ready' }, nm)), ...r.pending.map((nm) => h('span', { class: 'st-chip', 'data-state': 'pending' }, nm))]
+              : here.length && r.state !== 'nocrew' ? here.map((nm) => h('span', { class: 'st-chip', 'data-state': 'idle' }, nm)) : [h('span', { class: 'st-dept-count' }, r.state === 'nocrew' ? 'No crew' : 'Unmanned')];
+            return h('li', { 'data-dept': d, 'data-manned': n > 0, 'data-ready': r.state, title: said },
+              tapTo(h('button', { type: 'button', class: 'lcars-button lcars-button--pill st-dept-check', 'data-check': d }, 'Check'), d),
               h('span', { class: 'st-dept-label' }, d),
-              h('span', { class: 'st-dept-count' }, said),
-              tapTo(h('button', { type: 'button', class: 'lcars-button lcars-button--pill st-dept-check', 'data-check': d }, 'Check'), d));
+              h('span', { class: 'st-chips' }, ...chips));
           }));
         }
       },
