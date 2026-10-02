@@ -931,7 +931,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     beamSelf();
     await waitFor(() => randMsgs.some((m) => m.type === 'notice' && /out of transporter range/.test(m.text)));
     step('Helm flew the Enterprise out of radio range at warp 7: the Defiant left hailing range and beaming over is out of range, but the data link held (subspace reaches the whole system)');
-    // A subspace relay down drops the link; back up, a new one opens across the system.
+    // A subspace relay down: the link stays but carries nothing (signal lost); back up, it carries again.
     const kyle = new WebSocket(`ws://localhost:${process.env.PORT}`);
     await new Promise((r) => kyle.on('open', r));
     kyle.send(JSON.stringify({ type: 'register', name: 'kyle', ship: 'Enterprise', station: 'Engineering' }));
@@ -940,15 +940,13 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.waitForFunction(() => !window.__operator.network.includes('Defiant'), null, { timeout: 15000 });
     await op.waitForSelector('#ops-log li:has-text("a subspace relay is down")', { state: 'attached' });
     await op.waitForFunction(() => !window.__operator.linkShips.includes('Defiant'));
+    assert.ok(await op.evaluate(() => window.__operator.links.includes('Defiant')), 'the link stays (signal lost), to be closed or to come back');
     kyle.send(JSON.stringify({ type: 'grid', ties: { 'sub:subspace': ['B'] } }));
     await op.waitForFunction(() => window.__operator.linkShips.includes('Defiant'), null, { timeout: 15000 });
-    await screen(op, 'link');
-    await op.click(`#link-taps button[data-ship="Defiant"]`);
-    await screen(dops, 'link');
-    await dops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
-    await op.waitForFunction(() => window.__operator.network.includes('Defiant'));
+    await op.waitForFunction(() => window.__operator.network.includes('Defiant'), null, { timeout: 15000 });
+    await op.waitForSelector('#ops-log li:has-text("signal restored")', { state: 'attached' });
     kyle.close();
-    step('with the Enterprise\'s subspace relay untied the data link dropped; tied again, a new link opened with the far-off Defiant');
+    step('with the Enterprise\'s subspace relay untied the data link with the far-off Defiant lost its signal (it stayed, carrying nothing, off the network); tied again, it carried again');
 
     // And back: intercept the Defiant, arriving within transporter range.
     // (Far off, the Defiant may be off our sensors: head for where it is, then intercept.)
@@ -1795,7 +1793,12 @@ const audioBytes = (page) => page.evaluate(async () => {
       await auto('tactical', false);
       await picard.evaluate(() => window.__send({ type: 'alert', level: 'green' }));
       await carol.evaluate(() => { window.__send({ type: 'shields', up: false }); window.__send({ type: 'arm', on: false }); });
-      // Science: a sensor lock on the nearest contact off our network.
+      // Science: a sensor lock on the nearest contact off our network (the Defiant: its link, which
+      // came back when it powered up again, closed first).
+      if (await op.evaluate(() => window.__operator.links.includes('Defiant'))) {
+        await op.evaluate(() => window.__send({ type: 'link-close', ship: 'Defiant' }));
+        await op.waitForFunction(() => !window.__operator.network.includes('Defiant'));
+      }
       await auto('science', true);
       await waitFor(async () => /tracking the /.test(await ops('science')), 20000);
       await auto('science', false);

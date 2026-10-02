@@ -97,6 +97,22 @@ async function sock(hello) {
     assert.match(await page.textContent('#net-details-facts'), /Galaxy class/);
     assert.match(await page.textContent('#net-details-facts'), /Data network.*network \(2\)/);
     step('tapping the Enterprise–Starbase 47 link listed its data network (Enterprise, Farragut, Starbase 47); tapping the Cole showed its class and network');
+    // A link whose path is down stays, dashed (signal lost), and either end still closes it; the
+    // other ships' links say who can close them; our own Open Links match the map's edges.
+    await page.click('#net-map .net-link[data-link="enterprise|starbase 47"] .net-hit', { force: true });
+    assert.match(await page.textContent('#net-link-who'), /Closed by either end: the Enterprise's or the Starbase 47's ops or Communications/);
+    const ours = await page.$$eval('#net-map .net-link', (ls) => ls.map((l) => l.dataset.link).filter((k) => k.split('|').includes('discovery')));
+    assert.equal(ours.length, (await until(() => ops.Discovery.last('roster'))).links.length, 'Open Links match the map');
+    const scotty = await sock({ type: 'register', name: 'scotty', ship: 'Vengence', station: 'Engineering' });
+    await until(() => scotty.last('nav'));
+    scotty.send({ type: 'grid', ties: { 'sub:subspace': [] } });
+    await page.waitForSelector('#net-map .net-link[data-link="utopia planitia|vengence"] line[data-lost]', { state: 'attached', timeout: 15000 });
+    ops.Vengence.send({ type: 'link-close', ship: 'Utopia Planitia' });
+    await until(() => !ops.Vengence.last('roster')?.links?.includes('Utopia Planitia'));
+    await page.waitForSelector('#net-map .net-link[data-link="utopia planitia|vengence"]', { state: 'detached', timeout: 15000 });
+    scotty.send({ type: 'grid', ties: { 'sub:subspace': ['B'] } });
+    scotty.close();
+    step("a link with its subspace relay down showed dashed (signal lost) and the Vengence still closed it; a link that isn't ours says who can close it; our Open Links match the map");
 
     // Communications (the Farragut's) has the map too, and requests a link the Cole's ops sees.
     const comms = await (await browser.newContext({ viewport: { width: 1300, height: 850 } })).newPage();
@@ -112,6 +128,25 @@ async function sock(hello) {
     await comms.click('[data-netmap-details] button:has-text("Request link")');
     await until(() => ops.Cole.last('roster')?.linkIncoming?.some((r) => r.fromShip === 'Farragut'));
     step("the Farragut's Communications has the map: tapping the Cole and Request link sent a request the Cole's ops sees");
+    // Live counts: someone signing on aboard the Cole, and its ops leaving, change its pill (and its
+    // details) on the Discovery's map without a reload (and without laying the map out again).
+    const pill = () => page.textContent('#net-map .net-node[data-ship="Cole"]');
+    await page.click('#net-map .net-node[data-ship="Cole"]');
+    await page.waitForSelector('#net-details-title:has-text("The Cole")');
+    // (Once the map is at rest from the last change.)
+    const coleAt = () => page.$eval('#net-map .net-node[data-ship="Cole"]', (g) => g.getAttribute('transform'));
+    let before = await coleAt();
+    for (let i = 0; i < 40; i++) { await wait(250); const now = await coleAt(); if (now === before) break; before = now; }
+    assert.match(await pill(), /1 aboard(?! · no ops)/);
+    const rand = await sock({ type: 'register', name: 'rand', ship: 'Cole', station: 'Crew' });
+    await page.waitForFunction(() => /2 aboard/.test(document.querySelector('#net-map .net-node[data-ship="Cole"]').textContent), null, { timeout: 10000 });
+    assert.match(await page.textContent('#net-details-facts'), /Aboard\s*2 · ops manned/);
+    assert.equal(await page.$eval('#net-map .net-node[data-ship="Cole"]', (g) => g.getAttribute('transform')), before, 'a count change moves nothing');
+    ops.Cole.close();
+    await page.waitForFunction(() => /1 aboard · no ops/.test(document.querySelector('#net-map .net-node[data-ship="Cole"]').textContent), null, { timeout: 10000 });
+    assert.match(await page.textContent('#net-details-facts'), /Aboard\s*1 · ops unmanned/);
+    rand.close();
+    step("the Discovery's map followed the Cole's crew live: 2 aboard when rand signed on, no ops when its ops left; a count change moved nothing");
     ok = true;
   } catch (err) {
     console.error('FAIL:', err.message);

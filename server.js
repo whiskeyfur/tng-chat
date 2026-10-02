@@ -165,20 +165,30 @@ function registerShip(name) {
 // --- data links ---------------------------------------------------------------
 
 const linkKey = (a, b) => [a, b].sort().join('|');
+// A link whose path is down (a subspace relay, or out of the system): it stays, signal lost, until it's back.
+// (Both ends there and its path down, as linkTick last found it.)
+const lostLinks = new Set();
+const linkLost = (l) => links.has(l) && lostLinks.has(l);
 const linkedTo = (key) => [...links].map((l) => l.split('|')).filter((l) => l.includes(key)).map((l) => (l[0] === key ? l[1] : l[0]));
 // Every ship reachable over data links from `key`, including itself.
 function network(key) {
   const seen = new Set([key]);
   const todo = [key];
-  while (todo.length) for (const k of linkedTo(todo.pop())) if (!seen.has(k)) { seen.add(k); todo.push(k); }
+  // (Over live links only: a link whose path is down carries nothing until it's back.)
+  while (todo.length) { const x = todo.pop(); for (const k of linkedTo(x)) if (!seen.has(k) && !linkLost(linkKey(x, k))) { seen.add(k); todo.push(k); } }
   return seen;
 }
 const sameNetwork = (a, b) => network(a).has(b);
 
 // Crew see everyone aboard ships on their data network (just their own ship
 // when unlinked). `ops` says whether their own ship has ops on duty.
+// The network map's crew counts and ops flags: every ops and Communications console,
+// aboard any ship, gets the picture again when anyone comes or goes (once, shortly after).
+let presenceTimer = null;
+const schedulePresence = () => { presenceTimer ||= setTimeout(() => { presenceTimer = null; new Set([...users.values()].filter((u) => u.operator || u.station === 'Communications').map((u) => u.shipKey)).forEach(broadcastOps); }, 250); };
 function broadcastCrew(key) {
   syncRooms();
+  schedulePresence();
   scheduleTraffic();
   scheduleNav();
   const net = network(key);
@@ -255,6 +265,8 @@ function networkGraph() {
     // (Each with what the map's details show: where it is, remote control, crewless.)
     ships: shipList().filter((sh) => sh.active).map((sh) => { const k = shipKey(sh.name), n = navState.get(k); return { ...sh, crew: crewOf(k).length, ...(n ? { x: Math.round(n.x), y: Math.round(n.y) } : {}), remoteBlock: !!engOf(k).remoteBlock, automated: isBase(k) || !crewOf(k).length }; }),
     since: Object.fromEntries([...links].map((l) => [l.split('|').map((k) => shipName(k).toLowerCase()).sort().join('|'), linkSince.get(l) || null])),
+    // (Links whose path is down: they stay, carrying nothing, until it's back; either end can still close them.)
+    lost: [...links].filter(linkLost).map((l) => l.split('|').map(shipName)),
     links: [...links].map((l) => l.split('|').map(shipName)),
     hard: [...hardLinks].filter((l) => links.has(l)).map((l) => l.split('|').map(shipName)), // (docking-port hard links)
     requests: [...linkRequests.values()].map((r) => [shipName(r.fromShip), shipName(r.toShip)]),
@@ -2952,6 +2964,23 @@ function restoreLinks(k, names) {
   if (!Array.isArray(names)) return;
   for (const n of names) if (typeof n === 'string' && n) { const l = linkKey(k, shipKey(n)); if (!links.has(l)) pendingLinks.set(l, Date.now()); }
 }
+// (Links losing or getting back their path are noticed within a second.)
+setInterval(() => lostTick(), 1000);
+// A link's path down: signal lost (it stays, and either end can close it); back: it carries again.
+function lostTick(only) {
+  for (const l of only ? [only] : [...links]) {
+    if (hardLinks.has(l)) continue;
+    const [a, b] = l.split('|');
+    const relayDown = !commsUp(a, 'subspace') || !commsUp(b, 'subspace');
+    const lost = !hardLine(a, b) && (!subspaceOk(a, b) || relayDown) && present(a) && present(b);
+    if (lost === lostLinks.has(l)) continue;
+    if (lost) lostLinks.add(l); else lostLinks.delete(l);
+    for (const k of [a, b]) opLog(k, lost ? `data link with the ${shipName(k === a ? b : a)}: signal lost: ${relayDown ? 'a subspace relay is down' : 'left the star system'}` : `data link with the ${shipName(k === a ? b : a)}: signal restored`);
+    refreshNetworks([a, b]);
+    broadcastAllOps();
+    schedulePresence();
+  }
+}
 function linkTick() {
   for (const [l, at] of [...pendingLinks]) {
     const [a, b] = l.split('|');
@@ -2995,13 +3024,7 @@ function linkTick() {
       broadcastAllOps();
       continue;
     }
-    const relayDown = !commsUp(a, 'subspace') || !commsUp(b, 'subspace');
-    if (!hardLine(a, b) && (!subspaceOk(a, b) || relayDown) && present(a) && present(b)) {
-      links.delete(l);
-      for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} lost: ${relayDown ? 'a subspace relay is down' : 'left the star system'}`);
-      refreshNetworks([a, b]);
-      broadcastAllOps();
-    }
+    lostTick(l);
   }
 }
 // A fresh starbase connection: nothing tied (no power, Deu., AM or ODN) until Engineering ties it.
@@ -4086,7 +4109,7 @@ function stationCommand(ws, msg) {
 const PREFIX = { tries: 3, lockMs: (Number(process.env.PREFIX_LOCK_SECS) || 60) * 1000, factory: '00000' };
 const prefixFails = new Map(); // "fromKey|toKey" -> { n, until }
 function remoteOk(ws, t) {
-  if (!t || t === ws.shipKey || !present(t) || !links.has(linkKey(ws.shipKey, t))) return false;
+  if (!t || t === ws.shipKey || !present(t) || !links.has(linkKey(ws.shipKey, t)) || linkLost(linkKey(ws.shipKey, t))) return false;
   if (ws.station === 'Crew') return false;
   if ([...users.values()].some((u) => u !== ws && u.controlling === t && u.station === ws.station)) return false; // someone else has it
   if (AUTO_PANELS.some((p) => AUTO_STATION[p] === ws.station && autoOn(t, p))) return false; // (an automated station runs itself)

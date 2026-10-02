@@ -33,6 +33,7 @@
     let graph = { ships: [], links: [], requests: [] };
     let broadcasts = [];
     let me = getMe(), ship = me.ship;
+    let pictureShip = ship; // (the vessel whose picture this is: ours, or the one we run by remote control)
 
     function stardate() {
       const now = new Date();
@@ -55,6 +56,7 @@
           hardLinks = msg.hardLinks || [];
           linkShips = msg.linkShips || ships;
           graph = msg.graph || graph;
+          pictureShip = msg.ship || ship;
           broadcasts = msg.broadcasts || [];
           remoteBlock = !!msg.remoteBlock;
           renderDrydock(msg.drydock, msg.berths);
@@ -172,7 +174,7 @@
     let netMap = null;
     function renderMap() {
       if (!$('net-map') || !window.createNetMap) return;
-      netMap ||= createNetMap({ svg: $('net-map'), details: $('net-details'), send, own: () => ship });
+      netMap ||= createNetMap({ svg: $('net-map'), details: $('net-details'), send, own: () => pictureShip });
       netMap.update({ graph, links, hardLinks, linkShips, linkIncoming, linkOutgoing, network });
     }
 
@@ -207,7 +209,7 @@
       const linkList = $('links');
       linkList.replaceChildren(...(links.length ? links.map((s) => (hardLinks || []).includes(s) ? el('li', { className: 'ops-hail' },
         el('span', { className: 'ops-hail__text', textContent: `Linked with the ${s} · hard link: docking port` })) : el('li', { className: 'ops-hail' },
-        el('span', { className: 'ops-hail__text', textContent: `Linked with the ${s}` }),
+        el('span', { className: 'ops-hail__text', textContent: `Linked with the ${s}${(graph.lost || []).some((l) => l.includes(s) && l.includes(pictureShip)) ? ' · signal lost (carrying nothing until it\'s back)' : ''}` }),
         el('button', { className: 'lcars-button lcars-button--pill lcars-button--alert', textContent: 'Close link',
           onclick: () => send({ type: 'link-close', ship: s }) }))) : [el('li', { className: 'empty', textContent: 'No open links' })]));
       const reqList = $('link-requests');
@@ -222,7 +224,7 @@
       if (!reqList.children.length) reqList.append(el('li', { className: 'empty', textContent: 'No link requests' }));
       // Every other vessel as a tap: one that can be linked requests it; the rest greyed with why.
       const why = (s) => (links.includes(s) ? 'linked' : linkOutgoing.some((r) => r.toShip === s) || linkIncoming.some((r) => r.fromShip === s) ? 'requested' : linkShips.includes(s) ? '' : 'out of reach: a subspace relay down');
-      const others = [...new Set([...graph.ships.map((x) => x.name), ...linkShips])].filter((s) => s.toLowerCase() !== ship.toLowerCase()).sort();
+      const others = [...new Set([...graph.ships.map((x) => x.name), ...linkShips])].filter((s) => s.toLowerCase() !== pictureShip.toLowerCase()).sort();
       $('link-taps').replaceChildren(...(others.length ? others.map((s) => { const w = why(s); const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: w ? `${s} · ${w}` : s, disabled: !!w, title: w, onclick: () => send({ type: 'link-request', ship: s }) }); b.dataset.ship = s; return b; }) : [el('span', { className: 'ops-hint', textContent: 'No other vessels' })]));
 
       // Roster

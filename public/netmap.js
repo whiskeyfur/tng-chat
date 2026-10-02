@@ -150,6 +150,7 @@
       const g = data.graph, me = keyOf(own());
       const onNet = new Set([me, ...(data.network || []).map(keyOf)]);
       const hard = new Set((g.hard || []).map(([a, b]) => pairKey(a, b)));
+      const lost = new Set((g.lost || []).map(([a, b]) => pairKey(a, b)));
       const nets = networks();
       const hiNet = selected?.link ? nets.of(selected.link.split('|')[0]) : null;
       const hiLinks = new Set((hiNet?.links || []).map(([a, b]) => pairKey(a, b)));
@@ -163,11 +164,11 @@
       const edge = ([a, b], pending) => {
         const p = nodes.get(keyOf(a)), q = nodes.get(keyOf(b));
         if (!p || !q) return;
-        const k = pairKey(a, b), isHard = !pending && hard.has(k), lit = selected?.link === k || hiLinks.has(k);
+        const k = pairKey(a, b), isHard = !pending && hard.has(k), lit = selected?.link === k || hiLinks.has(k), isLost = !pending && lost.has(k);
         const grp = node('g', { class: 'net-link', 'data-link': k });
         grp.append(
-          node('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: color(lit ? 'gold' : pending ? 'gold' : isHard ? 'orange' : 'sky'), 'stroke-width': lit ? 9 : pending ? 3 : isHard ? 9 : 5,
-            'stroke-dasharray': pending ? '10 8' : 'none', 'stroke-linecap': 'round', opacity: pending ? 0.8 : 1, ...(isHard ? { 'data-hard': '' } : {}) }),
+          node('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: color(lit ? 'gold' : pending ? 'gold' : isHard ? 'orange' : isLost ? 'tan' : 'sky'), 'stroke-width': lit ? 9 : pending ? 3 : isHard ? 9 : 5,
+            'stroke-dasharray': pending ? '10 8' : isLost ? '4 10' : 'none', ...(isLost ? { 'data-lost': '' } : {}), 'stroke-linecap': 'round', opacity: pending ? 0.8 : 1, ...(isHard ? { 'data-hard': '' } : {}) }),
           // (A wide invisible stroke: easy to tap on a tablet.)
           node('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: 'transparent', 'stroke-width': 26, class: 'net-hit' }));
         drawn.links.push({ a: keyOf(a), b: keyOf(b), lines: [...grp.children] });
@@ -215,7 +216,7 @@
         const linked = (data.links || []).includes(sh.name), hardLink = (data.hardLinks || []).includes(sh.name);
         const inc = (data.linkIncoming || []).find((r) => r.fromShip === sh.name), out = (data.linkOutgoing || []).find((r) => r.toShip === sh.name);
         const reach = (data.linkShips || []).includes(sh.name);
-        const status = mine ? 'this vessel' : linked ? (hardLink ? 'linked (hard link: docking port)' : 'linked') : inc ? 'requests a link with us' : out ? 'link requested' : 'not linked';
+        const status = mine ? 'this ship' : linked ? (hardLink ? 'linked (hard link: docking port)' : 'linked') : inc ? 'requests a link with us' : out ? 'link requested' : 'not linked';
         const actions = mine ? [] : linked ? (hardLink ? [] : [tap('Close link', () => send({ type: 'link-close', ship: sh.name }), true)])
           : inc ? [tap('Accept', () => send({ type: 'link-accept', request: inc.id })), tap('Decline', () => send({ type: 'link-decline', request: inc.id }), true)]
           : out ? [tap('Withdraw', () => send({ type: 'link-cancel', request: out.id }), true)]
@@ -236,10 +237,18 @@
       } else {
         const [a, b] = selected.link.split('|'), A = nodes.get(a), B = nodes.get(b);
         if (!A || !B) return select(null);
-        const net = nets.of(A.name), since = data.graph.since?.[selected.link];
+        const net = nets.of(A.name), since = data.graph.since?.[selected.link], me = keyOf(own());
+        const isHard = (data.graph.hard || []).some(([x, y]) => pairKey(x, y) === selected.link), isLost = (data.graph.lost || []).some(([x, y]) => pairKey(x, y) === selected.link);
+        const other = a === me ? B : b === me ? A : null;
+        // Either end closes it (ours, or the vessel we run by remote control); a hard link ends at the dock.
+        const close = other && !isHard ? [bar('Data link', tap('Close link', () => send({ type: 'link-close', ship: other.name }), true))] : [];
+        const who = other ? (isHard ? 'A hard link (docking port): it ends when its ODN tie is cut on the Engineering grid, or on undocking.' : '')
+          : `Closed by either end: the ${A.name}'s or the ${B.name}'s ops or Communications.`;
         details.replaceChildren(
           el('h3', { className: 'ops-subhead', id: 'net-details-title', textContent: 'Data link' }),
           bar('Between', tap(A.name, () => select({ node: a })), tap(B.name, () => select({ node: b }))),
+          ...(isLost ? [el('p', { className: 'ops-hint net-lost', textContent: 'Signal lost: no subspace path (a relay down, or out of reach). The link stays, carrying nothing, until it returns.' })] : []),
+          ...close, ...(who ? [el('p', { className: 'ops-hint', id: 'net-link-who', textContent: who })] : []),
           el('p', { className: 'ops-hint', textContent: since ? `Established ${new Date(since).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : '' }),
           el('h3', { className: 'ops-subhead', textContent: `${net.name} · ${net.members.length} members` }),
           el('ul', { className: 'st-list', id: 'net-details-members' }, ...net.members.map((m) => { const li = el('li', {}, tap(m, () => select({ node: keyOf(m) }))); li.dataset.member = m; return li; })));
@@ -253,7 +262,11 @@
         if (!d3) { svg.replaceChildren(); return; }
         const now = JSON.stringify([data.graph.ships.map((s) => s.name).sort(), data.graph.links, data.graph.requests]);
         if (now !== was) layout(!!was);
-        else draw(false);
+        else {
+          // (Same vessels and links: only what's shown on them changed, crew counts, ops, shields; nothing moves.)
+          for (const sh of data.graph.ships) { const n = nodes.get(keyOf(sh.name)); if (n) n.ship = sh; }
+          draw(false);
+        }
         renderDetails();
       },
       select,
