@@ -1137,7 +1137,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     helm({ dest: { x: 250, y: 500 }, warp: 5 });
     await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); return n?.own.warp === 0 && n.own.x < 260; }, 30000);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
-    obrien.send({ type: 'power', power: { engines: 0, injectors: 0, shields: 0, sensors: 20, lateral: 0, deflector: 0, sif: 0, idf: 0, transporter: 0, weapons: 0, atmosphere: 60, thermal: 60, gravity: 0, replicators: 0, recreation: 0 } });
+    obrien.send({ type: 'power', power: { engines: 0, injectors: 0, shields: 0, sensors: 20, lateral: 0, deflector: 0, sif: 0, idf: 0, transporter: 0, weapons: 0, atmosphere: 60, thermal: 60, gravity: 0, lights: 0, replicators: 0, recreation: 0 } });
     await nog.waitForSelector('[data-readout="Replicators"]:has-text("Offline")', { state: 'attached' });
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'detached' });
     await carol.waitForSelector('#weapons-lock-state:has-text("No weapons lock")');
@@ -1253,6 +1253,15 @@ const audioBytes = (page) => page.evaluate(async () => {
     await geordi.click('.msd-tile[data-system="warp"]');
     await geordi.waitForSelector('[data-screen="st-core"]:not([hidden])');
     step(`the master systems display: ${await geordi.textContent('#msd-overall')}, the warp core tile Running, and tapping it opened the warp core panel`);
+    // Life support place by place: switching gravity off in a place takes its share off the draw.
+    await screen(geordi, 'st-lifesupport');
+    await geordi.waitForSelector('#ls-table .ls-tap[data-loc="Crew"][data-sys="gravity"][aria-pressed="true"]');
+    const gravBefore = await geordi.evaluate(() => window.__nav.last.own.grid.demand.gravity);
+    await geordi.click('#ls-table .ls-tap[data-loc="Crew"][data-sys="gravity"]');
+    await geordi.waitForSelector('#ls-table .ls-tap[data-loc="Crew"][data-sys="gravity"][aria-pressed="false"]');
+    await geordi.waitForFunction((b) => window.__nav.last.own.grid.demand.gravity < b, gravBefore);
+    await geordi.click('#ls-table .ls-tap[data-loc="Crew"][data-sys="gravity"]');
+    step('the Life support panel: gravity switched off in Crew quarters took its share off the draw, and back on');
     // The Warp core panel: the reaction's state, readouts and controls.
     await screen(geordi, 'st-core');
     await geordi.waitForSelector('#wc-state:has-text("Running")');
@@ -1557,11 +1566,19 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(['A', 'B', 'C', 'EPS'].map((n) => cold.stores[n].level), [100, 100, 100, 0], 'full batteries on each bus; the EPS unpressurized');
     assert.deepEqual(['A', 'B', 'C'].map((n) => cold.stores[n].breaker), [false, false, false], "the batteries' main breakers open");
     assert.ok(Object.entries(cold.ties).every(([k, v]) => !v.length || ['impulsePort', 'impulseStarboard'].includes(k)), `cold iron: nothing tied in (${JSON.stringify(Object.entries(cold.ties).filter(([, v]) => v.length))})`);
+    // A dark room: no lights and the console dark: black but for Station and comms.
+    const dataPage = await openAs(browser, 'data', 'data', 'Excelsior', 'Science');
+    await dataPage.waitForFunction(() => document.body.hasAttribute('data-blackout'));
+    assert.equal(await dataPage.isVisible('#reassign-tab'), true, 'the Station button still works');
+    await dataPage.click('#reassign-tab');
+    await dataPage.waitForSelector('[data-screen="reassign"]:not([hidden])');
+    await dataPage.close();
+    step("the Excelsior's Science station, unlit and its console dark, went black but for the Station button and comms");
     // Engineering ties in the loads (a usual layout) before bringing anything up.
     barclay.send({ type: 'grid', ties: {
       'console:Engineering': ['A'], 'console:Tactical': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'system:gravity': ['A'], 'system:lighting': ['A'], 'system:lateral': ['A'],
       'system:replicators': ['B'], 'system:recreation': ['B'], 'system:transporter': ['B'], 'sub:constriction': ['A'], 'sub:corePump': ['A'], 'sub:injector': ['A'], 'sub:amConduit': ['A'], 'sub:portPump': ['B'], 'sub:starboardPump': ['B'], 'sub:portChamber': ['B'], 'sub:starboardChamber': ['B'], 'sub:cryoPumps': ['A'], 'sub:slushHeaters': ['B'], 'sub:aux1Chamber': ['A'], 'sub:aux1Pump': ['A'], aux1: ['EPS'],
-      'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'sub:forcefields': ['B'], 'sub:computer1': ['A'], 'sub:computer2': ['B'], 'sub:computer3': ['C'], 'sub:patternBuffers': ['B'], 'sub:targetingScanners': ['B'], 'sub:energizingCoils': ['B'], 'sub:heisenberg': ['B'], 'sub:biofilter': ['B'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'],
+      'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'sub:forcefields': ['B'], 'sub:computer1': ['A'], 'sub:computer2': ['B'], 'sub:computer3': ['C'], 'system:lights': ['A'], 'sub:patternBuffers': ['B'], 'sub:targetingScanners': ['B'], 'sub:energizingCoils': ['B'], 'sub:heisenberg': ['B'], 'sub:biofilter': ['B'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'],
       ...Object.fromEntries(['sensors', 'sif', 'idf', 'engines', 'injectors', 'shields', 'weapons', 'deflector', 'tractor'].map((x) => [`system:${x}`, ['EPS']])) } });
     await waitFor(() => barclay.nav()?.own.grid.ties['system:sif'].join() === 'EPS'); assert.ok(Object.values(cold.drives).every((d) => d.state === 'off') && Object.values(cold.taps).every((t) => t === 0), 'drives off and taps closed');
     // A source tied to two buses splits evenly, but what one bus can't use goes to the other:

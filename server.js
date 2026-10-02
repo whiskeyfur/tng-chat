@@ -744,7 +744,7 @@ function coreSignOff(ws) {
 
 // Ranges at full sensor power; sensor power scales all three (Engineering).
 const COMMS_RANGE = 400, SENSOR_RANGE = 600, TRANSPORTER_RANGE = 20;
-const SYSTEMS = ['engines', 'injectors', 'deflector', 'bussard', 'shields', 'sensors', 'lateral', 'transporter', 'weapons', 'sif', 'idf', 'atmosphere', 'thermal', 'gravity', 'lighting', 'replicators', 'recreation'];
+const SYSTEMS = ['engines', 'injectors', 'deflector', 'bussard', 'shields', 'sensors', 'lateral', 'transporter', 'weapons', 'sif', 'idf', 'atmosphere', 'thermal', 'gravity', 'lights', 'lighting', 'replicators', 'recreation'];
 // Sensors: the long-range sensors (EPS) set sensor and subspace range; the
 // lateral arrays (a low bus) see close in and give the transporter its range.
 // The navigational deflector (EPS) needs the long-range sensors; warp needs it.
@@ -755,12 +755,20 @@ const HULL = { idfNeedsSif: 50, coreSif: 50, impulse: { sif: 60, idf: 80 }, warp
 // Life support is three systems: atmospheric processors, thermal regulation
 // and gravity generators. Small ones: solar (25) runs the first two, with a
 // little over to charge batteries, but not gravity as well.
-const LIFE_SUPPORT = ['atmosphere', 'thermal', 'gravity', 'lighting'];
+const LIFE_SUPPORT = ['atmosphere', 'thermal', 'gravity', 'lights', 'lighting'];
+// Life support location by location (Engineering's Life support panel): every
+// station is a place aboard, and each has its atmosphere, heat, gravity and
+// lights switched on or off. A system draws for the places it's on in (so
+// switching areas off saves power), and serves them only while it has its
+// power. Emergency lighting lights any place whose lights are on but unpowered.
+const LOCATIONS = [...STATIONS, OPS_STATION];
+const LS_SYSTEMS = ['atmosphere', 'thermal', 'gravity', 'lights'];
+const lsShare = (k, sys) => { const ls = engOf(k).ls; return LOCATIONS.filter((l) => ls[l]?.[sys] !== false).length / LOCATIONS.length; };
 // What a system draws at 100% (most: 100).
 // The Bussard collectors (EPS, under Helm) gather interstellar deuterium at
 // warp: up to 5 a second at warp 9, less slower or with less power.
 const BUSSARD = { perSecond: 5 };
-const RATING = { bussard: 20, engines: 300, atmosphere: 10, thermal: 8, gravity: 20, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
+const RATING = { bussard: 20, engines: 300, atmosphere: 10, thermal: 8, gravity: 20, lights: 6, lighting: 1, sensors: 22, lateral: 10, deflector: 80, sif: 35, idf: 22 };
 const ratingOf = (s) => RATING[s] ?? 100;
 // Each system's power setting is a limit, 0-150: past 100 (its rating) is
 // emergency overdrive, which slowly damages it, faster the further over it runs.
@@ -768,7 +776,7 @@ const POWER_MAX = 150;
 const OVERDRIVE_DAMAGE = 0.02; // damage per second for each point drawn over 100
 const REACTOR = 360; // power drawn for a full sensor signature (a warm ship idling draws a little less)
 const MIN_SHIELD_POWER = 20;
-const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lighting: 100, lateral: 100, deflector: 100, bussard: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
+const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lights: 100, lighting: 100, lateral: 100, deflector: 100, bussard: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
 // actually gets from the power grid (see "the power grid" below): damage caps
 // a system, unarmed weapons draw nothing, and a bus short of power browns out.
@@ -777,7 +785,9 @@ const allocOf = (k) => { const p = navState.get(k)?.power || {}; return { ...DEF
 function powerOf(k) {
   const f = flow(k);
   const p = Object.fromEntries(SYSTEMS.map((s) => [s, Math.floor(f.delivered[s] + 1e-9)]));
-  p.lifeSupport = Math.min(p.atmosphere, p.thermal); // what keeps the crew alive (gravity is a comfort)
+  // What keeps the crew alive (gravity is a comfort): how fully atmosphere and heat are served where they're on.
+  const served = (x) => { const u = 100 * lsShare(k, x); return u > 0 ? Math.min(100, Math.floor((f.delivered[x] / u) * 100 + 1e-9)) : 100; };
+  p.lifeSupport = Math.min(served('atmosphere'), served('thermal'));
   if (p.sif < HULL.idfNeedsSif) p.idf = 0; // the dampers work inside the SIF
   if (p.sensors <= 0) p.deflector = 0; // the deflector aims by the long-range sensors
   return p;
@@ -1403,15 +1413,15 @@ const PORTS = ['port', 'starboard']; // docking ports (starbases take any number
 // The port a ship is docked to us at (or null), and the ships docked with us (both sides agreeing).
 const portFor = (k, other) => PORTS.find((p) => engOf(k).shipDocks[p] === other) || null;
 const shipsDocked = (k) => PORTS.map((p) => [p, engOf(k).shipDocks[p]]).filter(([, o]) => o && portFor(o, k));
-const SYSTEM_BUS = { atmosphere: 'A', thermal: 'A', gravity: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', bussard: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
+const SYSTEM_BUS = { atmosphere: 'A', thermal: 'A', gravity: 'A', lights: 'A', lighting: 'A', lateral: 'A', sensors: 'EPS', deflector: 'EPS', bussard: 'EPS', sif: 'EPS', idf: 'EPS', replicators: 'B', recreation: 'B', engines: 'B', injectors: 'B', shields: 'B', weapons: 'B', transporter: 'B' };
 const CONSOLE_BUS = { Captain: 'A', 'First Officer': 'A', Helm: 'A', Science: 'A', Engineering: 'A', Communications: 'A', Operations: 'A', Tactical: 'B', Security: 'B', Medical: 'B', Transporter: 'B', Crew: 'B' };
 const STATION_SYSTEMS = { Helm: ['engines', 'deflector', 'bussard'], Tactical: ['shields', 'weapons', 'tractor'], Science: ['sensors', 'lateral'], Engineering: ['sif', 'idf', 'lifeSupport'] /* a parent row: its systems carry the ties */, Transporter: ['transporter'], Crew: ['replicators', 'recreation'] };
 const LOAD_NODES = {
-  atmosphere: AB, thermal: AB, gravity: AB, lighting: AB, lateral: AB, replicators: AB, recreation: AB, // low power
+  atmosphere: AB, thermal: AB, gravity: AB, lights: AB, lighting: AB, lateral: AB, replicators: AB, recreation: AB, // low power
   transporter: AB,
   engines: ['EPS'], injectors: ['EPS'], shields: ['EPS'], weapons: ['EPS'], tractor: ['EPS'], sensors: ['EPS'], deflector: ['EPS'], bussard: ['EPS'], sif: ['EPS'], idf: ['EPS'], // high power: EPS only
 };
-const SYSTEM_PRIORITY = ['sif', 'idf', 'atmosphere', 'thermal', 'lighting', 'gravity', 'sensors', 'lateral', 'deflector', 'bussard', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
+const SYSTEM_PRIORITY = ['sif', 'idf', 'atmosphere', 'thermal', 'lighting', 'lights', 'gravity', 'sensors', 'lateral', 'deflector', 'bussard', 'shields', 'engines', 'injectors', 'weapons', 'tractor', 'transporter', 'replicators', 'recreation'];
 // Systems shown under another system in the grid table (Helm > Engines > Plasma injectors).
 const SYSTEM_CHILDREN = { engines: ['injectors'], lifeSupport: LIFE_SUPPORT };
 // Rows with no ties of their own, only their systems' (Engineering > Life support > ...).
@@ -1582,6 +1592,8 @@ function freshEng(saved, { cold = false } = {}) {
     breach: 0, selfDestruct: null, towing: null, dirty: false,
     // The warp core's reaction (older saves: running at 70%, 15:1, aligned, conduits open, auto-trim on).
     wc: { rate: Number.isFinite(s.wc?.rate) ? s.wc.rate : 70, actual: s.core === 'online' || (s.core === undefined && !cold) ? (Number.isFinite(s.wc?.actual) ? s.wc.actual : 70) : 0, mix: Number.isFinite(s.wc?.mix) ? s.wc.mix : 15, align: Number.isFinite(s.wc?.align) ? s.wc.align : 100, crystal: Number.isFinite(s.wc?.crystal) ? s.wc.crystal : 100, temp: Number.isFinite(s.wc?.temp) ? s.wc.temp : 0, plasma: s.wc?.plasma ?? !cold, autoTrim: s.wc?.autoTrim ?? !cold, breachT: null },
+    // Life support, place by place (all on to start).
+    ls: Object.fromEntries(LOCATIONS.map((l) => [l, Object.fromEntries(LS_SYSTEMS.map((x) => [x, s.ls?.[l]?.[x] !== false]))])),
     // The transporter's level-3 diagnostic (older saves: passed).
     trDiag: { state: s.trDiag === 'passed' || (s.trDiag === undefined && !cold) ? 'passed' : 'none', t: 0 },
     // Antimatter containment: the field's strength (%) and its internal reserve.
@@ -1607,7 +1619,7 @@ const savedEng = (k) => {
     core: e.core === 'starting' ? 'offline' : e.core,
     drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state === 'running' ? 'running' : 'off', epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear }]; })),
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state === 'running' ? 'running' : 'off', epsTap: e.aux[a].epsTap }])),
-    dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure) }, epsLive: e.epsLive, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
+    dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure) }, epsLive: e.epsLive, ls: e.ls, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     dockedPort: e.dockedPort, autoRefuel: e.autoRefuel,
@@ -1635,6 +1647,7 @@ function usageOf(k, s, c) {
     case 'deflector': return w >= 1 ? 100 : w > 0 ? 50 : 0;
     case 'bussard': return w >= 1 ? 100 : 0; // collecting only at warp
     case 'sensors': case 'lateral': return POWER_MAX;
+    case 'atmosphere': case 'thermal': case 'gravity': case 'lights': return 100 * lsShare(k, s); // for the places it's on in
     default: return 100;
   }
 }
@@ -1936,6 +1949,12 @@ function gridView(k) {
     core: e.core, antimatter: Math.floor(e.antimatter), deuterium: Math.floor(e.deuterium), fuelCaps: { antimatter: FUEL.antimatter, deuterium: FUEL.deuterium },
     drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state, start: dr.start, thrusters: !!(e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length, epsTap: dr.epsTap, pressure: Math.round(dr.pressure), accel: dr.accel, gear: dr.gear, top: Math.round(driveTop(dr) * 1000) / 1000 }]; })),
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state, start: e.aux[a].start, epsTap: e.aux[a].epsTap, pressure: Math.round(e.aux[a].pressure) }])), auxOutput: FUSION.aux,
+    // Each place: what's switched on, what it's actually getting, and whether it's lit.
+    ls: (() => {
+      const servedAll = Object.fromEntries(LS_SYSTEMS.map((x) => { const u = 100 * lsShare(k, x); return [x, u > 0 && f.delivered[x] >= u * 0.99]; }));
+      const emergency = (f.delivered.lighting || 0) >= 99;
+      return Object.fromEntries(LOCATIONS.map((l) => { const on = e.ls[l]; const got = Object.fromEntries(LS_SYSTEMS.map((x) => [x, on[x] && servedAll[x]])); return [l, { on, got, lit: got.lights || (on.lights && emergency), emergency: on.lights && !got.lights && emergency }]; }));
+    })(),
     dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure), temp: e.dfeed.temp, min: FUSION.minPressure }, epsLive: e.epsLive, epsGen: Math.round(f.epsGen), epsChargeGen: EPS_CHARGE_GEN, impulseStartSecs: GRID.impulseStartSecs, impulseOutput: GRID.impulse,
     transfer: e.transfer ? { ...e.transfer, left: Math.ceil(e.transfer.left), with: e.transfer.with === 'station' ? e.docked : shipName(e.transfer.with) } : null,
     dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName), autoRefuel: e.autoRefuel,
@@ -2050,6 +2069,11 @@ function gridCommand(ws, msg) {
     if (typeof rx.epsTap === 'boolean') { r.epsTap = rx.epsTap; said.push(`${label}'s EPS tap ${r.epsTap ? 'on: it powers itself from the EPS while running' : 'off: it runs on its bus ties'}`); }
     if (DRIVES.includes(rName) && Number.isFinite(rx.accel)) { r.accel = Math.max(0, Math.min(100, Math.round(rx.accel))); said.push(`${label}'s accelerators at ${r.accel}%`); }
     if (DRIVES.includes(rName) && (rx.gear === 'low' || rx.gear === 'high')) { r.gear = rx.gear; said.push(`${label}'s driver coils in ${rx.gear === 'low' ? 'Low gear (quick, a quarter impulse at most)' : 'High gear (full impulse)'}`); }
+  }
+  // Life support in a place (or 'all'): { ls: { loc, sys, on } }.
+  if (msg.ls && LS_SYSTEMS.includes(msg.ls.sys) && (msg.ls.loc === 'all' || LOCATIONS.includes(msg.ls.loc))) {
+    for (const l of msg.ls.loc === 'all' ? LOCATIONS : [msg.ls.loc]) e.ls[l][msg.ls.sys] = !!msg.ls.on;
+    said.push(`${SYSTEM_NAMES[msg.ls.sys]} ${msg.ls.on ? 'on' : 'off'} ${msg.ls.loc === 'all' ? 'everywhere' : `at ${msg.ls.loc}`}`);
   }
   // The deuterium feed's isolation valves.
   if (typeof msg.valves === 'boolean') { e.dfeed.valves = msg.valves; said.push(`deuterium feed valves ${msg.valves ? 'open' : 'closed'}`); }
@@ -2403,7 +2427,7 @@ const TORPEDO = { range: 300, reload: 5000, damage: 25, carried: 10, restock: 50
 const MIN_SHIELD_STRENGTH = 10;  // shield generators hold from here
 const REPAIR = { auto: 0.5, directed: 3, hull: 0.1, hullDirected: 1, docked: 4 }; // per second (docked: times faster)
 const UNDER_FIRE_MS = 10000;      // "taking fire" lasts this long after a hit
-const SYSTEM_NAMES = { engines: 'warp field coils', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', bussard: 'Bussard collectors', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
+const SYSTEM_NAMES = { engines: 'warp field coils', shields: 'shield generators', sensors: 'long-range sensors', lateral: 'lateral sensor arrays', deflector: 'navigational deflector', bussard: 'Bussard collectors', sif: 'structural integrity field', idf: 'inertial dampers', lighting: 'emergency lighting', transporter: 'transporter', weapons: 'weapons', atmosphere: 'atmospheric processors', thermal: 'thermal regulation', gravity: 'gravity generators', lights: 'lighting', replicators: 'replicators', recreation: 'recreation (holodecks)', tractor: 'tractor beam', injectors: 'plasma injectors',
   corePump: "warp core's deuterium pump", injector: 'antimatter injector', portPump: "port impulse drive's deuterium pump", starboardPump: "starboard impulse drive's deuterium pump",
   conduits: 'power transfer conduits', rf: 'local RF', radio: 'radio', subspace: 'subspace relay', busA: 'Bus A', busB: 'Bus B', busC: 'Bus C', busEPS: 'EPS grid' };
 // What a hit can damage: the systems, and the subsystems that fail when badly damaged.

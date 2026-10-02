@@ -419,7 +419,7 @@ const ownShip = () => ships.find((s) => me && s.name.toLowerCase() === me.ship.t
 
 // Shields (footer, displays, Tactical's control) and the transporter controls.
 // Power as Engineering has routed it (from the ship's computer, via 'nav').
-const POWER = [['engines', 'Warp field coils'], ['injectors', 'Plasma injectors'], ['deflector', 'Navigational deflector'], ['bussard', 'Bussard collectors'], ['shields', 'Shields'], ['sensors', 'Long-range sensors'], ['lateral', 'Lateral sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['sif', 'Structural integrity field'], ['idf', 'Inertial dampers'], ['atmosphere', 'Atmospheric processors'], ['thermal', 'Thermal regulation'], ['gravity', 'Gravity generators'], ['lighting', 'Emergency lighting'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
+const POWER = [['engines', 'Warp field coils'], ['lights', 'Lighting'], ['injectors', 'Plasma injectors'], ['deflector', 'Navigational deflector'], ['bussard', 'Bussard collectors'], ['shields', 'Shields'], ['sensors', 'Long-range sensors'], ['lateral', 'Lateral sensors'], ['transporter', 'Transporter'], ['weapons', 'Weapons'], ['sif', 'Structural integrity field'], ['idf', 'Inertial dampers'], ['atmosphere', 'Atmospheric processors'], ['thermal', 'Thermal regulation'], ['gravity', 'Gravity generators'], ['lighting', 'Emergency lighting'], ['replicators', 'Replicators'], ['recreation', 'Recreation']];
 const ownPower = () => lastNav?.own?.power || null;
 
 // Shields (footer, displays, Tactical's control), the transporter controls and
@@ -579,6 +579,32 @@ const MSD_SCREENS = {
 function openSystem(k) {
   const id = (MSD_SCREENS[k] || []).find((x) => document.querySelector(`[data-screen="${x}"]`)) || (document.querySelector('[data-screen="st-status"]') ? 'st-status' : null);
   if (id) showScreen(id);
+}
+// Engineering's Life support panel: each place aboard, its atmosphere, heat,
+// gravity and lights (taps), and what it's actually getting.
+function renderLifeSupport() {
+  const root = document.querySelector('[data-lifesupport]');
+  const ls = lastNav?.own?.grid?.ls;
+  if (!root || !ls) return;
+  const sig = JSON.stringify(ls);
+  if (root.dataset.sig === sig) return;
+  root.dataset.sig = sig;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const SYS = [['atmosphere', 'Atmosphere'], ['thermal', 'Thermal'], ['gravity', 'Gravity'], ['lights', 'Lights']];
+  const tap = (loc, sys, on, got) => {
+    const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill lcars-toggle ls-tap', textContent: on ? (got ? 'On' : 'On · no power') : 'Off', onclick: () => send({ type: 'grid', ls: { loc, sys, on: !on } }) });
+    b.setAttribute('aria-pressed', String(on));
+    b.dataset.loc = loc; b.dataset.sys = sys;
+    if (on && !got) b.dataset.short = '';
+    return b;
+  };
+  const all = (sys, on) => el('button', { type: 'button', className: 'lcars-button lcars-button--pill grid-mini', textContent: on ? 'All on' : 'All off', onclick: () => send({ type: 'grid', ls: { loc: 'all', sys, on } }) });
+  root.replaceChildren(el('table', { className: 'grid-table ls-table', id: 'ls-table' },
+    el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'Place' }), ...SYS.map(([k, n]) => el('th', { scope: 'col' }, el('span', { textContent: n }), all(k, true), all(k, false))), el('th', { scope: 'col', textContent: 'Status' }))),
+    el('tbody', {}, ...Object.entries(ls).map(([loc, x]) => el('tr', { id: `ls-${loc.replace(/\s/g, '-')}` }, el('th', { scope: 'row', textContent: loc }),
+      ...SYS.map(([k]) => el('td', {}, tap(loc, k, x.on[k], x.got[k]))),
+      el('td', { className: 'grid-note', textContent: !x.lit ? 'DARK' : x.emergency ? 'emergency lighting' : x.on.atmosphere && !x.got.atmosphere ? 'NO ATMOSPHERE' : 'nominal' }))))),
+    el('p', { className: 'ops-hint', textContent: 'Each system draws for the places it\'s on in: switch areas off to save power. A place is served only while its system has power; emergency lighting lights any place whose lights are on but unpowered. A dark place with its console dark goes black but for Station and comms.' }));
 }
 // Damage control's core eject: armed by the first press, fired by a second within 5 s.
 let ejectArmedAt = 0;
@@ -743,6 +769,14 @@ function updateCover() {
   const shown = [...document.querySelectorAll('[data-screen]')].find((el) => !el.hidden);
   $('console-dark').hidden = !consoleDark || !shown?.closest('#station-view, #ops-view');
 }
+// A dark room: no lights where this console is (off, or unpowered with no
+// emergency lighting) and the console itself dark: the whole screen goes
+// black but for the Station button and comms.
+function renderDarkness() {
+  const here = me && lastNav?.own?.grid?.ls?.[me.station];
+  const dark = !!(here && !here.lit && consoleDark && !(me.station === 'Engineering'));
+  document.body.toggleAttribute('data-blackout', dark);
+}
 window.addEventListener('screenchange', updateCover);
 
 // --- combat and the power grid: Tactical's weapons, Engineering's grid and
@@ -779,6 +813,8 @@ function renderCombat() {
   consoleDark = dark && !emergency;
   if (dark) $('console-dark').querySelector('p').textContent = `Console offline · no power on ${bus}`;
   updateCover();
+  renderDarkness();
+  renderLifeSupport();
   document.body.toggleAttribute('data-console-dark', dark);
   if (!stationView) return;
 

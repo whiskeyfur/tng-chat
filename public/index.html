@@ -224,6 +224,11 @@
     .admin-dialog { max-width: min(900px, 95vw); width: 900px; }
     .admin-dialog .admin-log { max-height: 220px; overflow: auto; font-size: 12px; background: #111; padding: 8px; white-space: pre-wrap; }
     #link { cursor: default; }
+    /* A dark room: everything black but the Station button and comms. */
+    body[data-blackout] .lcars-app > :not(.lcars-sidebar):not(.lcars-content), body[data-blackout] .lcars-sidebar > :not(#reassign-tab):not(#comms-button),
+    body[data-blackout] .lcars-content:not(:has([data-screen="reassign"]:not([hidden]))) { filter: brightness(0.06); pointer-events: none; }
+    body[data-blackout] .lcars-content { background: #000; }
+    .ls-table .ls-tap[data-short] { background: var(--lcars-red); }
     button.lcars-back { border: 0; font: inherit; color: #000; cursor: pointer; display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 14px 6px 0; letter-spacing: 0.1em; }
     /* Dim: only the label, so the corner stays the colour of the bar it joins. */
     button.lcars-back:disabled { cursor: default; }

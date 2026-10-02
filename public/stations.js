@@ -381,6 +381,8 @@
         panel('st-grid', 'Power grid', 'sky', true, h('div', { 'data-grid': '' })),
         // Damage and where the repair crews go (client.js fills it in).
         panel('st-damage', 'Damage control', 'red', true, h('div', { 'data-damage': '' })),
+        // Life support, place by place (client.js fills it in).
+        panel('st-lifesupport', 'Life support', 'blue', true, h('div', { 'data-lifesupport': '' })),
       ] };
     },
     Medical: () => ({ code: 'MED 07', color: 'blue', panels: [
