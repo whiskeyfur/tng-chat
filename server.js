@@ -1573,6 +1573,9 @@ function flow(k) {
   const maxOf = (X) => BUS_MAX[X] * Math.max(0, 1 - (c.damage[`bus${X}`] || 0) / 100);
   const busRoom = (node) => pool(node).reduce((n, X) => n + maxOf(X) - buses[X].have, 0);
   const tapRoom = (node) => pool(node).reduce((n, X) => n + Math.max(0, e.taps[X] - buses[X].tapUsed), 0);
+  // Power moving between crosslinked buses, per pair: 'AB' > 0 is A to B, < 0 is B to A.
+  const crossflow = {};
+  const xflow = (from, to, t) => { if (from === to || t <= 0) return; const k = [from, to].sort().join(''); crossflow[k] = (crossflow[k] || 0) + (from < to ? t : -t); };
   let storesOk = false; // the stores (batteries, EPS pressure) only once every other source has been shared out
   const take = (node, amt, topUp = false) => {
     let got = 0;
@@ -1585,7 +1588,8 @@ function flow(k) {
       if (s.share && !eps) s.share[side] -= t;
       cells[s.name][eps ? 'EPS' : side] += t;
       if (eps) viaEps += t;
-      if (bus && eps) { let rest = t; for (const X of [node, ...pool(node).filter((y) => y !== node)]) { const u = Math.min(rest, Math.max(0, e.taps[X] - buses[X].tapUsed)); buses[X].tapUsed += u; rest -= u; } }
+      if (bus && !eps) xflow(side, node, t); // from a crosslinked bus's source
+      if (bus && eps) { let rest = t; for (const X of [node, ...pool(node).filter((y) => y !== node)]) { const u = Math.min(rest, Math.max(0, e.taps[X] - buses[X].tapUsed)); buses[X].tapUsed += u; rest -= u; xflow(X, node, u); } }
       if (bus) bus.src[s.name] = (bus.src[s.name] || 0) + t;
     };
     const sides = bus ? pool(node) : [node];
@@ -1667,7 +1671,8 @@ function flow(k) {
       x.left -= t; charging[X] += t;
       if (direct && x.share) x.share[via] -= t;
       buses[X].need += t; buses[X].have += t;
-      if (!direct) { viaEps += t; let rest = t; for (const y of sides) { const u = Math.min(rest, Math.max(0, e.taps[y] - buses[y].tapUsed)); buses[y].tapUsed += u; rest -= u; } }
+      if (direct) xflow(via, X, t);
+      if (!direct) { viaEps += t; let rest = t; for (const y of sides) { const u = Math.min(rest, Math.max(0, e.taps[y] - buses[y].tapUsed)); buses[y].tapUsed += u; rest -= u; xflow(y, X, u); } }
       cells[store][X] -= t; // shown as a draw on the store's row
       cells[x.name][direct ? via : 'EPS'] += t; // and as what the source gave
     }
@@ -1736,7 +1741,7 @@ function flow(k) {
   }));
   const f = {
     cells, totals, buses, consoleOk, demand, capacity, delivered, containmentOk, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
-    storeUsed: used, coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps,
+    crossflow, storeUsed: used, coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps,
   };
   flowCache.set(k, { at: Date.now(), f });
   return f;
@@ -1808,7 +1813,7 @@ function gridView(k) {
     cells: Object.fromEntries(Object.entries(f.cells).map(([n, c]) => [n, r(c)])), totals: f.totals,
     coreUsed: Math.round(f.coreUsed), impulseUsed: Math.round(f.impulseUsed), coreSubsOk: f.coreSubsOk, subOk: f.subOk,
     start: e.start, startSecs: GRID.coreStartSecs, coreOutput: GRID.core,
-    taps: e.taps, ties: e.ties, tripped: Object.keys(e.tripped || {}), containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
+    crossflow: Object.fromEntries(Object.entries(f.crossflow).map(([x, v]) => [x, Math.round(v)]).filter(([, v]) => v)), taps: e.taps, ties: e.ties, tripped: Object.keys(e.tripped || {}), containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
     breach: e.breach ? GRID.breachSecs - e.breach : null,
     // Each store: how full (%), charging, covering a shortfall.
     stores: Object.fromEntries(Object.entries(STORES).map(([name, node]) => [node, { name, breaker: node === 'EPS' ? null : e.breakers[node], level: Math.round((e.stores[name] / (node === 'EPS' ? GRID.epsCap : GRID.batteryCap)) * 100), charging: Math.round(f.charging[node]), supplying: Math.round(f.storeUsed[node]) }])),

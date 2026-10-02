@@ -191,6 +191,14 @@
     .grid-table .grid-section th span { margin-right: 10px; }
     .lcars-toggle[aria-pressed="false"] { opacity: 0.45; filter: saturate(0.3); }
     .lcars-toggle[aria-pressed="true"] { background: var(--lcars-orange); box-shadow: 0 0 10px var(--lcars-orange); }
+    .grid-table tr.grid-xflow th, .grid-table tr.grid-xflow td { padding-top: 0; padding-bottom: 2px; }
+    .xflow-bar { position: relative; height: 14px; border-radius: 7px; background: rgba(153, 204, 255, 0.2); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+    .xflow-bar::before { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 14px, var(--lcars-sky) 14px 22px, transparent 22px 36px); opacity: 0.7; animation: xflow-right 0.9s linear infinite; }
+    .xflow-bar--left::before { animation-name: xflow-left; }
+    .xflow-label { position: relative; font-size: 11px; color: #fff; background: #000; padding: 0 6px; border-radius: 6px; }
+    @keyframes xflow-right { from { background-position: 0 0; } to { background-position: 36px 0; } }
+    @keyframes xflow-left { from { background-position: 36px 0; } to { background-position: 0 0; } }
+    @media (prefers-reduced-motion: reduce) { .xflow-bar::before { animation: none; } }
     button.lcars-back { border: 0; font: inherit; color: #000; cursor: pointer; display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 14px 6px 0; letter-spacing: 0.1em; }
     button.lcars-back:disabled { opacity: 0.35; cursor: default; }
     button.lcars-back:not(:disabled):hover { filter: brightness(1.2); }

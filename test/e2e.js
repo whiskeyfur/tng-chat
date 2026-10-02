@@ -1212,10 +1212,12 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Three orders: Operations (sources, crosslink, batteries, then consoles), and the Startup and Shutdown checklists.
     assert.deepEqual(await geordi.evaluate(() => window.__nav.last.own.grid.tieNodes['system:tractor']), ['EPS'], 'the tractor beam ties to the EPS only');
     await geordi.click('#grid-order-operations');
-    const sections = await geordi.$$eval('#grid-table tbody tr', (rs) => rs.map((r) => (r.classList.contains('grid-section') ? `[${r.textContent.trim()}]` : r.id)).slice(0, 8));
+    const sections = await geordi.$$eval('#grid-table tbody tr', (rs) => rs.map((r) => (r.classList.contains('grid-section') ? `[${r.textContent.trim()}]` : r.id)).slice(0, 12));
     assert.deepEqual(sections.slice(0, 2), ['[Power sources]', 'ties-dock'], sections.join(' '));
     assert.ok(sections.indexOf('[Bus crosslink]') < sections.indexOf('ties-crosslink'), sections.join(' '));
-    assert.equal(sections[sections.indexOf('ties-crosslink') + 1], 'ties-console-Captain');
+    assert.equal(sections.slice(sections.indexOf('ties-crosslink') + 1).find((x) => !x.startsWith('xflow-')), 'ties-console-Captain');
+    // Power crossing the crosslink shows as a bar under it, the amount in the middle.
+    for (const r of await geordi.$$eval('#grid-table tr.grid-xflow', (rs) => rs.map((x) => ({ id: x.id, label: x.querySelector('.xflow-label').textContent })))) assert.match(r.label, /\d/, JSON.stringify(r));
     // The stores (each bus's battery, the EPS pressure) sit under the headings.
     assert.match(await geordi.textContent('#grid-table thead #grid-stores'), /Battery \d+%.*Battery \d+%.*Battery \d+%.*Pressure \d+%/);
     const STEPS = ['Dock power, Solar', 'Bus batteries and EPS pressure', 'Bus crosslink', 'Engineering console', 'Antimatter containment', 'Impulse drives', 'EPS taps', 'Warp core', 'Consoles and systems'];
@@ -1536,6 +1538,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /console offline/.test(m.text)));
     barclay.send({ type: 'grid', ties: { dock: ['A'], crosslink: ['A', 'B'] } }); // dock power on Bus A, shared with B
     await waitFor(() => barclay.nav()?.own.grid.consoleOk.Tactical && barclay.nav().own.power.lifeSupport === 100);
+    assert.ok(barclay.nav().own.grid.crossflow.AB > 0, `Bus B drew on Bus A's dock power across the crosslink (${JSON.stringify(barclay.nav().own.grid.crossflow)})`);
     // Loads have their own ties: consoles on Bus A or B only; engines (high power) on the EPS only.
     barclay.send({ type: 'grid', ties: { 'console:Tactical': ['EPS'] } });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /Tactical can only be tied to Bus A \+ Bus B/.test(m.text)));

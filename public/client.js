@@ -864,10 +864,24 @@ function renderCombat() {
       const header = (text, extra = []) => { const tr = el('tr', { className: 'grid-section' }, el('th', { scope: 'rowgroup', colSpan: COLS.length + 1 }, el('span', { textContent: text }), ...extra)); return tr; };
       const divide = (rows) => { rows[rows.length - 1]?.classList.add('grid-crosslink'); return rows; };
       const xl = () => { const r = crosslinkRow(); r.querySelector('th').className = ''; return r; };
+      // Power moving across the crosslink: a thin bar per pair, spanning the two
+      // buses' columns under the crosslink row (so its checkboxes stay clear),
+      // pulsing the way it flows, with the amount in the middle.
+      const crossflowRows = () => Object.entries(grid.crossflow || {}).map(([pair, v]) => {
+        const [x, y] = pair.split(''), from = v > 0 ? x : y, to = v > 0 ? y : x;
+        const i = COLS.indexOf(x), j = COLS.indexOf(y);
+        const tr = el('tr', { className: 'grid-xflow', id: `xflow-${from}${to}` }, el('th', { scope: 'row', className: 'grid-indent grid-indent--1' }, el('small', { className: 'grid-note', textContent: `Bus ${from} → Bus ${to}` })));
+        for (let c = 0; c < i; c++) tr.append(el('td'));
+        const bar = el('div', { className: `xflow-bar xflow-bar--${COLS.indexOf(from) < COLS.indexOf(to) ? 'right' : 'left'}`, title: `${Math.abs(v)} from Bus ${from} to Bus ${to}` },
+          el('span', { className: 'xflow-label', textContent: `${COLS.indexOf(from) < COLS.indexOf(to) ? '' : '← '}${Math.abs(v)}${COLS.indexOf(from) < COLS.indexOf(to) ? ' →' : ''}` }));
+        tr.append(el('td', { colSpan: j - i + 1 }, bar));
+        for (let c = j + 1; c < COLS.length; c++) tr.append(el('td'));
+        return tr;
+      });
       const rows = [];
       if (gridOrder === 'operations') {
         // Management layout: power sources, the crosslink, batteries, then the consoles.
-        rows.push(header('Power sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl()]));
+        rows.push(header('Power sources'), ...divide(sourceRows()), header('Bus crosslink'), ...divide([xl(), ...crossflowRows()]));
         for (const st of consoles) rows.push(...consoleRows(st));
       } else {
         // Startup / Shutdown: a checklist, worked top to bottom.
@@ -896,7 +910,7 @@ function renderCombat() {
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
           // (The stores sit under the column headings; this step has no controls.)
           { title: 'Bus batteries and EPS pressure', rows: () => [], state: () => (Object.values(grid.stores || {}).some((x) => x.breaker && x.level > 0) ? 'Online' : 'Cold') },
-          { title: 'Bus crosslink', rows: () => [xl()], state: () => (grid.ties.crosslink.length >= 2 ? 'Online' : 'Cold'),
+          { title: 'Bus crosslink', rows: () => [xl(), ...crossflowRows()], state: () => (grid.ties.crosslink.length >= 2 ? 'Online' : 'Cold'),
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
           { title: 'Engineering console', rows: engNoReactors, state: () => (grid.ties['console:Engineering'].length ? (grid.consoleOk.Engineering ? 'Online' : 'Startup') : 'Cold'),
             on: () => (busOn ? '' : 'the Engineering console needs Bus A, B or C energized'), off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
