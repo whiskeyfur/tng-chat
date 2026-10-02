@@ -1844,6 +1844,8 @@ const SOURCES = ['ship', 'shipEps', 'solar', 'dock', 'dockEps', 'impulsePort', '
 // with a full one.
 const EMERG_SIZE = 5; // × a bus battery's capacity
 const EMERG = { names: ['emergA', 'emergB', 'emergC'], bus: { emergA: 'A', emergB: 'B', emergC: 'C' }, cap: GRID.batteryCap * EMERG_SIZE, out: GRID.batteryOut };
+// Sources that are used up (they never recharge): tied only by hand, never by All on.
+const CONSUMABLE = new Set(EMERG.names);
 // Drawn on only when nothing else will do: the stores and the emergency batteries.
 const lastResort = (name) => isStore(name) || EMERG.names.includes(name);
 // Stores: a battery on each low bus, and the EPS manifold's plasma pressure.
@@ -3023,6 +3025,7 @@ function gridCommand(ws, msg) {
         if (k2 === 'crosslink' || k2 === 'impulsePort' || k2 === 'impulseStarboard' || !aboard(k2) || !tieNodes(k2).includes(X)) continue;
         const cur = e.ties[k2];
         if (on) {
+          if (CONSUMABLE.has(k2)) continue; // (the emergency batteries: by hand only)
           if (cur.includes(X) || (!isMulti(k2) && cur.length)) continue;
           e.ties[k2] = NODES.filter((n) => n === X || cur.includes(n));
         } else {

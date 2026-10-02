@@ -2042,6 +2042,7 @@ const audioBytes = (page) => page.evaluate(async () => {
       assert.ok(tiedTo('A').includes('containment') || !eng.nav().own.grid.ties.containment.includes('A'), 'the pods stay contained');
       eng.send({ type: 'grid', busAll: { bus: 'A', on: true } });
       await waitFor(() => eng.nav().own.grid.ties['system:atmosphere'].includes('A') && eng.nav().own.grid.ties['console:Helm'].includes('A'));
+      assert.deepEqual(eng.nav().own.grid.ties.emergA, [], "all on leaves the emergency battery (it's used up): by hand only");
       eng.send({ type: 'grid', busAll: { bus: 'all', on: false } });
       await waitFor(() => eng.msgs.some((m) => m.type === 'notice' && /All buses: all off; kept tied/.test(m.text)));
       await waitFor(() => { const t = eng.nav().own.grid.ties; return t.containment.length > 0 && t['console:Engineering'].length > 0 && !t['console:Helm'].length && !t['system:shields'].length && !t['system:atmosphere'].length; });
@@ -2054,7 +2055,7 @@ const audioBytes = (page) => page.evaluate(async () => {
       await waitFor(() => Object.values(eng.nav().own.grid.odn).every((v) => v !== false));
       eng.close();
       await stopComputer(bc);
-      step('All on / All off: Bus A all off kept only the pods\' containment (antimatter in them) and the Engineering console; all on tied it all back; All buses off left only what keeps antimatter contained; All buses on tied everything again; under the ODN, all off cut every console link but Engineering, and all on linked them again');
+      step('All on / All off: Bus A all off kept only the pods\' containment (antimatter in them) and the Engineering console; all on tied it all back; All buses off left only what keeps antimatter contained; All buses on tied everything again (but the emergency batteries, by hand only); under the ODN, all off cut every console link but Engineering, and all on linked them again');
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;
