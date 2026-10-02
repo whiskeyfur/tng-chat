@@ -526,7 +526,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await screen(kops, 'link');
     await op.click(`#link-taps button[data-ship="K'Vatch"]`);
     // The data network map: a pending request is a dashed line, then solid.
-    await kops.waitForSelector('#net-map line[stroke-dasharray="10 8"]', { state: 'attached' });
+    await kops.waitForSelector('#net-map path[stroke-dasharray="10 8"]', { state: 'attached' });
     assert.equal(await kops.locator('#net-map .net-node').count(), 9); // (the ships, the starbases and the Sol Subspace Relay)
     // A force-directed map: our own ship at the centre, and no two labels overlap.
     const boxes = await kops.$$eval('#net-map .net-node', (gs) => gs.map((g) => { const r = g.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, name: g.getAttribute('aria-label') }; }));
@@ -537,7 +537,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await op.waitForFunction(() => window.__operator.network.includes("K'Vatch"));
     await op.waitForFunction(() => window.__operator.graph.links.some((l) => l.includes('Enterprise') && l.includes("K'Vatch")));
-    await op.waitForSelector('#net-map line[stroke-dasharray="none"]', { state: 'attached' });
+    await op.waitForSelector('#net-map path[stroke-dasharray="none"]', { state: 'attached' });
     await bob.waitForSelector('#users li:has-text("kor")', { state: 'attached' });
     await kor.waitForSelector('#users li:has-text("bob")', { state: 'attached' });
     assert.match(await bob.textContent('#comms-net'), /Enterprise.*K'Vatch/);

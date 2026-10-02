@@ -70,7 +70,11 @@
     .ops-hail--incoming .ops-hail__text { animation: lcars-blink 1.2s steps(2) infinite; }
     .ops-hails .empty { color: var(--lcars-tan); font-size: 16px; text-transform: uppercase; }
     .net-map { display: block; flex: 1 1 0; min-height: 160px; width: 100%; }
-    .net-map .net-node { cursor: grab; }
+    .net-map .net-node { cursor: pointer; }
+    /* (The map at its readable size scrolls inside its panel; the panel beside it keeps its share.) */
+    .screen-row > .lcars-panel, .net-map-wrap { min-width: 0; }
+    .lcars-panel__body:has(> .net-map), .net-map-wrap { overflow: auto; overscroll-behavior: contain; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+    .net-map { flex: 0 0 auto; }
     .net-map .net-link { cursor: pointer; }
     .net-details { margin-bottom: 12px; }
     .net-facts li { display: flex; justify-content: space-between; gap: 12px; }
@@ -710,13 +714,6 @@
   <script src="media.js"></script>
   <script src="voice.js"></script>
   <script src="broadcast.js"></script>
-  <!-- d3 (from node_modules, served by the relay) for the data network map. -->
-  <script src="vendor/d3-dispatch.js"></script>
-  <script src="vendor/d3-quadtree.js"></script>
-  <script src="vendor/d3-timer.js"></script>
-  <script src="vendor/d3-force.js"></script>
-  <script src="vendor/d3-selection.js"></script>
-  <script src="vendor/d3-drag.js"></script>
   <script src="netmap.js"></script>
   <script src="room.js"></script>
   <script src="radio.js"></script>

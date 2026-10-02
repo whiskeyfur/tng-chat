@@ -1,8 +1,8 @@
-// The data network map (d3-force), with John's topology: Utopia Planitia–Vengence–
+// The data network map (a schematic, like Distribution), with John's topology: Utopia Planitia–Vengence–
 // Discovery, Deep Space 4–Cole, Enterprise and Farragut both with Starbase 47;
 // Starbase 12 and 74 on no ship's link, but every starbase joined through the Sol
-// Subspace Relay (so it's all one data network). Seen from the Discovery's ops: linked vessels
-// close together, no pills overlapping, the unlinked starbases further out;
+// Subspace Relay (so it's all one data network). Seen from the Discovery's ops: the Discovery
+// in the middle, each hop a column further out beside what it's reached through, no overlaps;
 // tapping a link lists its data network. Communications has the map too, and
 // can request a link the other ship's ops sees.
 const fs = require('fs');
@@ -74,17 +74,21 @@ async function sock(hello) {
     // The pills, in the map's own coordinates.
     const pills = await page.$$eval('#net-map .net-node', (gs) => gs.map((g) => { const m = /translate\(([-\d.e]+) ([-\d.e]+)\)/.exec(g.getAttribute('transform')); const r = g.querySelector('rect'); const w = +r.getAttribute('width'), h = +r.getAttribute('height'); return { name: g.dataset.ship, x: +m[1] + w / 2, y: +m[2] + h / 2, w, h }; }));
     const at = Object.fromEntries(pills.map((p) => [p.name, p]));
-    const dist = (a, b) => Math.hypot(at[a].x - at[b].x, at[a].y - at[b].y);
-    for (const [a, b] of [['Vengence', 'Utopia Planitia'], ['Discovery', 'Vengence'], ['Cole', 'Deep Space 4'], ['Enterprise', 'Starbase 47'], ['Farragut', 'Starbase 47']]) {
-      assert.ok(dist(a, b) < 1.4 * (at[a].w + at[b].w) / 2 + 60, `${a}–${b} close (${Math.round(dist(a, b))})`);
-    }
+    // Laid out like Distribution: the Discovery in the middle; its one link (the Vengence) and on to
+    // the relay stand in a line above it; where it branches the starbases split left and right,
+    // each ship a column further out beside the starbase it's reached through.
+    assert.ok(Math.abs(at.Discovery.x) < 1 && Math.abs(at.Discovery.y) < 1, 'our ship at the centre');
+    const trunk = ['Discovery', 'Vengence', 'Utopia Planitia', 'Sol Subspace Relay'];
+    for (let i = 1; i < trunk.length; i++) assert.ok(Math.abs(at[trunk[i]].x) < 1 && at[trunk[i]].y < at[trunk[i - 1]].y, `${trunk[i]} above ${trunk[i - 1]}`);
+    const bases = ['Starbase 12', 'Starbase 74', 'Starbase 47', 'Deep Space 4'];
+    assert.ok(bases.some((b) => at[b].x < 0) && bases.some((b) => at[b].x > 0), `the starbases on both sides: ${bases.map((b) => Math.round(at[b].x))}`);
+    for (const [ship, base] of [['Enterprise', 'Starbase 47'], ['Farragut', 'Starbase 47'], ['Cole', 'Deep Space 4']]) assert.ok(Math.sign(at[ship].x) === Math.sign(at[base].x) && Math.abs(at[ship].x) > Math.abs(at[base].x), `the ${ship} a column beyond ${base}`);
+    assert.ok(Math.abs(at.Cole.y - at['Deep Space 4'].y) <= Math.min(...bases.filter((b) => b !== 'Deep Space 4' && Math.sign(at[b].x) === Math.sign(at.Cole.x)).map((b) => Math.abs(at.Cole.y - at[b].y)), 1e9), 'the Cole beside Deep Space 4');
     for (let i = 0; i < pills.length; i++) for (let j = i + 1; j < pills.length; j++) {
       const p = pills[i], q = pills[j];
       assert.ok(Math.abs(p.x - q.x) >= (p.w + q.w) / 2 - 1 || Math.abs(p.y - q.y) >= (p.h + q.h) / 2 - 1, `${p.name} and ${q.name} overlap`);
     }
-    assert.ok(Math.abs(at.Discovery.x) < 1 && Math.abs(at.Discovery.y) < 1, 'our ship at the centre');
-    for (const b of ['Starbase 12', 'Starbase 74', 'Starbase 47', 'Deep Space 4', 'Utopia Planitia']) assert.ok(dist('Sol Subspace Relay', b) < 1.4 * (at[b].w + at['Sol Subspace Relay'].w) / 2 + 80, `${b} near the relay (${Math.round(dist('Sol Subspace Relay', b))})`);
-    step('the map: linked vessels close together (every starbase around the subspace relay), no pills overlapping, the Discovery at the centre');
+    step('the map, laid out like Distribution: the Discovery in the middle, the Vengence, Utopia Planitia and the relay in a line above it, the starbases split left and right from the relay, each ship a column beyond its starbase, no pills overlapping');
     // The relay: at its place on the chart, linked with every starbase; a starbase can't close that link;
     // through it, the Enterprise (linked with Starbase 47) is on Starbase 12's network.
     const g = ops.Discovery.last('roster').graph;
@@ -119,7 +123,7 @@ async function sock(hello) {
     const scotty = await sock({ type: 'register', name: 'scotty', ship: 'Vengence', station: 'Engineering' });
     await until(() => scotty.last('nav'));
     scotty.send({ type: 'grid', ties: { 'sub:subspace': [] } });
-    await page.waitForSelector('#net-map .net-link[data-link="utopia planitia|vengence"] line[data-lost]', { state: 'attached', timeout: 15000 });
+    await page.waitForSelector('#net-map .net-link[data-link="utopia planitia|vengence"] [data-lost]', { state: 'attached', timeout: 15000 });
     ops.Vengence.send({ type: 'link-close', ship: 'Utopia Planitia' });
     await until(() => !ops.Vengence.last('roster')?.links?.includes('Utopia Planitia'));
     await page.waitForSelector('#net-map .net-link[data-link="utopia planitia|vengence"]', { state: 'detached', timeout: 15000 });

@@ -170,7 +170,7 @@
       }
     }
 
-    // The data network map (netmap.js: d3-force), with the details of a tapped vessel or link.
+    // The data network map (netmap.js: a schematic, like Distribution), with the details of a tapped vessel or link.
     let netMap = null;
     function renderMap() {
       if (!$('net-map') || !window.createNetMap) return;
