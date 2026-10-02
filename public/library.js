@@ -86,7 +86,7 @@
       folders.replaceChildren();
       const own = msg.ships.find((s) => s.own);
       upload.disabled = own?.online === false;
-      if (own?.online === false) status.textContent = "The ship's computer is offline: start one (tools/shipcore.js) to use the library";
+      if (own?.online === false) status.textContent = "The ship's computer is offline: the library is unavailable until it's back online";
       else if (status.textContent.startsWith("The ship's computer is offline")) status.textContent = '';
       for (const ship of msg.ships) {
         const rows = ship.files.map((f) => el('li', { className: 'lib-file-row' },
