@@ -95,6 +95,7 @@ const adminReach = (addr) => (SETTINGS.read().adminAccess === 'lan' ? isLan(addr
 const server = http.createServer((req, res) => {
   let urlPath = new URL(req.url, 'http://x').pathname;
   if (urlPath.startsWith('/api/account/')) return accountRequest(req, res, urlPath.slice(13));
+  if (urlPath.startsWith('/api/poll/')) return pollRequest(req, res, urlPath.slice(10));
   const account = needLogin() ? ACCOUNTS.session(sessionToken(req)) : null;
   if (/^\/admin(\.html|\.js|\/)?$/.test(urlPath)) {
     if (!adminReach(req.socket.remoteAddress)) { res.writeHead(403, { 'Content-Type': 'text/plain' }).end(`Admin: ${SETTINGS.read().adminAccess === 'lan' ? 'this network' : 'this machine'} only (Settings, Admin reachable from)`); return; }
@@ -142,6 +143,67 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server });
+
+// The HTTP fallback, for a browser whose WebSocket can't connect (a proxy that won't pass it):
+// a connection made of plain HTTP calls. POST /api/poll/open starts one (the same session cookie
+// and account rules: 401 without one, once there are accounts); POST /api/poll/send?id= takes a
+// list of messages; GET /api/poll/recv?id= returns what's waiting, held open up to 25 s for more.
+// To the relay it's a socket like any other (the same connection handler), dropped after 30 s
+// with no call. Calls' audio and video stay peer to peer; only signaling and state go this way.
+const EventEmitter = require('events');
+const POLL = { holdMs: 25000, idleMs: 30000 };
+const polls = new Map(); // id -> PollSocket
+class PollSocket extends EventEmitter {
+  constructor(pollId) { super(); Object.assign(this, { pollId, OPEN: 1, readyState: 1, bufferedAmount: 0, queue: [], waiter: null, seen: Date.now(), closeCode: null }); }
+  send(data) { if (this.readyState !== 1) return; this.queue.push(String(data)); this.flush(); }
+  flush() { if (this.waiter && (this.queue.length || this.readyState !== 1)) { const w = this.waiter; this.waiter = null; w(); } }
+  close(code = 1000, reason = '') {
+    if (this.readyState !== 1) return;
+    this.readyState = 3; this.closeCode = code;
+    this.flush();
+    this.emit('close', code, reason);
+    setTimeout(() => polls.delete(this.pollId), POLL.holdMs + 5000); // (its last poll still hears why)
+  }
+}
+setInterval(() => { for (const p of polls.values()) if (p.readyState === 1 && Date.now() - p.seen > POLL.idleMs) p.close(1001, 'no polls'); }, 5000).unref();
+function pollRequest(req, res, what) {
+  const json = (code, v) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(v));
+  const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
+  if (what === 'open' && req.method === 'POST') {
+    if (needLogin() && !ACCOUNTS.session(sessionToken(req))) return json(401, { error: 'log in first' });
+    const p = new PollSocket(crypto.randomBytes(16).toString('hex'));
+    polls.set(p.pollId, p);
+    wss.emit('connection', p, req);
+    return json(200, { id: p.pollId }); // (its own id: ws.id is the person's)
+  }
+  const p = polls.get(id);
+  if (!p) return json(410, { closed: 1001, reason: 'no such connection' });
+  p.seen = Date.now();
+  if (what === 'recv' && req.method === 'GET') {
+    const reply = () => { if (res.writableEnded) return; const out = p.queue.splice(0); json(200, { messages: out, ...(p.readyState !== 1 && !out.length ? { closed: p.closeCode } : {}) }); };
+    if (p.queue.length || p.readyState !== 1) return reply();
+    const t = setTimeout(() => { if (p.waiter === done) p.waiter = null; reply(); }, POLL.holdMs);
+    const done = () => { clearTimeout(t); reply(); };
+    if (p.waiter) p.waiter(); // (a newer poll replaces an older one)
+    p.waiter = done;
+    req.on('close', () => { if (p.waiter === done) { p.waiter = null; clearTimeout(t); } });
+    return;
+  }
+  if (what === 'send' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 2 * 1024 * 1024) req.destroy(); });
+    req.on('end', () => {
+      let list;
+      try { list = JSON.parse(body || '[]'); } catch { return json(400, { error: 'bad request' }); }
+      if (p.readyState !== 1) return json(410, { closed: p.closeCode });
+      for (const m of Array.isArray(list) ? list : []) p.emit('message', Buffer.from(typeof m === 'string' ? m : JSON.stringify(m)), false);
+      json(200, { ok: true });
+    });
+    return;
+  }
+  if (what === 'close' && req.method === 'POST') { p.close(1000, 'closed'); return json(200, { ok: true }); }
+  json(404, { error: 'no such call' });
+}
 const users = new Map();     // user id ("name@ship", lowercased) -> ws
 const operators = new Set(); // operator sockets; each has .ship and .shipKey
 const ships = new Map();     // ship key -> display name (first spelling seen)

@@ -86,8 +86,11 @@ window.addEventListener('screenchange', renderRoomPanel);
 const library = createLibrary($('library-view'), { token: () => token, base: relay.http, log, canDelete: (s) => s.own && (!!ops || me?.station === 'Communications') });
 
 function setLink(status, text) {
+  // (On the HTTP fallback, it says so.)
+  const http = ws?.kind === 'http' && ws.readyState === 1;
   $('link').dataset.status = status;
-  $('link').textContent = text;
+  $('link').dataset.transport = http ? 'http' : 'ws';
+  $('link').textContent = http ? `${text} · HTTP fallback` : text;
 }
 
 // Connect as soon as the page loads, so the ship list is live before sign-in.
@@ -100,7 +103,7 @@ function connect() {
     return;
   }
   try {
-    ws = new WebSocket(relay.ws());
+    ws = relayLink(relay.ws(), relay.http()); // (a WebSocket, or HTTP when that can't connect: transport.js)
   } catch {
     setLink('error', 'Comm relay address invalid');
     return;
@@ -153,6 +156,13 @@ function renderAccount() {
   if (account) $('station-account').replaceChildren(Object.assign(document.createElement('span'), { textContent: `Account: ${account.username}` }), Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill', id: 'station-logout', textContent: 'Log out', onclick: logOut }));
 }
 $('account-menu').onclick = logOut;
+
+// On the HTTP fallback: every 30 s, see whether a WebSocket gets through now; if it does (and
+// there's no call going), move back to it (this page reloads, and signs back in where it was).
+setInterval(() => {
+  if (ws?.kind !== 'http' || ws.readyState !== 1 || new URLSearchParams(location.search).get('transport') === 'http') return;
+  relayLink.probe(relay.ws(), () => { if (comms.voice.state === 'idle' && ws?.kind === 'http') { saveRejoin(); location.reload(); } });
+}, 30000);
 
 // The relay restarting (or the pages changing): remember who and where we
 // are, reload once the relay is back, and rejoin. Calls aren't resumed.

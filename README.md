@@ -36,6 +36,8 @@ An **account** is a username and password (3-24 letters, digits, `.` `_` `-`; 6 
 
 Players: the header shows your account (tap to log out); Log out is on the Station screen too. Sessions are a cookie (HttpOnly, SameSite=Lax; Secure over https) that lasts 30 days unused; five wrong passwords lock that username out for a minute. Accounts, sessions and Settings are kept in `data/` (`users.json`, `sessions.json`, `settings.json`: not in git); passwords as scrypt hashes, sessions as hashes of their tokens.
 
+**When WebSockets can't get through** (a proxy or network that blocks them): after three failed tries a console falls back to plain HTTP (long polling: `/api/poll`), and the footer says **HTTP fallback**. Everything works the same (sign-in, ship state, messages, calls' signaling; the calls' audio and video stay peer to peer); every 30 s it tries a WebSocket again and moves back to one, between calls. `?transport=http` starts a page on HTTP.
+
 ### Hosting the pages elsewhere (GitHub Pages)
 
 The pages in `public/` are static, so they can be hosted anywhere, for example GitHub Pages, as long as they can reach a running `server.js` (the comm relay):
