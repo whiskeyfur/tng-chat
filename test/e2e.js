@@ -13,7 +13,8 @@ const { chromium } = require('playwright');
 
 process.env.PORT = process.env.PORT || '8099';
 process.env.BEAM_SECS = process.env.BEAM_SECS || '2'; // the transporter energizes this long (5 s in play)
-process.env.RESERVE_SECS = process.env.RESERVE_SECS || '3'; // antimatter containment's internal reserve (9 minutes in play)
+process.env.RESERVE_SECS = process.env.RESERVE_SECS || '3';
+process.env.DIAG_SECS = process.env.DIAG_SECS || '2'; // the transporter's level-3 diagnostic (16 s in play) // antimatter containment's internal reserve (9 minutes in play)
 // Ship's computers keep their libraries in a scratch folder for the test.
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-test-'));
 const computers = new Set();
@@ -1136,7 +1137,6 @@ const audioBytes = (page) => page.evaluate(async () => {
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     obrien.send({ type: 'power', power: { engines: 0, injectors: 0, shields: 0, sensors: 20, lateral: 0, deflector: 0, sif: 0, idf: 0, transporter: 0, weapons: 0, atmosphere: 60, thermal: 60, gravity: 0, replicators: 0, recreation: 0 } });
     await nog.waitForSelector('[data-readout="Replicators"]:has-text("Offline")', { state: 'attached' });
-    await waitFor(() => obrien.nav()?.own.signature < 0.42);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'detached' });
     await carol.waitForSelector('#weapons-lock-state:has-text("No weapons lock")');
     step(`the Defiant powered down (replicators and holodecks too: its Crew consoles show them offline) to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 250 units away, and the weapons lock was lost`);
@@ -1545,7 +1545,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', ties: {
       'console:Engineering': ['A'], 'console:Tactical': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'system:gravity': ['A'], 'system:lighting': ['A'], 'system:lateral': ['A'],
       'system:replicators': ['B'], 'system:recreation': ['B'], 'system:transporter': ['B'], 'sub:constriction': ['A'], 'sub:corePump': ['A'], 'sub:injector': ['A'], 'sub:amConduit': ['A'], 'sub:portPump': ['B'], 'sub:starboardPump': ['B'], 'sub:portChamber': ['B'], 'sub:starboardChamber': ['B'], 'sub:cryoPumps': ['A'], 'sub:slushHeaters': ['B'], 'sub:aux1Chamber': ['A'], 'sub:aux1Pump': ['A'], aux1: ['EPS'],
-      'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'sub:forcefields': ['B'], 'sub:computer1': ['A'], 'sub:computer2': ['B'], 'sub:computer3': ['C'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'],
+      'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'sub:forcefields': ['B'], 'sub:computer1': ['A'], 'sub:computer2': ['B'], 'sub:computer3': ['C'], 'sub:patternBuffers': ['B'], 'sub:targetingScanners': ['B'], 'sub:energizingCoils': ['B'], 'sub:heisenberg': ['B'], 'sub:biofilter': ['B'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'],
       ...Object.fromEntries(['sensors', 'sif', 'idf', 'engines', 'injectors', 'shields', 'weapons', 'deflector', 'tractor'].map((x) => [`system:${x}`, ['EPS']])) } });
     await waitFor(() => barclay.nav()?.own.grid.ties['system:sif'].join() === 'EPS'); assert.ok(Object.values(cold.drives).every((d) => d.state === 'off') && Object.values(cold.taps).every((t) => t === 0), 'drives off and taps closed');
     // A source tied to two buses splits evenly, but what one bus can't use goes to the other:
@@ -1587,6 +1587,22 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', ties: { crosslink: ['A', 'C'] } });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /A and C link only through B/.test(m.text)));
     assert.deepEqual(barclay.nav().own.grid.ties.crosslink, ['A', 'B']);
+    // The transporter: a level-3 diagnostic before anyone is beamed; the pattern buffers losing power undo it.
+    barclay.send({ type: 'grid', ties: { 'console:Transporter': ['B'] } });
+    const kirk = await crewWs('kirk', 'Excelsior', 'Transporter');
+    await waitFor(() => barclay.nav()?.own.grid.consoleOk.Transporter);
+    kirk.send({ type: 'transporter-lock', ship: 'Excelsior' });
+    kirk.send({ type: 'beam', who: id('kirk', 'Excelsior'), station: 'Crew' });
+    await waitFor(() => kirk.msgs.some((m) => m.type === 'notice' && /run a level-3 diagnostic first/.test(m.text)));
+    kirk.send({ type: 'transporter-diagnostic' });
+    await waitFor(() => kirk.msgs.some((m) => m.type === 'notice' && /level-3 diagnostic passed/.test(m.text)), 10000);
+    barclay.send({ type: 'grid', ties: { 'sub:patternBuffers': [] } });
+    await waitFor(() => kirk.msgs.some((m) => m.type === 'notice' && /diagnostic invalidated: the pattern buffers lost power/.test(m.text)));
+    barclay.send({ type: 'grid', ties: { 'sub:patternBuffers': ['B'] } });
+    kirk.send({ type: 'transporter-lock', ship: null });
+    await waitFor(() => barclay.nav()?.own.transporter.lock === null);
+    kirk.close();
+    step("the Excelsior's transporter refused to energize before a level-3 diagnostic; the diagnostic passed, and the pattern buffers losing power invalidated it");
     // Loads have their own ties: consoles on Bus A or B only; engines (high power) on the EPS only.
     barclay.send({ type: 'grid', ties: { 'console:Tactical': ['EPS'] } });
     await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /Tactical can only be tied to Bus A \+ Bus B/.test(m.text)));

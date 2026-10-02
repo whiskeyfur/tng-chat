@@ -763,7 +763,7 @@ const ratingOf = (s) => RATING[s] ?? 100;
 // emergency overdrive, which slowly damages it, faster the further over it runs.
 const POWER_MAX = 150;
 const OVERDRIVE_DAMAGE = 0.02; // damage per second for each point drawn over 100
-const REACTOR = 320; // power drawn for a full sensor signature (a warm ship idling draws a little less)
+const REACTOR = 360; // power drawn for a full sensor signature (a warm ship idling draws a little less)
 const MIN_SHIELD_POWER = 20;
 const DEFAULT_POWER = { engines: 80, injectors: 80, shields: 60, sensors: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, lighting: 100, lateral: 100, deflector: 100, sif: 100, idf: 100, replicators: 40, recreation: 10 };
 // Power as Engineering set it (each system's demand), and what each system
@@ -781,7 +781,7 @@ function powerOf(k) {
 }
 // How visible a ship is to other ships' sensors: the more power it uses (all
 // of it: systems, consoles, the warp core's containment), the further off it
-// shows up. 320 units drawn or more: seen at full sensor range; power down to run quiet.
+// shows up. 360 units drawn or more: seen at full sensor range; power down to run quiet.
 const signatureOf = (k) => (isBase(k) ? 1 : Math.max(0.1, Math.min(1, flow(k).drawn / REACTOR)));
 // The lateral arrays alone see a quarter as far as the long-range sensors.
 function rangesOf(k) {
@@ -1430,6 +1430,11 @@ const SUBSYSTEMS = {
   cryoPumps: { parent: 'deuterium', ties: ['A'], name: 'cryo-pumps' },
   slushHeaters: { parent: 'deuterium', ties: ['B'], name: 'slush heaters' },
   forcefields: { parent: 'Security', ties: ['B'], name: 'force field emitters' },
+  patternBuffers: { parent: 'Transporter', ties: ['B'], name: 'pattern buffers' },
+  targetingScanners: { parent: 'Transporter', ties: ['B'], name: 'targeting scanners' },
+  energizingCoils: { parent: 'Transporter', ties: ['B'], name: 'energizing coils' },
+  heisenberg: { parent: 'Transporter', ties: ['B'], name: 'Heisenberg compensators' },
+  biofilter: { parent: 'Transporter', ties: ['B'], name: 'biofilter' },
   computer1: { parent: 'computer', ties: ['A'], name: 'computer core 1' },
   computer2: { parent: 'computer', ties: ['B'], name: 'computer core 2' },
   computer3: { parent: 'computer', ties: ['C'], name: 'computer core 3' },
@@ -1574,6 +1579,8 @@ function freshEng(saved, { cold = false } = {}) {
     breach: 0, selfDestruct: null, towing: null, dirty: false,
     // The warp core's reaction (older saves: running at 70%, 15:1, aligned, conduits open, auto-trim on).
     wc: { rate: Number.isFinite(s.wc?.rate) ? s.wc.rate : 70, actual: s.core === 'online' || (s.core === undefined && !cold) ? (Number.isFinite(s.wc?.actual) ? s.wc.actual : 70) : 0, mix: Number.isFinite(s.wc?.mix) ? s.wc.mix : 15, align: Number.isFinite(s.wc?.align) ? s.wc.align : 100, crystal: Number.isFinite(s.wc?.crystal) ? s.wc.crystal : 100, temp: Number.isFinite(s.wc?.temp) ? s.wc.temp : 0, plasma: s.wc?.plasma ?? !cold, autoTrim: s.wc?.autoTrim ?? !cold, breachT: null },
+    // The transporter's level-3 diagnostic (older saves: passed).
+    trDiag: { state: s.trDiag === 'passed' || (s.trDiag === undefined && !cold) ? 'passed' : 'none', t: 0 },
     // Antimatter containment: the field's strength (%) and its internal reserve.
     contain: { field: Number.isFinite(s.contain?.field) ? s.contain.field : 100, reserve: Number.isFinite(s.contain?.reserve) ? Math.min(reserveCap(), s.contain.reserve) : reserveCap() },
   };
@@ -1597,7 +1604,7 @@ const savedEng = (k) => {
     core: e.core === 'starting' ? 'offline' : e.core,
     drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state === 'running' ? 'running' : 'off', epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear }]; })),
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state === 'running' ? 'running' : 'off', epsTap: e.aux[a].epsTap }])),
-    dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure) }, epsLive: e.epsLive, contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
+    dfeed: { valves: e.dfeed.valves, pressure: Math.round(e.dfeed.pressure) }, epsLive: e.epsLive, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     dockedPort: e.dockedPort, autoRefuel: e.autoRefuel,
@@ -1767,6 +1774,8 @@ function flow(k) {
     ...Object.keys(CONSOLE_BUS).map((st) => [`console:${st}`, crew.filter((u) => u.station === st).length * GRID.console]),
     ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
     ['sub:forcefields', e.forcefields.length * GRID.forcefield],
+    ['sub:patternBuffers', TR.buffers], ['sub:targetingScanners', TR.small], ['sub:heisenberg', TR.small], ['sub:biofilter', TR.small],
+    ['sub:energizingCoils', transporters.get(k)?.energizing ? TR.coils : 0],
     ...COMPUTERS.map((x, i) => [`sub:${x}`, ['booting', 'online'].includes(e.computers[i].state) ? COMPUTER.draw : 0]),
     ...PORTS.map((p) => [`feed:${p}`, Math.max(0, conns.find((cn) => cn.p === p)?.net || 0)]),
     ...SYSTEM_PRIORITY.map((sys) => [`system:${sys}`, sys === 'tractor' ? (e.towing ? TRACTOR.draw : 0) : (demand[sys] * ratingOf(sys)) / 100]),
@@ -2758,6 +2767,7 @@ function stationCommand(ws, msg) {
   if (t === 'shields') return shieldsCommand(ws, msg), true;
   if (t === 'beam') return beamCommand(ws, msg), true;
   if (t === 'transporter-lock') return transporterLock(ws, msg), true;
+  if (t === 'transporter-diagnostic') return transporterDiagnostic(ws), true;
   if (['helm', 'autopilot', 'scan', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
@@ -2838,8 +2848,24 @@ function shieldsCommand(ws, msg) {
 // start, or fails at the end.
 const BEAM_SECS = Number(process.env.BEAM_SECS) || 5;
 const transporters = new Map(); // ship key -> { lock: ship key, energizing: { who, station, at } }
+// The transporter's subsystems (Transporter's console, low bus): pattern
+// buffers (15, they need the lateral sensors), targeting scanners (2, for a
+// lock), Heisenberg compensators and the biofilter (2 each), and the
+// energizing coils (5, while energizing). A level-3 diagnostic (16 s, all of
+// them powered) must pass before anyone is beamed; the buffers losing power
+// invalidates it.
+const TR = { buffers: 15, small: 2, coils: 5, diagSecs: Number(process.env.DIAG_SECS) || 16 };
+const TR_SUBS = ['patternBuffers', 'targetingScanners', 'energizingCoils', 'heisenberg', 'biofilter'];
+// What's missing for the transporter to work (null: nothing), and whether the lock part works.
+function transporterFault(k, { lock = false } = {}) {
+  const f = flow(k), p = powerOf(k);
+  if (p.lateral <= 0) return 'the pattern buffers need the lateral sensors';
+  const need = lock ? ['patternBuffers', 'targetingScanners'] : ['patternBuffers', 'targetingScanners', 'heisenberg', 'biofilter'];
+  const down = need.filter((x) => f.subOk[x] === false);
+  return down.length ? `no power to its ${down.map((x) => SUBSYSTEMS[x].name).join(', ')}` : null;
+}
 const transporterDraw = (k) => { const t = transporters.get(k); return t?.energizing ? 100 : t?.lock ? 50 : 0; };
-const transporterView = (k) => { const t = transporters.get(k); return { lock: t?.lock ? shipName(t.lock) : null, energizing: t?.energizing ? { who: t.energizing.who, until: t.energizing.at + BEAM_SECS * 1000 } : null, secs: BEAM_SECS }; };
+const transporterView = (k) => { const t = transporters.get(k), d = engOf(k).trDiag; return { lock: t?.lock ? shipName(t.lock) : null, energizing: t?.energizing ? { who: t.energizing.who, until: t.energizing.at + BEAM_SECS * 1000 } : null, secs: BEAM_SECS, diag: { state: d.state, t: d.t, secs: TR.diagSecs }, fault: transporterFault(k) }; };
 const transporterPower = (k) => { flowCache.delete(k); return powerOf(k).transporter; };
 function dropLock(k, why) {
   const t = transporters.get(k);
@@ -2850,6 +2876,19 @@ function dropLock(k, why) {
 }
 // Every tick: a lock on another ship holds only while it's there and in range.
 function checkTransporterLocks() {
+  for (const k of cores.keys()) {
+    if (isBase(k) || !eng.has(k)) continue;
+    const d = engOf(k).trDiag;
+    if (d.state === 'none') continue;
+    const f = flow(k);
+    // The buffers losing power (or the diagnostic's subsystems) undoes it.
+    if (f.subOk.patternBuffers === false || powerOf(k).lateral <= 0 || (d.state === 'running' && transporterFault(k))) {
+      const was = d.state; Object.assign(d, { state: 'none', t: 0 }); engOf(k).dirty = true;
+      tellStations(k, ['Transporter'], `Transporter: level-3 diagnostic ${was === 'running' ? 'aborted' : 'invalidated'}: the pattern buffers lost power`);
+      continue;
+    }
+    if (d.state === 'running' && ++d.t >= TR.diagSecs) { Object.assign(d, { state: 'passed', t: 0 }); engOf(k).dirty = true; tellStations(k, ['Transporter'], 'Transporter: level-3 diagnostic passed: ready to energize'); }
+  }
   for (const [k, t] of transporters) {
     if (t.energizing || !t.lock || t.lock === k) continue;
     if (!present(t.lock)) dropLock(k, `the ${shipName(t.lock)} has no ship's computer online`);
@@ -2857,6 +2896,19 @@ function checkTransporterLocks() {
   }
 }
 
+// A level-3 diagnostic: 16 s with every subsystem powered.
+function transporterDiagnostic(ws) {
+  const fail = (text) => send(ws, { type: 'notice', text: `Transporter: ${text}` });
+  if (ws.station !== 'Transporter') return fail('only the transporter room runs its diagnostics');
+  if (consoleDark(ws)) return fail('console offline, no power on its bus');
+  const d = engOf(ws.shipKey).trDiag;
+  if (d.state === 'running') return fail('the diagnostic is already running');
+  const fault = transporterFault(ws.shipKey) || (flow(ws.shipKey).subOk.energizingCoils === false ? 'no power to its energizing coils' : null);
+  if (fault) return fail(`can't run the diagnostic: ${fault}`);
+  Object.assign(d, { state: 'running', t: 0 });
+  tellStations(ws.shipKey, ['Transporter'], `Transporter: level-3 diagnostic running (${TR.diagSecs} s)`);
+  broadcastShips();
+}
 function transporterLock(ws, msg) {
   const fail = (text) => send(ws, { type: 'notice', text: `Transporter: ${text}` });
   if (ws.station !== 'Transporter') return fail('only the transporter room can lock on');
@@ -2868,6 +2920,8 @@ function transporterLock(ws, msg) {
     return broadcastShips();
   }
   const toKey = shipKey(clean(msg.ship));
+  const lockFault = transporterFault(k, { lock: true });
+  if (lockFault) return fail(`can't lock on: ${lockFault}`);
   if (toKey !== k) {
     if (!present(toKey)) return fail(`the ${clean(msg.ship)} has no ship's computer online`);
     if (!transporterOk(k, toKey)) return fail(`the ${shipName(toKey)} is out of transporter range (${rangeText(k, toKey)}; get within ${Math.round(rangesOf(k).transporter)})`);
@@ -2905,6 +2959,9 @@ function beamCommand(ws, msg) {
   const why = beamBlocked(k, u, toKey, station);
   if (why) return fail(why);
   if (allocOf(k).transporter < 100) return fail(`the transporter's limiter is at ${allocOf(k).transporter}%: it needs 100% to energize (ask Engineering)`);
+  const fault = transporterFault(k);
+  if (fault) return fail(`can't energize: ${fault}`);
+  if (engOf(k).trDiag.state !== 'passed') return fail(`run a level-3 diagnostic first (${TR.diagSecs} s)${engOf(k).trDiag.state === 'running' ? ': it\'s running' : ''}`);
   t.energizing = { who: u.id, station, at: Date.now() };
   const have = transporterPower(k);
   if (have < 100 - 1e-6) { t.energizing = null; gridChanged(k); return fail(`not enough power to energize: ${have}% of 100% (ask Engineering)`); }
@@ -2916,7 +2973,7 @@ function beamCommand(ws, msg) {
     const now = transporters.get(k);
     if (now !== t) return; // destroyed meanwhile
     const have = transporterPower(k);
-    const lost = beamBlocked(k, u, toKey, station) || (have < 100 - 1e-6 ? `power fell to ${have}% while energizing` : null);
+    const lost = beamBlocked(k, u, toKey, station) || (have < 100 - 1e-6 ? `power fell to ${have}% while energizing` : null) || transporterFault(k) || (flow(k).subOk.energizingCoils === false ? 'no power to its energizing coils' : null);
     t.energizing = null;
     gridChanged(k);
     if (lost) { tellStations(k, ['Transporter'], `Transporter: beam failed: ${lost}`); if (u.shipKey === k && u !== ws) send(u, { type: 'notice', text: 'The transporter beam failed: you are still here' }); return broadcastShips(); }

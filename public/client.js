@@ -393,7 +393,7 @@ function renderShipState() {
   // Where each target is, for the transporter's reach (updates as ships move).
   const where = (name) => lastNav?.ships?.find((x) => x.name === name)?.distance ?? lastNav?.bases?.find((b) => b.name === name)?.distance;
   const trState = lastNav?.own?.transporter || {};
-  const sig = JSON.stringify([up, p?.shields, lastNav?.own?.capacity?.shields, p?.transporter, lastNav?.own?.allocated?.transporter, trState.lock, !!trState.energizing, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields, Math.round(where(t.name) ?? -1)]), strength]);
+  const sig = JSON.stringify([up, p?.shields, lastNav?.own?.capacity?.shields, p?.transporter, lastNav?.own?.allocated?.transporter, trState.lock, !!trState.energizing, trState.diag, trState.fault, Math.round(range || 0), crew.map((u) => u.id), targets.map((t) => [t.name, t.shields, Math.round(where(t.name) ?? -1)]), strength]);
   if (sig === shipStateSig) return;
   shipStateSig = sig;
   stationView.setShields(up);
@@ -444,6 +444,7 @@ function renderTransporter(trEl, { crew, targets, up, p, range, where = () => un
       el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Station' }), el('div', { className: 'tr-taps', id: 'beam-station' })),
       el('div', { className: 'tr-energize' }, sliders, el('span', { className: 'tr-label', textContent: 'Energize: all three up' })),
       el('p', { className: 'ops-notice', id: 'beam-status' }),
+      el('div', { className: 'ops-form' }, el('span', { id: 'beam-diag' }), Object.assign(el('button', { type: 'button', className: 'lcars-button lcars-button--pill', id: 'beam-diag-run', textContent: 'Run level-3 diagnostic' }), { onclick: () => send({ type: 'transporter-diagnostic' }) })),
       el('p', { className: 'ops-hint', id: 'beam-range' }));
   }
   const ships = [{ name: me.ship, here: true }, ...targets];
@@ -475,11 +476,15 @@ function renderTransporter(trEl, { crew, targets, up, p, range, where = () => un
   taps(tr.querySelector('#beam-ship'), ships.map((x) => [x.name, x.here ? `The ${x.name} (site to site)` : /^(Starbase|Deep Space) /.test(x.name) ? x.name : `The ${x.name}`, x.name === tr2.lock ? '' : reach(x)]), beamSel.ship, (v) => { send({ type: 'transporter-lock', ship: v === tr2.lock ? null : v }); });
   taps(tr.querySelector('#beam-station'), stations.map((n) => [n, n]), beamSel.station, (v) => { beamSel.station = v; });
   const limit = lastNav?.own?.allocated?.transporter ?? 100;
-  const blocked = tr2.energizing ? `Energizing · 100% power` : !tr2.lock ? 'No lock · tap a destination to lock on (transporter idle, no power drawn)'
+  // The level-3 diagnostic: it must pass before anyone is beamed.
+  const diag = tr2.diag || { state: 'passed' };
+  tr.querySelector('#beam-diag').textContent = diag.state === 'passed' ? 'Level-3 diagnostic: passed' : diag.state === 'running' ? `Level-3 diagnostic: running (${diag.t} of ${diag.secs} s)` : 'Level-3 diagnostic: required before beaming';
+  tr.querySelector('#beam-diag-run').disabled = diag.state === 'running' || !!tr2.fault;
+  const blocked = tr2.energizing ? `Energizing · 100% power` : tr2.fault ? `Transporter offline: ${tr2.fault}` : !tr2.lock ? 'No lock · tap a destination to lock on (transporter idle, no power drawn)'
     : limit < 100 ? `Locked on the ${tr2.lock} · limiter at ${limit}%: energizing needs 100% (ask Engineering)`
     : up && tr2.lock !== me.ship ? `Locked on the ${tr2.lock} · shields are up aboard the ${me.ship}`
     : `Locked on the ${tr2.lock} · ${p?.transporter ?? 0}% power (energizing takes 100% for ${tr2.secs || 5} s)`;
-  for (const r of tr.querySelectorAll('.tr-slider')) r.disabled = !crew.length || !tr2.lock || !!tr2.energizing || limit < 100;
+  for (const r of tr.querySelectorAll('.tr-slider')) r.disabled = !crew.length || !tr2.lock || !!tr2.energizing || limit < 100 || !!tr2.fault || diag.state !== 'passed';
   tr.querySelector('#beam-status').textContent = blocked;
   tr.querySelector('#beam-range').textContent = range != null ? `Transporter range ${Math.round(range)} units (sensor power ${p?.sensors ?? 100}%)` : '';
 }
