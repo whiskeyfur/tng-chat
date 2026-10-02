@@ -1401,11 +1401,13 @@ const AB = BUSES; // what a low-power tie may pick (one of them)
 const DRIVES = ['port', 'starboard'];
 const driveSource = (d) => `impulse${d[0].toUpperCase()}${d.slice(1)}`; // impulsePort, impulseStarboard
 // Sources, in the order they're drawn on: power a docked ship sends us first, batteries last.
-const SOURCES = ['ship', 'shipEps', 'solar', 'dock', 'dockEps', 'impulsePort', 'impulseStarboard', 'aux1', 'aux2', 'core', 'emerg1', 'emerg2', 'emerg3', 'batteryA', 'batteryB', 'batteryC', 'pressure'];
-// Emergency batteries: three, each half a bus battery, on Bus B only (an
-// External source, like solar). They only give power while tied, last of all
-// with the stores, and never recharge: a starbase replaces one with a full one.
-const EMERG = { names: ['emerg1', 'emerg2', 'emerg3'], cap: GRID.batteryCap / 2, out: 50 };
+const SOURCES = ['ship', 'shipEps', 'solar', 'dock', 'dockEps', 'impulsePort', 'impulseStarboard', 'aux1', 'aux2', 'core', 'emergA', 'emergB', 'emergC', 'batteryA', 'batteryB', 'batteryC', 'pressure'];
+// Emergency batteries: one per low bus, each tied only to its own (or not),
+// holding EMERG_SIZE bus batteries' worth. They only give power while tied,
+// last of all with the stores, and never recharge: a starbase replaces one
+// with a full one.
+const EMERG_SIZE = 5; // × a bus battery's capacity
+const EMERG = { names: ['emergA', 'emergB', 'emergC'], bus: { emergA: 'A', emergB: 'B', emergC: 'C' }, cap: GRID.batteryCap * EMERG_SIZE, out: GRID.batteryOut };
 // Drawn on only when nothing else will do: the stores and the emergency batteries.
 const lastResort = (name) => isStore(name) || EMERG.names.includes(name);
 // Stores: a battery on each low bus, and the EPS manifold's plasma pressure.
@@ -1415,8 +1417,9 @@ const STORES = { batteryA: 'A', batteryB: 'B', batteryC: 'C', pressure: 'EPS' };
 const isStore = (name) => name in STORES;
 // Power as shown: rounded up, away from zero (float dust aside).
 const ceilUp = (v) => (v < 0 ? -Math.ceil(-v - 1e-9) : Math.ceil(v - 1e-9));
-// The computer cores: three, each on a low bus (2), booting in stages (about
-// 14 s) and crashing if their power fails (boot them again). The EPS flow
+// The computer cores: three, each on a low bus (2), booting by themselves in
+// stages (about 14 s) once tied and powered, crashing if their power fails
+// (and booting again when it returns). The EPS flow
 // regulators (the taps) need at least one online; text messages need one at
 // each end; the warp core's dilithium auto-trim needs all three.
 // The optical data network: each console's link to the ship's computers. A
@@ -1505,9 +1508,9 @@ const storeOf = (node) => (node === 'EPS' ? 'pressure' : `battery${node}`);
 // Every tie is one class: Bus A/B, or the EPS only (the warp core's and
 // impulse drives' outputs). The warp core itself spans both: its
 // subsystems on A/B, its output on the EPS.
-// Solar and the emergency batteries come in on Bus B only. Each connection's
+// Solar comes in on Bus B only; each emergency battery on its own bus. Each connection's
 // power comes in on two rows: Power (Bus B) and EPS (the EPS).
-const SOURCE_NODES = { ship: ['B'], shipEps: ['EPS'], solar: ['B'], dock: ['B'], dockEps: ['EPS'], emerg1: ['B'], emerg2: ['B'], emerg3: ['B'], impulsePort: ['EPS'], impulseStarboard: ['EPS'], aux1: ['EPS'], aux2: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: AB, crosslink: AB };
+const SOURCE_NODES = { ship: ['B'], shipEps: ['EPS'], solar: ['B'], dock: ['B'], dockEps: ['EPS'], emergA: ['A'], emergB: ['B'], emergC: ['C'], impulsePort: ['EPS'], impulseStarboard: ['EPS'], aux1: ['EPS'], aux2: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: AB, crosslink: AB };
 // Low-power loads and sources may tie to several of Bus A, B and C (a load
 // split evenly over them, a source's output shared evenly); so may the
 // crosslink (the buses checked are one pool). EPS ties are one.
@@ -1635,7 +1638,7 @@ const eng = new Map(); // ship key -> { core, antimatter, start, taps, ties, bat
 
 // thrustersPort / thrustersStarboard: a drive's maneuvering thrusters tied in
 // to the EPS (the drive's unused thrust feeds it) or not (thrust only).
-const DEFAULT_TIES = { solar: ['B'], dock: ['B'], dockEps: [], ship: [], shipEps: [], emerg1: [], emerg2: [], emerg3: [], impulsePort: ['EPS'], impulseStarboard: ['EPS'], aux1: ['EPS'], aux2: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: ['A'], crosslink: [] };
+const DEFAULT_TIES = { solar: ['B'], dock: ['B'], dockEps: [], ship: [], shipEps: [], emergA: [], emergB: [], emergC: [], impulsePort: ['EPS'], impulseStarboard: ['EPS'], aux1: ['EPS'], aux2: ['EPS'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'], core: ['EPS'], containment: ['A'], crosslink: [] };
 // New ships (unless their computer says --warm) and rebuilt ones start cold:
 // docked at a starbase, reactors offline, no power source tied in (consoles
 // and systems keep their wiring), taps closed, no antimatter or deuterium.
@@ -1731,9 +1734,11 @@ function freshEng(saved, { cold = false } = {}) {
     trDiag: { state: s.trDiag === 'passed' || (s.trDiag === undefined && !cold) ? 'passed' : 'none', t: 0 },
     // Antimatter containment: the field's strength (%) and its internal reserve.
     contain: { field: Number.isFinite(s.contain?.field) ? s.contain.field : 100, reserve: Number.isFinite(s.contain?.reserve) ? Math.min(reserveCap(), s.contain.reserve) : reserveCap() },
-    // The emergency batteries' charge (older saves and new ships: full).
-    emerg: Object.fromEntries(EMERG.names.map((n) => [n, Number.isFinite(s.emerg?.[n]) ? Math.max(0, Math.min(EMERG.cap, s.emerg[n])) : EMERG.cap])),
+    // The emergency batteries' charge (new ships: full; the three earlier Bus B ones, 500 each, became A, B and C at the same %).
+    emerg: Object.fromEntries(EMERG.names.map((n, i) => { const v = s.emerg?.[n], old = s.emerg?.[`emerg${i + 1}`]; return [n, Number.isFinite(v) ? Math.max(0, Math.min(EMERG.cap, v)) : Number.isFinite(old) ? Math.max(0, Math.min(1, old / 500)) * EMERG.cap : EMERG.cap]; })),
   };
+  // The three earlier Bus B emergency batteries: tied, they're tied to their own bus now.
+  EMERG.names.forEach((n, i) => { if (!s.ties?.[n] && s.ties?.[`emerg${i + 1}`]?.length) ties[n] = [EMERG.bus[n]]; });
   // Older saves: one connection power row, on Bus B and/or the EPS. Its EPS tie
   // is now the EPS row, tied, with the same Import / Export.
   for (const [src, eps] of [['dock', 'dockEps'], ['ship', 'shipEps']]) {
@@ -2148,7 +2153,7 @@ function gridView(k) {
       .map((x) => ({ ...x, ...Object.fromEntries(CONN_RES.map((r) => [r, { ...connOf(e, x.key)[r], ...(e.connFlow[`${x.key}:${r}`] || {}) }])), powerIn: x.kind === 'station' ? Math.round(Object.values(f.cells.dock || {}).reduce((a, b) => a + b, 0)) : Math.round(e.fed[x.port] ? -e.fed[x.port] : Object.values(f.cells.ship || {}).reduce((a, b) => a + b, 0)),
         epsIn: x.kind === 'station' ? Math.round(Object.values(f.cells.dockEps || {}).reduce((a, b) => a + b, 0)) : Math.round(e.fedEps[x.port] ? -e.fedEps[x.port] : Object.values(f.cells.shipEps || {}).reduce((a, b) => a + b, 0)) })),
     // The emergency batteries: charge, and a starbase can swap in a full one.
-    emerg: EMERG.names.map((n) => ({ name: n, level: Math.floor(e.emerg[n]), pct: Math.floor((100 * e.emerg[n]) / EMERG.cap), out: EMERG.out })), canReplace: !!e.docked,
+    emerg: EMERG.names.map((n) => ({ name: n, bus: EMERG.bus[n], level: Math.floor(e.emerg[n]), pct: Math.floor((100 * e.emerg[n]) / EMERG.cap), out: EMERG.out, supplying: Math.round(f.emergUsed[n] || 0) })), canReplace: !!e.docked,
     dockedPort: e.docked ? e.dockedPort : null, nearShip: nearShip(k), dockedWith: dockedWith(k).map(shipName),
     // What each port holds: a starbase, a ship (with its power offers), or nothing.
     ports: Object.fromEntries(PORTS.map((p) => {
@@ -2188,7 +2193,7 @@ function gridCommand(ws, msg) {
   const note = (text) => send(ws, { type: 'notice', text: `Engineering: ${text}` });
   if (ws.station !== 'Engineering') return send(ws, { type: 'notice', text: 'Only Engineering runs the power grid' });
   const said = [];
-  const NAME = { core: 'power transfer conduits', thrustersPort: 'port maneuvering thrusters', thrustersStarboard: 'starboard maneuvering thrusters', crosslink: 'bus crosslink', solar: 'solar', dock: 'starbase power (Bus B)', dockEps: 'starbase EPS power', ship: 'docked-ship power (Bus B)', shipEps: 'docked-ship EPS power', emerg1: 'emergency battery 1', emerg2: 'emergency battery 2', emerg3: 'emergency battery 3', core: 'warp core', battery: 'batteries', containment: 'antimatter containment', impulsePort: 'port impulse drive', impulseStarboard: 'starboard impulse drive' };
+  const NAME = { core: 'power transfer conduits', thrustersPort: 'port maneuvering thrusters', thrustersStarboard: 'starboard maneuvering thrusters', crosslink: 'bus crosslink', solar: 'solar', dock: 'starbase power (Bus B)', dockEps: 'starbase EPS power', ship: 'docked-ship power (Bus B)', shipEps: 'docked-ship EPS power', emergA: 'emergency battery A', emergB: 'emergency battery B', emergC: 'emergency battery C', core: 'warp core', battery: 'batteries', containment: 'antimatter containment', impulsePort: 'port impulse drive', impulseStarboard: 'starboard impulse drive' };
   const feeds = (list) => (list.length ? list.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(' + ') : 'off');
   if (msg.eject) {
     if (e.core === 'ejected') return note('the warp core is already gone');
@@ -2234,15 +2239,6 @@ function gridCommand(ws, msg) {
     said.push('warp core shut down');
   }
   // Impulse drives: start (on bus power for their pumps) or stop; thrusters in or out.
-  // A computer core: boot it ({ computer: { n, on: true } }) or shut it down.
-  if (msg.computer && Number.isInteger(msg.computer.n) && COMPUTERS[msg.computer.n - 1]) {
-    const i = msg.computer.n - 1, cc = e.computers[i];
-    if (msg.computer.on && cc.state !== 'online' && cc.state !== 'booting') {
-      cc.state = 'booting'; cc.t = 0; flowCache.delete(key);
-      if (!flow(key).subOk[COMPUTERS[i]]) { cc.state = 'off'; flowCache.delete(key); return note(`computer core ${i + 1} needs ${COMPUTER.draw} to boot: tie it to a bus that has power`); }
-      said.push(`computer core ${i + 1} booting`);
-    } else if (!msg.computer.on && cc.state !== 'off') { cc.state = 'off'; cc.t = 0; said.push(`computer core ${i + 1} shut down`); }
-  }
   // A fusion reactor (an impulse drive, or aux1/aux2): light its chamber or
   // shut it down; its EPS tap; a drive's accelerators (0-100) and gear.
   const rx = msg.impulse || msg.reactor;
@@ -2305,11 +2301,11 @@ function gridCommand(ws, msg) {
     if (typeof msg.conn.imp === 'boolean') { c.imp = msg.conn.imp; said.push(`${what} import from ${name} ${c.imp ? 'on' : 'off'}`); }
     if (typeof msg.conn.exp === 'boolean') { c.exp = msg.conn.exp; said.push(`${what} export to ${name} ${c.exp ? 'on' : 'off'}`); }
   }
-  // A starbase swaps in a full emergency battery: { emergReplace: 'emerg1' }.
+  // A starbase swaps in a full emergency battery: { emergReplace: 'emergA' }.
   if (EMERG.names.includes(msg.emergReplace)) {
     if (!e.docked) return note('emergency batteries are replaced at a starbase: dock first');
     e.emerg[msg.emergReplace] = EMERG.cap;
-    said.push(`emergency battery ${msg.emergReplace.slice(5)} replaced with a full one from ${e.docked}`);
+    said.push(`emergency battery ${EMERG.bus[msg.emergReplace]} replaced with a full one from ${e.docked}`);
   }
   // The starbase connection's Deu. / AM / ODN ties: { connTie: { res: 'deu' | 'am' | 'odn', on } }.
   if (msg.connTie && ['deu', 'am', 'odn'].includes(msg.connTie.res)) {
@@ -2998,10 +2994,15 @@ setInterval(() => {
       c.damage[sys] = Math.min(100, c.damage[sys] + (f.delivered[sys] - 100) * OVERDRIVE_DAMAGE);
       if (Math.floor(was / 10) !== Math.floor(c.damage[sys] / 10)) tellStations(k, ['Engineering'], `Engineering: ${SYSTEM_NAMES[sys]} overdriven (${Math.round(f.delivered[sys])}%), damage ${Math.ceil(c.damage[sys])}%`);
     }
-    // Computer cores: boot in stages; lose power and they crash.
+    // Computer cores: boot by themselves (in stages) once tied and getting
+    // power; lose power and they crash, booting again when it's back.
     e.computers.forEach((cc, i) => {
-      if (cc.state !== 'booting' && cc.state !== 'online') return;
-      if (!f.subOk[COMPUTERS[i]]) { cc.state = 'crashed'; cc.t = 0; e.dirty = true; opLog(k, `computer core ${i + 1} crashed: power lost`); tellStations(k, ['Engineering'], `Engineering: computer core ${i + 1} crashed (power lost): boot it again`); return; }
+      if (cc.state !== 'booting' && cc.state !== 'online') {
+        const ts = e.ties[`sub:${COMPUTERS[i]}`] || [];
+        if (ts.some((n) => f.totals[n].available - f.totals[n].used >= COMPUTER.draw)) { cc.state = 'booting'; cc.t = 0; e.dirty = true; flowCache.delete(k); opLog(k, `computer core ${i + 1} booting`); }
+        return;
+      }
+      if (!f.subOk[COMPUTERS[i]]) { cc.state = 'crashed'; cc.t = 0; e.dirty = true; opLog(k, `computer core ${i + 1} crashed: power lost`); tellStations(k, ['Engineering'], `Engineering: computer core ${i + 1} crashed (power lost): it boots again when power returns`); return; }
       if (cc.state === 'booting' && ++cc.t >= COMPUTER.bootSecs) { cc.state = 'online'; cc.t = 0; e.dirty = true; opLog(k, `computer core ${i + 1} online`); tellStations(k, ['Engineering'], `Engineering: computer core ${i + 1} online`); }
     });
     // The fuel buses: tanks with Fill on take from tanks with Drain on (the

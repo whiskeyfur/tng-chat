@@ -969,14 +969,18 @@ function renderCombat() {
     // The optical data network (each console's link), the power buses, then the fuel buses.
     const COLS = ['ODN', 'A', 'B', 'C', 'EPS', 'Deu', 'AM'];
     const FUEL_COL = { deu: 'Deu', am: 'AM' };
-    // A row: label (with a note and maybe controls), then a cell per node:
+    // Every row's buttons (Fill / Drain, Import / Export, Light, Start, On / Off, ...) sit in the Controls column.
+    const ctlCell = (controls = []) => el('td', { className: 'grid-controls' }, ...controls);
+    // The column a node's cell is in (after the System and Controls columns).
+    const colAt = (tr, n) => tr.children[2 + COLS.indexOf(n)];
+    // A row: label (with a note), its controls, then a cell per node:
     // the tie checkbox (only where this row may tie) and the power through it,
     // + for supply, − for draw.
-    const SOURCE_ROWS = new Set(['ship', 'shipEps', 'solar', 'dock', 'dockEps', 'emerg1', 'emerg2', 'emerg3', 'impulsePort', 'impulseStarboard', 'core', 'stores']);
+    const SOURCE_ROWS = new Set(['ship', 'shipEps', 'solar', 'dock', 'dockEps', 'emergA', 'emergB', 'emergC', 'impulsePort', 'impulseStarboard', 'core', 'stores']);
     const ties = (key, label, cellKey = key, { level = 0, note = '', controls = [], sign } = {}) => {
-      const th = el('th', { scope: 'row' }, el('span', { textContent: label }), ...controls, ...(note ? [el('small', { className: 'grid-note', textContent: note })] : []));
+      const th = el('th', { scope: 'row' }, el('span', { textContent: label }), ...(note ? [el('small', { className: 'grid-note', textContent: note })] : []));
       if (level) th.className = `grid-indent grid-indent--${level}`;
-      const tr = el('tr', { id: `ties-${key.replace(':', '-')}` }, th);
+      const tr = el('tr', { id: `ties-${key.replace(':', '-')}` }, th, ctlCell(controls));
       const allowed = grid.tieNodes[key] || [];
       const plus = sign ?? SOURCE_ROWS.has(cellKey);
       for (const n of COLS) {
@@ -995,7 +999,7 @@ function renderCombat() {
     // A system with subsystems (the warp core, an impulse drive) has no tie
     // cells of its own: status and controls only; its subsystems carry the ties.
     const parentRow = (id, label, level, note, controls = []) => {
-      const tr = el('tr', { id }, el('th', { scope: 'row', className: `grid-indent grid-indent--${level}` }, el('span', { textContent: label }), ...controls, ...(note ? [el('small', { className: 'grid-note', textContent: note })] : [])));
+      const tr = el('tr', { id }, el('th', { scope: 'row', className: `grid-indent grid-indent--${level}` }, el('span', { textContent: label }), ...(note ? [el('small', { className: 'grid-note', textContent: note })] : [])), ctlCell(controls));
       for (const n of COLS) tr.append(el('td', { className: 'grid-na' }));
       return tr;
     };
@@ -1006,7 +1010,7 @@ function renderCombat() {
       const b = small(on ? 'On' : 'Off', `${id}-toggle`, onTap);
       b.classList.add('lcars-toggle');
       b.setAttribute('aria-pressed', String(!!on));
-      return spanRow(id, label, level, b, note);
+      return spanRow(id, label, level, null, note, [b]);
     };
     // A fusion reactor (an impulse drive or an aux reactor): its reaction
     // chamber (light / shut down), deuterium pump and EPS tap; a drive's
@@ -1024,7 +1028,7 @@ function renderCombat() {
       const tank = grid.fuel?.deu?.tanks.find((t) => t.name === rn);
       const press = `tank ${tank?.pct ?? 0}% (lights at ${grid.fuel?.deu?.light ?? 30}%)`;
       const chamber = subRow(`${rn}Chamber`, 2, `${press}${x.state === 'starting' ? (grid.subOk[`${rn}Chamber`] ? ' · lighting' : ' · NO POWER') : x.state === 'running' ? (self ? ' · self-powered from the EPS' : ' · on its bus ties') : ''}`);
-      chamber.querySelector('th span').after(x.state === 'off' ? small('Light', `${rn}-start`, () => send({ type: 'grid', reactor: { name: rn, on: true } })) : small('Shut down', `${rn}-stop`, () => send({ type: 'grid', reactor: { name: rn, on: false } }), true));
+      chamber.querySelector('.grid-controls').prepend(x.state === 'off' ? small('Light', `${rn}-start`, () => send({ type: 'grid', reactor: { name: rn, on: true } })) : small('Shut down', `${rn}-stop`, () => send({ type: 'grid', reactor: { name: rn, on: false } }), true));
       const rows = [
         parentRow(`ties-${src}`, label, 1, `${state}${out}`),
         ...tankRow('deu', rn), // (the tank above the chamber it feeds)
@@ -1038,7 +1042,7 @@ function renderCombat() {
         const gears = el('span', { className: 'grid-gears' }, ...['low', 'high'].map((g) => { const b = small(g === 'low' ? 'Low' : 'High', `${rn}-gear-${g}`, () => send({ type: 'grid', reactor: { name: rn, gear: g } })); b.setAttribute('aria-pressed', String(x.gear === g)); return b; }));
         rows.push(
           spanRow(`${rn}-accel`, 'Accelerators', 2, bar, `throttle ${x.accel}%`),
-          spanRow(`${rn}-coils`, 'Driver coils', 2, gears, x.gear === 'low' ? 'Low gear: quick, a quarter impulse at most' : 'High gear: full impulse, slower to build'),
+          spanRow(`${rn}-coils`, 'Driver coils', 2, null, x.gear === 'low' ? 'Low gear: quick, a quarter impulse at most' : 'High gear: full impulse, slower to build', [gears]),
           ties(`thrusters${cap(rn)}`, 'Maneuvering thrusters', `thrusters${cap(rn)}`, { level: 2, note: x.thrusters ? 'tied in: the drive\'s unused thrust feeds the EPS' : 'untied: thrust only, nothing to the EPS' }));
       } else rows.push(ties(rn, 'Power output', rn, { level: 2, note: `${grid.auxOutput} to the EPS while running` }));
       return rows;
@@ -1062,9 +1066,9 @@ function renderCombat() {
       const note = `${t.level} of ${t.cap} (${t.pct}%)${t.name !== 'main' && t.pct < grid.fuel[bus].light ? ' · LOW' : ''}${pods ? podsNote : t.field != null && t.level > 0 ? ` · containment ${t.field}%${t.field < 100 ? ' FAILING' : ''}` : ''}`;
       const own = bus === 'am' && t.containKey;
       const tr = own ? ties(t.containKey, label, t.containKey, { level, sign: false, note, controls: [fill, drain] })
-        : el('tr', {}, el('th', { scope: 'row', className: `grid-indent grid-indent--${level}` }, el('span', { textContent: label }), fill, drain, el('small', { className: 'grid-note', textContent: note })), ...COLS.map(() => el('td', { className: 'grid-na' })));
+        : el('tr', {}, el('th', { scope: 'row', className: `grid-indent grid-indent--${level}` }, el('span', { textContent: label }), el('small', { className: 'grid-note', textContent: note })), ctlCell([fill, drain]), ...COLS.map(() => el('td', { className: 'grid-na' })));
       tr.id = `tank-${bus}-${t.name}`;
-      const cell = tr.children[1 + COLS.indexOf(FUEL_COL[bus])];
+      const cell = colAt(tr, FUEL_COL[bus]);
       const box = el('input', { type: 'checkbox', checked: t.tied, ariaLabel: `${label}: ${NODE_NAMES[FUEL_COL[bus]]}` });
       box.onchange = () => send({ type: 'grid', tank: { bus, name: t.name, tied: box.checked } });
       cell.className = ''; cell.replaceChildren(el('label', { className: 'grid-tie' }, box));
@@ -1086,16 +1090,15 @@ function renderCombat() {
         parentRow('ties-computer-parent', 'Computer cores', 1, `${cs.filter((x) => x.state === 'online').length} of ${cs.length} online${cs.some((x) => x.state === 'online') ? '' : ' · EPS taps need one'}`),
         ...cs.map((x, i) => {
           const n = i + 1;
-          const note = x.state === 'booting' ? `booting: ${x.stage} (${x.t} of ${grid.computerBootSecs} s)` : x.state === 'crashed' ? 'CRASHED: power lost, boot again' : x.state;
-          const row = subRow(`computer${n}`, 2, note);
-          row.querySelector('th span').after(x.state === 'online' || x.state === 'booting' ? small('Shut down', `computer-${n}-stop`, () => send({ type: 'grid', computer: { n, on: false } }), true) : small('Boot', `computer-${n}-boot`, () => send({ type: 'grid', computer: { n, on: true } })));
-          return row;
+          const note = x.state === 'booting' ? `booting: ${x.stage} (${x.t} of ${grid.computerBootSecs} s)` : x.state;
+          // (A core boots by itself once tied and powered; it crashes without power, and boots again when it's back.)
+          return subRow(`computer${n}`, 2, x.state === 'off' ? 'off: boots once tied to a bus with power' : x.state === 'crashed' ? 'CRASHED: power lost, boots again when it returns' : note);
         }),
       ];
     };
     // A row with a control across the bus columns (EPS taps' light bars).
-    const spanRow = (id, label, level, control, note = '') => {
-      const tr = el('tr', { id }, el('th', { scope: 'row', className: `grid-indent grid-indent--${level}` }, el('span', { textContent: label }), ...(note ? [el('small', { className: 'grid-note', textContent: note })] : [])));
+    const spanRow = (id, label, level, control, note = '', controls = []) => {
+      const tr = el('tr', { id }, el('th', { scope: 'row', className: `grid-indent grid-indent--${level}` }, el('span', { textContent: label }), ...(note ? [el('small', { className: 'grid-note', textContent: note })] : [])), ctlCell(controls));
       tr.append(el('td', { colSpan: COLS.length }, ...(control ? [control] : [])));
       return tr;
     };
@@ -1103,7 +1106,7 @@ function renderCombat() {
       // What's flowing down the taps: out of the EPS, into each bus.
       (() => {
         const tr = parentRow('eps-taps', 'EPS taps', 1, `${grid.epsLive ? 'EPS energized' : `EPS NOT ENERGIZED: the manifold charges from ${grid.epsChargeGen}+ of EPS generation (now ${grid.epsGen})`} · EPS power down into each low bus, up to the level set (a computer core works the regulators)`);
-        COLS.forEach((n, i) => { const v = grid.cells.taps?.[n] || 0; tr.children[i + 1].replaceChildren(el('span', { className: `grid-flow${v > 0 ? ' grid-flow--in' : ''}`, textContent: v > 0 ? `+${v}` : v < 0 ? `−${-v}` : '' })); });
+        COLS.forEach((n) => { const v = grid.cells.taps?.[n] || 0; colAt(tr, n).replaceChildren(el('span', { className: `grid-flow${v > 0 ? ' grid-flow--in' : ''}`, textContent: v > 0 ? `+${v}` : v < 0 ? `−${-v}` : '' })); });
         return tr;
       })(),
       ...['A', 'B', 'C'].map((X) => {
@@ -1131,11 +1134,8 @@ function renderCombat() {
       ...tapRows(),
       ...computerRows(),
     ];
-    // External sources: solar and the emergency batteries (Bus B), then the connections.
-    const emergRows = () => (grid.emerg || []).map((b, i) => ties(b.name, `Emergency battery ${i + 1}`, b.name, { level: 1,
-      controls: grid.canReplace ? [small('Replace', `${b.name}-replace`, () => send({ type: 'grid', emergReplace: b.name }))] : [],
-      note: `${b.pct}% · ${b.level ? `up to ${b.out} while tied` : 'FLAT'} · never recharges${grid.canReplace ? '' : ' (replaced at a starbase)'}` }));
-    const sourceRows = () => [ties('solar', 'Solar', 'solar', { level: 1 }), ...emergRows()];
+    // External sources: solar (Bus B), then the connections.
+    const sourceRows = () => [ties('solar', 'Solar', 'solar', { level: 1 })];
     // Connections: the starbase and each ship docked with us. Per connection,
     // Deuterium, Antimatter and Power, each with Import and Export (import
     // keeps ours full, export keeps ours empty, both hold a set point); power
@@ -1150,7 +1150,7 @@ function renderCombat() {
       const fuelRow = (res, label, have, cap) => {
         const c = x[res];
         const note = `ours ${Math.round((100 * have) / cap)}%${c.flow ? ` · ${c.flow > 0 ? `+${c.flow}` : c.flow} a second` : ''}${c.why ? ` · ${c.why}` : ''}${c.imp && c.exp ? ' · holding 50%' : ''}`;
-        const tr = el('tr', { id: `conn-${slug}-${res}` }, el('th', { scope: 'row', className: 'grid-indent grid-indent--2' }, el('span', { textContent: label }), ...io(res, c), el('small', { className: 'grid-note', textContent: note })), ...COLS.map(() => el('td', { className: 'grid-na' })));
+        const tr = el('tr', { id: `conn-${slug}-${res}` }, el('th', { scope: 'row', className: 'grid-indent grid-indent--2' }, el('span', { textContent: label }), el('small', { className: 'grid-note', textContent: note })), ctlCell(io(res, c)), ...COLS.map(() => el('td', { className: 'grid-na' })));
         return tr;
       };
       // Power (Bus B, set point Battery B full) and EPS (the EPS, set point the manifold full).
@@ -1166,7 +1166,7 @@ function renderCombat() {
         const box = el('input', { type: 'checkbox', checked: !!x.ties[res], ariaLabel: `${x.name} connection: ${NODE_NAMES[col]}` });
         box.id = `conn-tie-${res}`;
         box.onchange = () => send({ type: 'grid', connTie: { res, on: box.checked } });
-        const cell = parent.children[1 + COLS.indexOf(col)];
+        const cell = colAt(parent, col);
         cell.className = ''; cell.replaceChildren(el('label', { className: 'grid-tie' }, box));
       }
       return [parent,
@@ -1175,7 +1175,7 @@ function renderCombat() {
     // The stores, one per column under the headings: each bus's battery and
     // the EPS manifold's pressure, how full, and charging (−) or covering a shortfall (+).
     const storesRow = () => {
-      const tr = el('tr', { id: 'grid-stores', className: 'grid-stores' }, el('th', { scope: 'row', textContent: 'Batteries · EPS pressure' }));
+      const tr = el('tr', { id: 'grid-stores', className: 'grid-stores' }, el('th', { scope: 'row', textContent: 'Batteries · EPS pressure' }), el('td'));
       for (const n of COLS) {
         const st = grid.stores?.[n];
         if (!st) { tr.append(el('td', { className: 'grid-na' })); continue; }
@@ -1187,6 +1187,23 @@ function renderCombat() {
           return box;
         })()];
         tr.append(el('td', {}, ...brk, el('span', { className: 'grid-store-level', textContent: `${n === 'EPS' ? 'Pressure' : 'Battery'} ${st.level}%` }), el('span', { className: `grid-flow${st.supplying ? ' grid-flow--in' : ''}`, textContent: flow })));
+      }
+      tr.querySelectorAll('td').forEach((td) => td.toggleAttribute('data-low', /\b([0-9]|1[0-9]|2[0-4])%/.test(td.textContent)));
+      return tr;
+    };
+    // The emergency batteries, right under the bus batteries: one per bus, tied
+    // to it or not (checkbox), charge %, + while supplying; they never recharge.
+    // Docked at a starbase, Replace swaps in a full one.
+    const emergRow = () => {
+      const tr = el('tr', { id: 'grid-emerg', className: 'grid-stores grid-emerg' }, el('th', { scope: 'row', textContent: 'Emergency batteries' }), el('td', { className: 'grid-controls', textContent: grid.canReplace ? '' : 'replaced at a starbase' }));
+      for (const n of COLS) {
+        const b = (grid.emerg || []).find((x) => x.bus === n);
+        if (!b) { tr.append(el('td', { className: 'grid-na' })); continue; }
+        const box = el('input', { type: 'checkbox', checked: (grid.ties[b.name] || []).includes(n), ariaLabel: `Emergency battery ${n}: Bus ${n}`, id: `emerg-tie-${n}` });
+        box.dataset.node = n;
+        box.onchange = () => send({ type: 'grid', ties: { [b.name]: box.checked ? [n] : [] } });
+        tr.append(el('td', {}, box, el('span', { className: 'grid-store-level', textContent: `Emergency ${b.pct}%` }), el('span', { className: `grid-flow${b.supplying ? ' grid-flow--in' : ''}`, textContent: b.supplying ? `+${b.supplying}` : '' }),
+          ...(grid.canReplace ? [small('Replace', `${b.name}-replace`, () => send({ type: 'grid', emergReplace: b.name }))] : [])));
       }
       tr.querySelectorAll('td').forEach((td) => td.toggleAttribute('data-low', /\b([0-9]|1[0-9]|2[0-4])%/.test(td.textContent)));
       return tr;
@@ -1203,7 +1220,7 @@ function renderCombat() {
         // Its ODN link (Engineering's can't be cut).
         const box = el('input', { type: 'checkbox', checked: linked, disabled: st === 'Engineering', ariaLabel: `${st} console: optical data network` });
         box.onchange = () => send({ type: 'grid', odn: { station: st, on: box.checked } });
-        const odnCell = con.children[1 + COLS.indexOf('ODN')];
+        const odnCell = colAt(con, 'ODN');
         odnCell.className = ''; odnCell.replaceChildren(el('label', { className: 'grid-tie' }, box));
         rows.push(con);
         const sysRow = (sys, level) => {
@@ -1227,7 +1244,7 @@ function renderCombat() {
         rows.push(...Object.entries(grid.subsystems).filter(([, v]) => v.parent === st).map(([x]) => subRow(x, 1)));
         return rows;
       };
-      const header = (text, extra = []) => { const tr = el('tr', { className: 'grid-section' }, el('th', { scope: 'rowgroup', colSpan: COLS.length + 1 }, el('span', { textContent: text }), ...extra)); return tr; };
+      const header = (text, extra = []) => { const tr = el('tr', { className: 'grid-section' }, el('th', { scope: 'rowgroup', colSpan: COLS.length + 2 }, el('span', { textContent: text }), ...extra)); return tr; };
       const divide = (rows) => { rows[rows.length - 1]?.classList.add('grid-crosslink'); return rows; };
       const xl = () => { const r = crosslinkRow(); r.querySelector('th').className = ''; return withFlows(r); };
       // Power moving along the crosslink (A–B, B–C): a bar in the gap between
@@ -1235,7 +1252,7 @@ function renderCombat() {
       const withFlows = (row) => {
         for (const [pair, v] of Object.entries(grid.crossflow || {})) {
           const [x, y] = pair.split(''), from = v > 0 ? x : y, to = v > 0 ? y : x;
-          const td = row.children[1 + COLS.indexOf(x)];
+          const td = colAt(row, x);
           if (!td) continue;
           td.classList.add('xflow-host');
           td.append(el('div', { className: `xflow-bar xflow-bar--${from === x ? 'right' : 'left'}`, title: `${Math.abs(v)} from Bus ${from} to Bus ${to}` },
@@ -1264,7 +1281,7 @@ function renderCombat() {
         const coreRows = () => { const [head, ...rest] = engineeringRows().filter((r) => /^(ties-(core|sub-constriction|sub-amConduit|sub-injector)|core-plasma|tank-(deu|am)-core)/.test(r.id)); return [head, ...(gridOrder === 'shutdown' ? rest.reverse() : rest)]; };
         const driveRowsAll = () => [...driveRows('port'), ...driveRows('starboard')];
         const steps = [
-          { title: 'External sources', rows: () => [...sourceRows(), ...connectionRows()], state: () => (['dock', 'dockEps', 'solar', 'ship', 'shipEps', 'emerg1', 'emerg2', 'emerg3'].reduce((n, x) => n + cells(x), 0) > 0 ? 'Online' : 'Cold'),
+          { title: 'External sources', rows: () => [...sourceRows(), ...connectionRows()], state: () => (['dock', 'dockEps', 'solar', 'ship', 'shipEps'].reduce((n, x) => n + cells(x), 0) > 0 ? 'Online' : 'Cold'),
             off: () => (running ? 'shut down the warp core and impulse drives first' : '') },
           // (The stores sit under the column headings; this step has no controls.)
           { title: 'Bus batteries and EPS pressure', rows: () => [], state: () => (Object.values(grid.stores || {}).some((x) => x.breaker && x.level > 0) ? 'Online' : 'Cold') },
@@ -1312,9 +1329,9 @@ function renderCombat() {
         });
       }
       return el('table', { className: 'grid-table', id: 'grid-table' },
-        el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), ...COLS.map((n) => el('th', { scope: 'col', textContent: NODE_NAMES[n] }))), storesRow()),
+        el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), el('th', { scope: 'col', textContent: 'Controls' }), ...COLS.map((n) => el('th', { scope: 'col', textContent: NODE_NAMES[n] }))), storesRow(), emergRow()),
         el('tbody', {}, ...rows),
-        el('tfoot', {}, el('tr', {}, el('th', { scope: 'row', textContent: 'Used / available / max' }),
+        el('tfoot', {}, el('tr', {}, el('th', { scope: 'row', textContent: 'Used / available / max' }), el('td'),
           ...COLS.map((n) => {
             // A fuel bus: what its tanks hold, of what they could.
             const fb = grid.fuel?.[Object.keys(FUEL_COL).find((b) => FUEL_COL[b] === n)];

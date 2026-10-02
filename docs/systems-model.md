@@ -75,7 +75,7 @@ All of this is `flow(k)` (line 1714). It returns cells (power through each sourc
 | Solar | 25 | Bus B only |
 | Dock power (`dock`, `dockEps`) | 700 on each row, when docked and that row's Import is on | `dock`: Bus B · `dockEps`: EPS |
 | Docked ship (`ship`, `shipEps`) | 100 per connection on each row, when one side exports and the other imports | `ship`: Bus B · `shipEps`: EPS |
-| Emergency batteries (`emerg1`–`emerg3`, `EMERG`) | up to 50 each, 500 stored; never recharge; Replace at a starbase | Bus B only |
+| Emergency batteries (`emergA`–`emergC`, `EMERG`) | up to 100 each, `EMERG_SIZE` (5) × a bus battery stored; never recharge; Replace at a starbase | its own bus only |
 | Impulse drives | 75 each, scaled by the share of thrust not used | EPS, through the thrusters tie |
 | Aux reactors | 75 each | EPS |
 | Warp core | `coreOutput` = 1000 × rate × efficiency (line 1434) | EPS, through the power transfer conduits |
@@ -176,7 +176,7 @@ Systems read `powerOf` for their effects: sensor ranges (`rangesOf`, line 813), 
 - **Hull fields** (`HULL`, line 767). The SIF (35) and IDF (22) are on the EPS. The IDF only counts with the SIF at 50%. Warp needs both at 90%. The core needs the SIF at 50% to start.
 - **Sensors** (`rangesOf`, line 813). Long-range sensors (22, EPS) set sensor range (600) and subspace range (400). The lateral arrays (10, low bus) give a quarter of that on their own, and they alone set transporter range (20). Your sensor signature, as others see it, is total draw / 360 (`signatureOf`, line 811).
 - **Deflector.** 80, EPS. It needs the long-range sensors, and warp needs it at 90% capacity.
-- **Computer cores** (`COMPUTER`, line 1435). Three, at 2 each, on a low bus. They boot in 14 s and crash without power. The EPS taps need one online, texts need one at each end, and auto-trim needs all three.
+- **Computer cores** (`COMPUTER`, line 1435). Three, at 2 each, on a low bus. They boot by themselves in 14 s once tied to a bus with power, crash without power, and boot again when it returns. The EPS taps need one online, texts need one at each end, and auto-trim needs all three.
 - **Transporter** (`TR`, line 2994; `transporterFault`, line 2997). Pattern buffers (15, need the lateral sensors), targeting scanners, Heisenberg compensators, biofilter, and energizing coils (5 while energizing). Locking needs the buffers and scanners. A 16 s level-3 diagnostic must pass, and the buffers losing power invalidates it. Energizing takes 5 s at 100%; the person moves at the end.
 - **Life support by place** (`LOCATIONS`, `LS_SYSTEMS`, line 777). Atmosphere 10, thermal 8, gravity 20, lights 6, emergency lighting 1. Each draws for the share of places it's switched on in, and "serves" a place while it has some power. Emergency lighting lights places whose lights are on but unpowered.
 - **Comms gating** (`commsUp`, line 1979; `commsReach`, line 2504).

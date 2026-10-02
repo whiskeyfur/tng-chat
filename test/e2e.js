@@ -1231,9 +1231,16 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(await geordi.evaluate(() => window.__nav.last.own.grid.tieNodes['system:tractor']), ['EPS'], 'the tractor beam ties to the EPS only');
     await geordi.click('#grid-order-operations');
     const sections = await geordi.$$eval('#grid-table tbody tr', (rs) => rs.map((r) => (r.classList.contains('grid-section') ? `[${r.textContent.trim()}]` : r.id)).slice(0, 20));
-    // External sources: solar, the emergency batteries, then the connections (each with a Power row on Bus B and an EPS row).
-    assert.deepEqual(sections.slice(0, 10), ['[External sources]', 'ties-solar', 'ties-emerg1', 'ties-emerg2', 'ties-emerg3', 'conn-Starbase-12', 'conn-Starbase-12-deu', 'conn-Starbase-12-am', 'conn-Starbase-12-power', 'conn-Starbase-12-eps'], sections.join(' '));
+    // External sources: solar, then the connections (each with a Power row on Bus B and an EPS row).
+    assert.deepEqual(sections.slice(0, 7), ['[External sources]', 'ties-solar', 'conn-Starbase-12', 'conn-Starbase-12-deu', 'conn-Starbase-12-am', 'conn-Starbase-12-power', 'conn-Starbase-12-eps'], sections.join(' '));
+    // The emergency batteries: a row right under the bus batteries, one per bus.
+    assert.deepEqual(await geordi.$$eval('#grid-table thead tr', (rs) => rs.map((r) => r.id).slice(1)), ['grid-stores', 'grid-emerg']);
+    assert.match(await geordi.textContent('#grid-emerg'), /Emergency \d+%.*Emergency \d+%.*Emergency \d+%/);
     assert.ok(sections.indexOf('[Bus crosslink]') < sections.indexOf('ties-crosslink'), sections.join(' '));
+    // A Controls column between System and the ODN: every row's buttons sit there.
+    assert.deepEqual((await geordi.$$eval('#grid-table thead tr:first-child th', (hs) => hs.map((h) => h.textContent.trim()))).slice(0, 3), ['System', 'Controls', 'ODN']);
+    assert.equal(await geordi.locator('#grid-table tbody th button').count(), 0, 'a button left in the System column');
+    assert.ok(await geordi.locator('#grid-table td.grid-controls #tank-deu-main-fill').count() === 1, 'Fill is in the Controls column');
     // Then the fuel storage (the buses, the main tanks), then the consoles.
     assert.deepEqual(sections.slice(sections.indexOf('ties-crosslink') + 1, sections.indexOf('ties-console-Captain')), ['[Fuel storage]', 'fuel-deu', 'ties-sub-deuTransfer', 'tank-deu-main', 'fuel-am', 'ties-sub-amTransfer', 'tank-am-main']);
     // The pods' row carries their containment ties (the low buses); there's no separate containment row.
@@ -1496,7 +1503,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.waitForSelector('#console-dark:not([hidden])', { state: 'attached' });
     // (Cold iron: nothing tied in, consoles, sensors and comms included.)
     laforge.send({ type: 'grid', conn: { with: 'station', res: 'power', imp: true }, ties: { dock: ['B'], crosslink: ['A', 'B'], 'console:Operations': ['A'], 'console:Engineering': ['A'], 'system:lateral': ['A'], 'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'sub:computer1': ['A'] } });
-    laforge.send({ type: 'grid', computer: { n: 1, on: true } }); // (texts need a computer core: it boots while we go on)
+    // (Computer core 1, tied to a powered bus, boots by itself: texts need a core.)
     await op.waitForSelector('#console-dark', { state: 'hidden' });
     step(`containment on a dead bus breached the core: the Enterprise was destroyed and rebuilt cold iron (nothing tied in, no fuel) docked at ${reborn.base}; tied to dock power, the ops console came back`);
     // Rebuilt like a new ship, its starbase connection had only the ODN tied: a hard link to the starbase. Untied, the link closes.
@@ -1693,20 +1700,20 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /computer core offline/.test(m.text)));
     // Emergency batteries: full and untied on a new ship; tied to Bus B, one carries its loads and runs
     // down (it never recharges); docked, the starbase replaces it with a full one.
-    assert.deepEqual(cold.emerg.map((b) => b.pct), [100, 100, 100], 'a new ship starts with full emergency batteries');
-    barclay.send({ type: 'grid', ties: { emerg1: ['B'] } });
-    await waitFor(() => barclay.nav()?.own.grid.emerg[0].pct < 98);
-    barclay.send({ type: 'grid', ties: { emerg1: [] }, emergReplace: 'emerg1' }); // (untied, so it isn't drawn on again)
-    await waitFor(() => barclay.nav()?.own.grid.emerg[0].pct === 100);
-    step('a new ship had three full, untied emergency batteries; tied to Bus B, one ran down carrying the loads, and the starbase replaced it with a full one');
+    assert.deepEqual(cold.emerg.map((b) => [b.bus, b.pct]), [['A', 100], ['B', 100], ['C', 100]], 'a new ship starts with full emergency batteries, one per bus');
+    assert.deepEqual(cold.tieNodes.emergB, ['B'], 'an emergency battery ties only to its own bus');
+    barclay.send({ type: 'grid', ties: { emergB: ['B'] } });
+    await waitFor(() => barclay.nav()?.own.grid.emerg[1].supplying > 0);
+    await waitFor(() => barclay.nav()?.own.grid.emerg[1].level < cold.emerg[1].level - 20);
+    barclay.send({ type: 'grid', ties: { emergB: [] }, emergReplace: 'emergB' }); // (untied, so it isn't drawn on again)
+    await waitFor(() => barclay.nav()?.own.grid.emerg[1].pct === 100 && barclay.nav().own.grid.emerg[1].level === cold.emerg[1].level);
+    step('a new ship had full, untied emergency batteries, one per bus; tied, Battery B\'s ran down carrying Bus B\'s loads, and the starbase replaced it with a full one');
     barclay.send({ type: 'grid', conn: { with: 'station', res: 'power', imp: true }, ties: { dock: ['B'], crosslink: ['A', 'B'] } }); // dock power: imported, on Bus B, shared with A
     await waitFor(() => barclay.nav()?.own.grid.consoleOk.Tactical && barclay.nav().own.power.lifeSupport === 100);
-    // The computer cores boot in stages (about 14 s); one on an unpowered bus can't.
-    barclay.send({ type: 'grid', computer: { n: 3, on: true } }); // Bus C: nothing on it
-    await waitFor(() => barclay.msgs.some((m) => m.type === 'notice' && /computer core 3 needs 2 to boot/.test(m.text)));
-    barclay.send({ type: 'grid', computer: { n: 1, on: true } });
+    // The computer cores boot by themselves in stages (about 14 s) once tied and powered; one on an unpowered bus can't.
     await waitFor(() => barclay.nav()?.own.grid.computers[0].state === 'booting' && barclay.nav().own.grid.computers[0].stage);
-    step(`no computer core online: no text messages; core 3 (on an unpowered Bus C) refused to boot; core 1 booting (${barclay.nav().own.grid.computers[0].stage})`);
+    assert.equal(barclay.nav().own.grid.computers[2].state, 'off', 'core 3 (on an unpowered Bus C) booted');
+    step(`no computer core online: no text messages; with dock power, core 1 booted by itself (${barclay.nav().own.grid.computers[0].stage}); core 3 (on an unpowered Bus C) stayed off`);
     assert.ok(barclay.nav().own.grid.crossflow.AB < 0, `Bus A drew on Bus B's dock power across the crosslink (${JSON.stringify(barclay.nav().own.grid.crossflow)})`);
     // The crosslink is a chain, A–B–C: A and C only link through B.
     barclay.send({ type: 'grid', ties: { crosslink: ['A', 'C'] } });

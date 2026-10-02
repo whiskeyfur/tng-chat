@@ -171,6 +171,8 @@
     .grid-table .grid-indent--2 { padding-left: 60px; }
     .grid-table .grid-indent--3 { padding-left: 90px; }
     .grid-table .grid-mini { min-height: 24px; font-size: 11px; margin-left: 8px; padding: 0 10px; }
+    .grid-table .grid-controls { white-space: nowrap; }
+    .grid-table .grid-controls .grid-mini:first-child { margin-left: 0; }
     .grid-flow--in { color: #66cc66; }
     .grid-table tr.grid-crosslink th, .grid-table tr.grid-crosslink td { border-bottom: 4px solid var(--lcars-orange); }
     .grid-table tfoot td[data-over] { color: var(--lcars-red); }
@@ -182,6 +184,8 @@
     .grid-table thead tr:first-child > *, .grid-table tfoot tr:first-child > * { border-top: 4px solid var(--lcars-orange); }
     .grid-table thead tr:last-child > *, .grid-table tfoot tr:last-child > * { border-bottom: 4px solid var(--lcars-orange); }
     .grid-table .grid-stores td { white-space: nowrap; }
+    .grid-table thead #grid-stores > * { border-bottom: 0; } /* the emergency batteries sit right under, no bar between */
+    .grid-table .grid-emerg .grid-mini { margin-left: 6px; }
     .grid-table .grid-stores .grid-store-level { color: var(--lcars-violet); margin-right: 6px; }
     .grid-table .grid-stores td[data-low] .grid-store-level { color: var(--lcars-red); }
     .grid-table .grid-indent span::before { content: '└ '; color: var(--lcars-tan); }
