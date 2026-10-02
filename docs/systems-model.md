@@ -73,13 +73,14 @@ All of this is `flow(k)` (line 1714). It returns cells (power through each sourc
 | Source | Output | Ties |
 |---|---|---|
 | Solar | 25 | Bus B only |
-| Dock power | 700, when docked and power Import is on | Bus B and/or EPS |
-| Docked ship | 100 per connection, when one side exports and the other imports | Bus B and/or EPS |
+| Dock power (`dock`, `dockEps`) | 700 on each row, when docked and that row's Import is on | `dock`: Bus B · `dockEps`: EPS |
+| Docked ship (`ship`, `shipEps`) | 100 per connection on each row, when one side exports and the other imports | `ship`: Bus B · `shipEps`: EPS |
+| Emergency batteries (`emerg1`–`emerg3`, `EMERG`) | up to 50 each, 500 stored; never recharge; Replace at a starbase | Bus B only |
 | Impulse drives | 75 each, scaled by the share of thrust not used | EPS, through the thrusters tie |
 | Aux reactors | 75 each | EPS |
 | Warp core | `coreOutput` = 1000 × rate × efficiency (line 1434) | EPS, through the power transfer conduits |
 
-The stores are sources too: battery A/B/C (100 each) and EPS pressure (300). They're the last resort. `SOURCE_NODES` (line 1444) says where each source may tie.
+The stores are sources too: battery A/B/C (100 each) and EPS pressure (300). They're the last resort, with the emergency batteries (`lastResort`); the emergency batteries never charge. `SOURCE_NODES` (line 1444) says where each source may tie.
 
 **Demand.** For each system: `capacity = min(limiter, 150 × (100 − damage) / 100)`, then `demand = min(capacity, usageOf(system))` (around line 1717). `usageOf` (line 1695) is what the system is using right now:
 
@@ -89,7 +90,8 @@ The stores are sources too: battery A/B/C (100 each) and EPS pressure (300). The
 - warp field coils and plasma injectors: by the warp being made
 - deflector: while moving
 - Bussard collectors: at warp
-- AM bus containment: 20% idle, full while antimatter moves
+- AM bus containment: full all the time it's tied
+- Fuel bus transfer (`sub:deuTransfer`, `sub:amTransfer`, `FUELBUS.transfer` 5): the deuterium bus's only while deuterium moves, the antimatter bus's all the time it's tied
 - life support: the share of places switched on
 - everything else: 100
 
@@ -140,7 +142,8 @@ Systems read `powerOf` for their effects: sensor ranges (`rangesOf`, line 813), 
 
 **Flow.** `moveFuel` (line 2426) runs once a second. Per bus, up to 50 moves from tied Drain tanks to tied Fill tanks, the systems' tanks first.
 
-- The antimatter bus moves nothing unless its magnetic containment (`amBus`, an EPS system) gets what it asks for.
+- A bus moves nothing (Fill/Drain or Import/Export) without its transfer power (`f.xferOk`); the antimatter bus also needs its magnetic containment (`amBus`, an EPS system) to get what it asks for. `busDownWhy` gives the reason, kept in `e.busDown`.
+- The pods' containment (`containment` ties, shown on the pods' row) is independent of the bus.
 - An antimatter tank only takes antimatter with its containment powered.
 
 **Connections** (`moveConnections`, line 2453) move fuel between the main storage and the starbase or a docked ship, by each side's Import/Export, 50 a second. The starbase connection also has ties (`connTies`: deu, am, odn): fuel to or from the starbase moves only on a tied bus, and a tied ODN keeps a hard data link to the starbase (`linkTick`, `hardLinks`) that Ops can't close. Docking at a starbase unties everything (`untieDock`).

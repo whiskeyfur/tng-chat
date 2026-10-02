@@ -1137,12 +1137,12 @@ const audioBytes = (page) => page.evaluate(async () => {
     helm({ dest: { x: 250, y: 500 }, warp: 5 });
     await waitFor(async () => { const n = await spock.evaluate(() => window.__nav.last); return n?.own.warp === 0 && n.own.x < 260; }, 30000);
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
-    obrien.send({ type: 'power', power: { engines: 0, injectors: 0, shields: 0, sensors: 20, lateral: 0, deflector: 0, sif: 0, idf: 0, transporter: 0, weapons: 0, atmosphere: 60, thermal: 60, gravity: 0, lights: 0, replicators: 0, recreation: 0 } });
+    obrien.send({ type: 'power', power: { engines: 0, injectors: 0, shields: 0, sensors: 20, lateral: 0, deflector: 0, sif: 0, idf: 0, transporter: 0, weapons: 0, atmosphere: 60, thermal: 60, gravity: 0, lights: 0, replicators: 0, recreation: 0, amBus: 0 } }); // (the AM bus's containment draws all the time it's on)
     await nog.waitForSelector('[data-readout="Replicators"]:has-text("Offline")', { state: 'attached' });
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'detached' });
     await carol.waitForSelector('#weapons-lock-state:has-text("No weapons lock")');
     step(`the Defiant powered down (replicators and holodecks too: its Crew consoles show them offline) to a ${Math.round(obrien.nav().own.signature * 100)}% signature: off the Enterprise's sensors 250 units away, and the weapons lock was lost`);
-    obrien.send({ type: 'power', power: { engines: 80, injectors: 80, shields: 60, sensors: 100, lateral: 100, deflector: 100, sif: 100, idf: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, replicators: 40, recreation: 10 } });
+    obrien.send({ type: 'power', power: { engines: 80, injectors: 80, shields: 60, sensors: 100, lateral: 100, deflector: 100, sif: 100, idf: 100, transporter: 100, weapons: 50, atmosphere: 100, thermal: 100, gravity: 100, replicators: 40, recreation: 10, amBus: 100 } });
     await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"]', { state: 'attached' });
     step('powered up again, the Defiant showed up on sensors');
     kira.close();
@@ -1217,10 +1217,14 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(await geordi.evaluate(() => window.__nav.last.own.grid.tieNodes['system:tractor']), ['EPS'], 'the tractor beam ties to the EPS only');
     await geordi.click('#grid-order-operations');
     const sections = await geordi.$$eval('#grid-table tbody tr', (rs) => rs.map((r) => (r.classList.contains('grid-section') ? `[${r.textContent.trim()}]` : r.id)).slice(0, 20));
-    assert.deepEqual(sections.slice(0, 7), ['[External sources]', 'ties-solar', '[Connections]', 'conn-Starbase-12', 'conn-Starbase-12-deu', 'conn-Starbase-12-am', 'conn-Starbase-12-power'], sections.join(' '));
+    // External sources: solar, the emergency batteries, then the connections (each with a Power row on Bus B and an EPS row).
+    assert.deepEqual(sections.slice(0, 10), ['[External sources]', 'ties-solar', 'ties-emerg1', 'ties-emerg2', 'ties-emerg3', 'conn-Starbase-12', 'conn-Starbase-12-deu', 'conn-Starbase-12-am', 'conn-Starbase-12-power', 'conn-Starbase-12-eps'], sections.join(' '));
     assert.ok(sections.indexOf('[Bus crosslink]') < sections.indexOf('ties-crosslink'), sections.join(' '));
     // Then the fuel storage (the buses, the main tanks), then the consoles.
-    assert.deepEqual(sections.slice(sections.indexOf('ties-crosslink') + 1, sections.indexOf('ties-console-Captain')), ['[Fuel storage]', 'fuel-deu', 'tank-deu-main', 'fuel-am', 'tank-am-main']);
+    assert.deepEqual(sections.slice(sections.indexOf('ties-crosslink') + 1, sections.indexOf('ties-console-Captain')), ['[Fuel storage]', 'fuel-deu', 'ties-sub-deuTransfer', 'tank-deu-main', 'fuel-am', 'ties-sub-amTransfer', 'tank-am-main']);
+    // The pods' row carries their containment ties (the low buses); there's no separate containment row.
+    assert.equal(await geordi.locator('#tank-am-main input[data-node="A"]').count(), 1, 'the pods tie their containment to the low buses');
+    assert.equal(await geordi.locator('#ties-containment').count(), 0, 'a duplicate containment row');
     // Each system's own tank sits under it: the warp core's two, each drive's, the torpedo bay's under weapons.
     for (const row of ['tank-deu-core', 'tank-am-core', 'tank-deu-port', 'tank-deu-aux1', 'tank-am-torpedo']) assert.equal(await geordi.locator(`#grid-table #${row}`).count(), 1, row);
     // Power crossing the crosslink shows as a bar under it, the amount in the middle.
@@ -1248,7 +1252,9 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.equal(await geordi.getAttribute('#conn-Starbase-12-am-imp', 'aria-pressed'), 'false', 'one at a time');
     await geordi.click('#conn-Starbase-12-deu-imp');
     await geordi.waitForSelector('#conn-Starbase-12-deu-imp[aria-pressed="false"]');
-    assert.equal(await geordi.locator('#conn-Starbase-12-power input[data-node="EPS"]').count(), 1, 'dock power can come in on the EPS too');
+    assert.equal(await geordi.locator('#conn-Starbase-12-power input[data-node="EPS"]').count(), 0, 'the Power row ties to Bus B only');
+    assert.equal(await geordi.locator('#conn-Starbase-12-eps input[data-node="EPS"]').count(), 1, 'the EPS row ties to the EPS');
+    assert.equal(await geordi.locator('#conn-Starbase-12-eps input[data-node="B"]').count(), 0, 'the EPS row ties to the EPS only');
     // The master systems display: the ship profile, the power budget, a tile per system (tap one to open it).
     await screen(geordi, 'st-msd');
     await geordi.waitForSelector('.msd-tile[data-system="warp"] .msd-pill[data-state="ok"]:has-text("Running")');
@@ -1372,6 +1378,20 @@ const audioBytes = (page) => page.evaluate(async () => {
     await waitFor(() => laforge.nav()?.own.grid.core === 'online', 20000);
     step('towed back to Starbase 12 and released, the Enterprise docked, had a new warp core and full antimatter pods installed, and started it');
 
+    // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;
+    // the pods stay contained (their own ties). The deuterium bus: nothing moves without its transfer power.
+    laforge.send({ type: 'grid', ties: { 'system:amBus': [] } });
+    await waitFor(() => laforge.nav()?.own.grid.fuel.am.why === 'AM bus: containment offline');
+    assert.ok(laforge.nav().own.grid.containmentOk, 'the pods lost containment with the AM bus');
+    laforge.send({ type: 'grid', ties: { 'system:amBus': ['EPS'], 'sub:amTransfer': [] } });
+    await waitFor(() => laforge.nav()?.own.grid.fuel.am.why === 'AM bus: no transfer power');
+    assert.ok(laforge.nav().own.grid.containmentOk, 'the pods lost containment with the AM bus transfer');
+    laforge.send({ type: 'grid', ties: { 'sub:amTransfer': ['B'], 'sub:deuTransfer': [] } });
+    await waitFor(() => !laforge.nav()?.own.grid.fuel.am.down && laforge.nav().own.grid.fuel.deu.why === 'Deu. bus: no transfer power');
+    laforge.send({ type: 'grid', ties: { 'sub:deuTransfer': ['B'] } });
+    await waitFor(() => !laforge.nav()?.own.grid.fuel.deu.down);
+    step('the antimatter bus stopped without its magnetic containment, then without its transfer power, the pods contained throughout; the deuterium bus stopped without its transfer power');
+
     // Supplies: the Enterprise exports deuterium to the starbase; the Defiant
     // docks with the Enterprise and sends it some of its own.
     const deuBefore = laforge.nav().own.grid.deuterium;
@@ -1413,6 +1433,10 @@ const audioBytes = (page) => page.evaluate(async () => {
     rom.send({ type: 'grid', ties: { ship: ['B'] }, conn: { with: 'Enterprise', res: 'power', exp: true } });
     laforge.send({ type: 'grid', ties: { ship: ['B'] }, conn: { with: 'Defiant', res: 'power', imp: true } });
     await waitFor(() => laforge.nav()?.own.grid.shipIn > 0 && Object.values(rom.nav()?.own.grid.ports || {}).find((v) => v?.ship === 'Enterprise')?.fed > 0);
+    // And on the EPS row: EPS to EPS.
+    rom.send({ type: 'grid', ties: { shipEps: ['EPS'] }, conn: { with: 'Enterprise', res: 'eps', exp: true } });
+    laforge.send({ type: 'grid', ties: { shipEps: ['EPS'] }, conn: { with: 'Defiant', res: 'eps', imp: true } });
+    await waitFor(() => laforge.nav()?.own.grid.connections.find((x) => x.name === 'Defiant')?.epsIn > 0);
     // Across the dock: the Station screen offers the Defiant's stations, and
     // the Defiant's engineer walks over to the Enterprise's Science console.
     await screen(spock, 'reassign');
@@ -1424,7 +1448,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     ezri.send({ type: 'dock', undock: true });
     await waitFor(() => !laforge.nav()?.own.grid.dockedShip);
     rom.close();
-    step('Connections: the Enterprise exported deuterium to Starbase 12; the Defiant docked with it and exported deuterium and power to it (the Enterprise importing); then undocked');
+    step('Connections: the Enterprise exported deuterium to Starbase 12; the Defiant docked with it and exported deuterium and power (Bus B and EPS rows) to it (the Enterprise importing); then undocked');
     ezri.close();
     tuvok.close();
 
@@ -1637,7 +1661,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     barclay.send({ type: 'grid', ties: {
       'console:Engineering': ['A'], 'console:Tactical': ['A'], 'system:atmosphere': ['A'], 'system:thermal': ['A'], 'system:gravity': ['A'], 'system:lighting': ['A'], 'system:lateral': ['A'],
       'system:replicators': ['B'], 'system:recreation': ['B'], 'system:transporter': ['B'], 'sub:constriction': ['A'], 'sub:injector': ['A'], 'sub:amConduit': ['A'], 'contain:amCore': ['A'], 'contain:amTorpedo': ['A'], 'sub:portChamber': ['B'], 'sub:starboardChamber': ['B'], 'sub:aux1Chamber': ['A'], aux1: ['EPS'],
-      'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'sub:forcefields': ['B'], 'sub:computer1': ['A'], 'sub:computer2': ['B'], 'sub:computer3': ['C'], 'system:lights': ['A'], 'sub:patternBuffers': ['B'], 'sub:targetingScanners': ['B'], 'sub:energizingCoils': ['B'], 'sub:heisenberg': ['B'], 'sub:biofilter': ['B'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'],
+      'sub:rf': ['B'], 'sub:radio': ['B'], 'sub:subspace': ['B'], 'sub:forcefields': ['B'], 'sub:deuTransfer': ['B'], 'sub:amTransfer': ['B'], 'sub:computer1': ['A'], 'sub:computer2': ['B'], 'sub:computer3': ['C'], 'system:lights': ['A'], 'sub:patternBuffers': ['B'], 'sub:targetingScanners': ['B'], 'sub:energizingCoils': ['B'], 'sub:heisenberg': ['B'], 'sub:biofilter': ['B'], thrustersPort: ['EPS'], thrustersStarboard: ['EPS'],
       ...Object.fromEntries(['sensors', 'sif', 'idf', 'engines', 'injectors', 'shields', 'weapons', 'deflector', 'tractor', 'amBus'].map((x) => [`system:${x}`, ['EPS']])) } });
     // The fuel buses: the main storage drains into the systems' own tanks.
     for (const [bus, names] of [['deu', ['core', 'port', 'starboard', 'aux1']], ['am', ['core']]]) {
@@ -1653,6 +1677,15 @@ const audioBytes = (page) => page.evaluate(async () => {
     // No computer core online: no text messages.
     ro.send({ type: 'text', to: [id('barclay', 'Excelsior')], text: 'testing' });
     await waitFor(() => ro.msgs.some((m) => m.type === 'notice' && /computer core offline/.test(m.text)));
+    // Emergency batteries: full and untied on a new ship; tied to Bus B, one carries its loads and runs
+    // down (it never recharges); docked, the starbase replaces it with a full one.
+    assert.deepEqual(cold.emerg.map((b) => b.pct), [100, 100, 100], 'a new ship starts with full emergency batteries');
+    barclay.send({ type: 'grid', ties: { emerg1: ['B'] } });
+    await waitFor(() => barclay.nav()?.own.grid.emerg[0].pct < 98);
+    barclay.send({ type: 'grid', emergReplace: 'emerg1' });
+    await waitFor(() => barclay.nav()?.own.grid.emerg[0].pct === 100);
+    barclay.send({ type: 'grid', ties: { emerg1: [] } });
+    step('a new ship had three full, untied emergency batteries; tied to Bus B, one ran down carrying the loads, and the starbase replaced it with a full one');
     barclay.send({ type: 'grid', conn: { with: 'station', res: 'power', imp: true }, ties: { dock: ['B'], crosslink: ['A', 'B'] } }); // dock power: imported, on Bus B, shared with A
     await waitFor(() => barclay.nav()?.own.grid.consoleOk.Tactical && barclay.nav().own.power.lifeSupport === 100);
     // The computer cores boot in stages (about 14 s); one on an unpowered bus can't.
