@@ -26,6 +26,8 @@ function applyPlaces() {
   window.PLACES = d?.places || [];
   window.SEATS = d?.seats || {};
 }
+// The stations a vessel has (its design's), of those this relay knows: mine, or the one I'm running.
+const stationsOf = (name) => { const d = vesselDesign(name); return stations.filter((n) => (d.stations ? d.stations.includes(n) : n !== 'Spore Lab' || lastNav?.own?.grid?.spore)); };
 // Another vessel's design: its places, and its stations (null: all of them, a starbase's).
 function vesselDesign(name) {
   const v = ships.find((s) => s.name.toLowerCase() === String(name || '').toLowerCase());
@@ -480,7 +482,9 @@ function fillReassign() {
   const fo = stations.indexOf('First Officer');
   const all = [...stations.slice(0, fo + 1), 'Operations', ...stations.slice(fo + 1)];
   // (The Spore Lab: only aboard a ship with a spore drive.)
-  const own = all.filter((n) => n !== 'Spore Lab' || lastNav?.own?.grid?.spore);
+  // (This vessel's stations only, by its design: a runabout's, not every station there is.)
+  const mine = stationsOf(me.ship);
+  const own = all.filter((n) => n === 'Operations' || mine.includes(n));
   $('station-taps').replaceChildren(...placeBars(own, (n) => n, (n) => tap(n)));
   const across = lastNav?.own?.grid?.dockedWith || [];
   dockSig = JSON.stringify([across, !!lastNav?.own?.grid?.spore, across.map((v) => vesselDesign(v).places.length)]);
@@ -1018,10 +1022,11 @@ function renderCrewPanels() {
 
   // First Officer: reassign crew.
   const ra = document.querySelector('[data-reassign]');
-  if (ra && changed(ra, crewSig, stations)) {
+  const aboardHere = stationsOf(controllingVessel || me.ship); // (the vessel's own stations)
+  if (ra && changed(ra, crewSig, aboardHere)) {
     const keep = ra.querySelector('#xo-who')?.value, keepSt = ra.querySelector('#xo-station')?.value;
     const who = pickCrew('xo-who', crew, keep);
-    const st = el('select', { className: 'ops-select', id: 'xo-station', ariaLabel: 'station' }, ...byPlace(stations).map((g) => el('optgroup', { label: g.label }, ...g.items.map((n) => new Option(n, n)))));
+    const st = el('select', { className: 'ops-select', id: 'xo-station', ariaLabel: 'station' }, ...byPlace(aboardHere).map((g) => el('optgroup', { label: g.label }, ...g.items.map((n) => new Option(n, n)))));
     if (keepSt) st.value = keepSt;
     ra.replaceChildren(
       el('div', { className: 'ops-form' }, el('span', { textContent: 'Reassign' }), who, el('span', { textContent: 'to' }), st,
@@ -1047,7 +1052,7 @@ function renderCrewPanels() {
         el('p', { className: 'st-state', id: 'brig-field-state', textContent: lastNav?.own?.grid?.brigSealed ? 'Brig force field: up' : 'Brig force field: down' }),
         button(lastNav?.own?.grid?.brigField ? 'Drop brig field' : 'Raise brig field', () => send({ type: 'brig-field', on: !lastNav?.own?.grid?.brigField }), lastNav?.own?.grid?.brigField ? '' : 'lcars-button--alert')), { id: 'brig-field-monitor' }),
       el('h3', { className: 'ops-subhead', textContent: 'Force fields (isolate a station)' }),
-      el('div', { className: 'tr-taps', id: 'sec-fields' }, ...placeNodes(stations, (st) => st, (st) => {
+      el('div', { className: 'tr-taps', id: 'sec-fields' }, ...placeNodes(aboardHere, (st) => st, (st) => {
         const on = fields.includes(st);
         const b = button(st, () => send({ type: 'forcefield', station: st, on: !on }), on ? 'lcars-button--alert' : '');
         b.classList.add('tr-tap');

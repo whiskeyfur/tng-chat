@@ -61,6 +61,21 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     assert.deepEqual(controlled[0], runabout, 'remote control: the controlled vessel\'s places');
     assert.ok(controlled[1].includes('Spore Propulsion Laboratory'), 'back home: the Crossfield\'s own');
     await page.evaluate(() => { lastNav = { ...lastNav, own: { ...lastNav.own, grid: { ...lastNav.own.grid, dockedWith: [] } } }; fillReassign(); });
+    // Aboard the Tundra: the Station panel lists the runabout's stations only (no "Elsewhere" of every other station).
+    {
+      const tp = await (await browser.newContext()).newPage();
+      await tp.goto(URL);
+      await tp.fill('#name', 'delta');
+      await tp.click('#signin-ships button[data-ship="Tundra"]');
+      await tp.click('#signin-unassigned button[data-station="Helm"]');
+      await tp.click('#register-go');
+      await tp.waitForSelector('#station-taps button[data-station]', { state: 'attached' });
+      const listed = await tp.$$eval('#station-taps button[data-station]', (bs) => bs.map((b) => b.dataset.station));
+      const runaboutStations = await tp.evaluate(() => ships.find((v) => v.name === 'Tundra').stations);
+      assert.ok(listed.every((st) => st === 'Operations' || runaboutStations.includes(st)), `aboard the Tundra: ${listed}`);
+      assert.equal(await tp.locator('#station-taps .place-bar[data-place="Elsewhere"]').count(), 0, 'no Elsewhere row');
+      await tp.close();
+    }
     step(`the Tundra (a runabout): across the dock and under remote control, its own places (${across.places.join(', ')}) and stations (${across.stations.join(', ')}), not the Crossfield's`);
     // The power grid: its panel body scrolls with a drag.
     await page.waitForSelector('#grid-table', { state: 'attached' });
