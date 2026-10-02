@@ -31,6 +31,11 @@ const step = (s) => console.log(`ok - ${s}`);
     await page.goto(URL);
     await page.waitForFunction(() => window.__admin?.status?.classes?.galaxy, null, { timeout: 15000 });
     const galaxyBus = await page.evaluate(() => window.__admin.status.classes.galaxy.bus);
+    // Fleet: one row a vessel (the relay in its own row, once), none of them classless.
+    await page.waitForSelector('#admin-fleet tr[data-vessel]');
+    const rows = await page.$$eval('#admin-fleet tr[data-vessel]', (rs) => rs.map((r) => [r.dataset.vessel, r.textContent]));
+    assert.deepEqual(rows.map(([n]) => n), [...new Set(rows.map(([n]) => n))], `Fleet lists each vessel once: ${rows.map(([n]) => n)}`);
+    assert.ok(!rows.some(([, t]) => /undefined/i.test(t)), 'no row says undefined');
     await page.click('[data-screen-tab="designs"]');
     await page.click('#design-list button[data-value="galaxy"]');
     await page.waitForSelector('#design-title:has-text("galaxy.json")');

@@ -5405,7 +5405,8 @@ let adminSeq = 0;
 // The vessels as the admin page shows them: class, crew, ops, where.
 // (The classes this relay has loaded, for the admin page: did a reload apply a design?)
 const adminClasses = () => Object.fromEntries(Object.entries(CLASSES).map(([id, c]) => [id, { name: c.name, bus: c.bus, eps: c.eps }]));
-const adminFleet = () => networkGraph().ships.map((v) => ({ name: v.name, class: v.class, classId: navState.has(shipKey(v.name)) && !v.starbase ? classId(shipKey(v.name)) : null, classUnknown: classGuessed.has(shipKey(v.name)), starbase: !!v.starbase, crew: v.crew, ops: v.ops, computer: v.computer, x: v.x, y: v.y }));
+// (The relays have their own rows: Fleet's ships and starbases are the rest.)
+const adminFleet = () => networkGraph().ships.filter((v) => !isRelay(shipKey(v.name))).map((v) => ({ name: v.name, class: v.class, classId: navState.has(shipKey(v.name)) && !v.starbase ? classId(shipKey(v.name)) : null, classUnknown: classGuessed.has(shipKey(v.name)), starbase: !!v.starbase, crew: v.crew, ops: v.ops, computer: v.computer, x: v.x, y: v.y }));
 // The account API: GET me; POST register, login, logout (JSON). A login sets the session
 // cookie (HttpOnly, SameSite=Lax); a page from another origin gets the token to send by message.
 function accountRequest(req, res, what) {

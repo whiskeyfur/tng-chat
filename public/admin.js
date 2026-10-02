@@ -55,7 +55,7 @@
       }),
       ...fleet.map((v) => {
         const c = computers.get(v.name);
-        const tr = el('tr', {}, el('td', { textContent: v.name }), el('td', {}, v.starbase || !v.classId ? (v.starbase ? 'Starbase' : v.class || '') : btn(`${v.class}${v.classUnknown ? ' (unknown: set it)' : ''} ▸`, `admin-class-${v.name}`, () => { classOpen = classOpen === v.name ? null : v.name; renderFleet(); })), el('td', { textContent: String(v.crew ?? '') }),
+        const tr = el('tr', {}, el('td', { textContent: v.name }), el('td', {}, v.starbase || !v.classId ? (v.starbase ? 'Starbase' : v.class || '') : btn(`${v.class || 'Class unknown'}${v.classUnknown ? ' (unknown: set it)' : ''} ▸`, `admin-class-${v.name}`, () => { classOpen = classOpen === v.name ? null : v.name; renderFleet(); })), el('td', { textContent: String(v.crew ?? '') }),
           el('td', { textContent: v.ops ? 'manned' : '—' }), el('td', { textContent: v.x != null ? `${v.x}, ${v.y}` : '' }),
           el('td', { textContent: v.starbase ? 'automated (the relay)' : c ? `${c.connected ? 'connected' : 'not connected'}${c.primary?.length ? ', flying it' : ''} · ${ago(c.since)}` : v.computer ? 'connected (not the supervisor\'s)' : 'offline' }),
           el('td', {}, ...(c ? [btn('Restart', `admin-restart-${v.name}`, () => send({ type: 'admin', action: 'restart-ship', ship: v.name }))] : [])));
