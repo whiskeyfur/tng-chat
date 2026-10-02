@@ -1471,9 +1471,22 @@ const audioBytes = (page) => page.evaluate(async () => {
     const bobAt = await bob.evaluate(() => window.__voice.me.station);
     await geordi.click(`#ls-table .ls-tap[data-loc="${bobAt}"][data-sys="atmosphere"]`);
     await bob.waitForSelector(`.bcast--alert:has-text("NO ATMOSPHERE: ${bobAt}")`, { state: 'attached' });
+    // Bob's personal environmental shield (Station, Equipment): on, sensors read him "shielded" and,
+    // if he's alone there unshielded, the warning goes; it drains its cell; off again.
+    const bobScreen = await bob.evaluate(() => [...document.querySelectorAll('.lcars-content [data-screen]')].find((x) => !x.hidden)?.dataset.screen);
+    await bob.click('#reassign-tab');
+    await bob.click('#equip-shield-on');
+    await bob.waitForSelector('#equip-shield-on[aria-pressed="true"]');
+    await geordi.waitForFunction((who) => window.__comms.users.find((u) => u.id === who)?.shielded, id('bob'));
+    const bareThere = await bob.evaluate((at) => window.__comms.users.filter((u) => u.ship === window.__voice.me.ship && u.station === at && !u.shielded).length, bobAt);
+    if (!bareThere) await bob.waitForFunction(() => ![...document.querySelectorAll('.bcast--alert')].some((x) => x.textContent.includes('NO ATMOSPHERE')));
+    await bob.waitForFunction(() => Number(/(\d+)%/.exec(document.getElementById('equip-shield-charge').textContent)[1]) < 100, null, { timeout: 10000 });
+    await bob.click('#equip-shield-off');
+    await bob.evaluate((sc) => { closePane(); if (sc) showScreen(sc); }, bobScreen);
+    await geordi.waitForFunction((who) => !window.__comms.users.find((u) => u.id === who)?.shielded, id('bob'));
     await geordi.click(`#ls-table .ls-tap[data-loc="${bobAt}"][data-sys="atmosphere"]`);
     await bob.waitForFunction(() => !document.querySelector('.bcast--alert')?.textContent.includes('NO ATMOSPHERE'));
-    step(`the Life support panel: gravity switched off in Crew quarters took its share off the draw; atmosphere off at ${bobAt}, where bob is, warned "NO ATMOSPHERE: ${bobAt}"`);
+    step(`the Life support panel: gravity switched off in Crew quarters took its share off the draw; atmosphere off at ${bobAt}, where bob is, warned "NO ATMOSPHERE: ${bobAt}"; bob's environmental shield read "shielded" to everyone aboard and drained its cell while on`);
     // The optical data network: Engineering cuts Science's console off it; Science sees only
     // "Disconnected", an empty menu (but Comms, log, library, Station), and its commands are refused.
     await screen(geordi, 'st-grid');
@@ -2310,6 +2323,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     // A dark room: no lights and the console dark: black but for Station and comms.
     const dataPage = await openAs(browser, 'data', 'data', 'Excelsior', 'Science');
     await dataPage.waitForFunction(() => document.body.dataset.blackout === 'all');
+    // (The flashlight comes on walking into the dark: all black but a lit circle. Off, it's black.)
+    await dataPage.waitForSelector('#flashlight[aria-pressed="true"]');
+    assert.equal(await dataPage.isVisible('#darkness'), true, 'the flashlight is on');
+    await dataPage.click('#flashlight');
+    await dataPage.waitForSelector('#darkness', { state: 'hidden' });
     const inert = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#sections > [data-screen-tab], #log-tab, #library-tab, #reassign-tab, #comms-button, .lcars-elbow--top, #back-button')]
       .map((b) => [b.dataset.screenTab || b.id || b.className, getComputedStyle(b).pointerEvents === 'none'])));
     const darkSeen = await inert(dataPage);
@@ -2317,8 +2335,28 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Engineering in the dark keeps its Power grid too, to bring the ship up.
     const engDark = await openAs(browser, 'scott', 'scott', 'Excelsior', 'Engineering');
     await engDark.waitForFunction(() => document.body.dataset.blackout === 'engineering');
+    await engDark.waitForSelector('#flashlight[aria-pressed="true"]');
+    await engDark.click('#flashlight');
     const engSeen = await inert(engDark);
     assert.ok(engSeen['st-grid'] === false && engSeen['st-msd'] === true && engSeen.reassign === false && engSeen['comms-button'] === false, JSON.stringify(engSeen));
+    assert.match(await engDark.$eval('#sections [data-screen-tab="st-grid"]', (b) => getComputedStyle(b).filter), /brightness/, 'the grid\'s tab is dark too (it works by feel)');
+    // The flashlight minigame: on, everything shows and works inside its circle; a tap outside
+    // it (a finger) only moves the light there, and the next tap there works.
+    await engDark.click('#flashlight');
+    await engDark.waitForSelector('#darkness:not([hidden])');
+    await engDark.click('#sections [data-screen-tab="st-msd"]');
+    await engDark.waitForSelector('[data-screen="st-msd"]:not([hidden])');
+    const fingerTap = (page, sel) => page.evaluate((q) => {
+      const b = document.querySelector(q), r = b.getBoundingClientRect(), at = { clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, bubbles: true, cancelable: true };
+      b.dispatchEvent(new PointerEvent('pointerdown', { ...at, pointerType: 'touch' }));
+      b.dispatchEvent(new MouseEvent('click', at));
+    }, sel);
+    await engDark.mouse.move(2, 2);
+    await fingerTap(engDark, '#sections [data-screen-tab="st-grid"]');
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(await engDark.isVisible('[data-screen="st-msd"]'), true, 'an unlit tap did nothing');
+    await fingerTap(engDark, '#sections [data-screen-tab="st-grid"]');
+    await engDark.waitForSelector('[data-screen="st-grid"]:not([hidden])');
     await engDark.close();
     // No console power and no local RF: the library and comms are offline (proximity only).
     await dataPage.waitForSelector('#library-tab[data-offline]');
@@ -2329,7 +2367,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await dataPage.click('#reassign-tab');
     await dataPage.waitForSelector('[data-screen="reassign"]:not([hidden])');
     await dataPage.close();
-    step("the Excelsior's Science station, unlit and its console dark, went black but for the Station button and comms");
+    step("the Excelsior's Science station, unlit and its console dark, went black but for the Station button and comms; the flashlight came on in the dark, and only what was in its circle responded");
     // Solar (25) comes in on Bus B only. Life support is several systems with their own
     // ties: solar alone runs the atmospheric processors (10) and thermal regulation (8) with
     // 7 over to charge Battery B (empty on a new ship).

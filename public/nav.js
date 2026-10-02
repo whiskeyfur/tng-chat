@@ -348,7 +348,7 @@
         const species = Object.entries(d.species || {}).map(([sp, n]) => `${n} ${sp}`).join(', ');
         // Lifeforms by name and species; their exact locations only when resolved (shields down, or sensors above shields).
         const where = d.shields ? `Sensors ${d.sensors}% vs shields ${d.shieldLevel}%: locations ${d.resolved ? 'resolved' : 'unresolved'}` : 'Shields down: locations resolved';
-        const lifeforms = el('ul', { className: 'nav-scan-lifeforms' }, ...(d.lifeforms?.length ? d.lifeforms.map((l) => el('li', { textContent: `${l.name} · ${l.species}${l.where ? ` · ${l.where}` : ''}` })) : [el('li', { className: 'empty', textContent: 'No life signs' })]));
+        const lifeforms = el('ul', { className: 'nav-scan-lifeforms' }, ...(d.lifeforms?.length ? d.lifeforms.map((l) => el('li', { textContent: `${l.name} · ${l.species}${l.where ? ` · ${l.where}` : ''}${l.shielded ? ' · shielded' : ''}` })) : [el('li', { className: 'empty', textContent: 'No life signs' })]));
         const power = d.power?.length ? [el('h4', { className: 'nav-scan-sub', textContent: `Power use: ${d.powerTotal}` }), el('ul', { className: 'nav-scan-power' }, ...d.power.map(([n, v]) => el('li', {}, el('span', { textContent: n }), el('b', { textContent: String(v) }))))] : [];
         scanOut.replaceChildren(
           el('h3', { className: 'ops-subhead', textContent: `${msg.tracking ? 'Tracking' : 'Scan'}: the ${msg.ship}` }),

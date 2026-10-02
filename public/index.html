@@ -279,20 +279,31 @@
     .keypad-shown { font-size: 22px; letter-spacing: 6px; min-width: 7ch; color: var(--lcars-gold); }
     .admin-dialog .admin-log { max-height: 220px; overflow: auto; font-size: 12px; background: #111; padding: 8px; white-space: pre-wrap; }
     #link { cursor: default; }
-    /* A dark room: everything black but the Station button and comms. */
-    /* Header and footer (Home, Back) and every menu button but Comms and Station (#sections is display: contents, so its buttons are dimmed one by one). */
-    body[data-blackout] .lcars-app > :not(.lcars-sidebar):not(.lcars-content):not(.lcars-pane),
-    body[data-blackout] .lcars-sidebar__col > :not(#reassign-tab):not(#comms-button):not(#room-mic):not(#sections):not(#library-tab:not([data-offline])),
-    body[data-blackout="all"] #sections > *,
-    body[data-blackout="engineering"] #sections > :not([data-screen-tab="st-grid"]),
-    body[data-blackout="all"] .lcars-content,
-    body[data-blackout="engineering"] .lcars-content:not(:has([data-screen="st-grid"]:not([hidden]))),
-    body[data-blackout] #left-pane:has([data-screen="log"]:not([hidden])) { filter: brightness(0.06); pointer-events: none; }
+    /* A dark room: everything black but the Station button, comms and the Flashlight. */
+    /* Header and footer (Home, Back) and every menu button but those (#sections is display: contents, so its buttons are dimmed one by one). */
+    body[data-blackout]:not([data-flashlight]) .lcars-app > :not(.lcars-sidebar):not(.lcars-content):not(.lcars-pane),
+    body[data-blackout]:not([data-flashlight]) .lcars-sidebar__col > :not(#reassign-tab):not(#comms-button):not(#room-mic):not(#flashlight):not(#sections):not(#library-tab:not([data-offline])),
+    body[data-blackout="all"]:not([data-flashlight]) #sections > *,
+    body[data-blackout="engineering"]:not([data-flashlight]) #sections > :not([data-screen-tab="st-grid"]),
+    body[data-blackout="all"]:not([data-flashlight]) .lcars-content,
+    body[data-blackout="engineering"]:not([data-flashlight]) .lcars-content:not(:has([data-screen="st-grid"]:not([hidden]))),
+    body[data-blackout]:not([data-flashlight]) #left-pane:has([data-screen="log"]:not([hidden])) { filter: brightness(0.06); pointer-events: none; }
+    /* (Engineering's Power grid and its tab: dark too, but they still work, by feel.) */
+    body[data-blackout="engineering"]:not([data-flashlight]) #sections > [data-screen-tab="st-grid"],
+    body[data-blackout="engineering"]:not([data-flashlight]) .lcars-content { filter: brightness(0.06); }
     body[data-blackout] .lcars-content { background: #000; }
+    /* The flashlight: all black but a lit circle around the pointer (or finger); what's in it works. */
+    #darkness { position: fixed; inset: 0; z-index: 90; pointer-events: none; background: radial-gradient(circle at var(--fx, -500px) var(--fy, -500px), transparent 0, transparent var(--beam, 110px), rgba(0, 0, 0, 0.97) calc(var(--beam, 110px) + 40px)); }
+    #darkness[hidden] { display: none; }
+    #flashlight[aria-pressed="true"] { --accent: #fff8d0; }
     .ls-table .ls-tap[data-short] { background: var(--lcars-red); }
     .signin-taps { flex: 1 1 100%; }
     .signin-taps .tr-tap small { display: block; font-size: 10px; opacity: 0.8; }
     .signin-taps .tr-tap { text-align: left; line-height: 1.1; padding: 4px 12px; }
+    .equipment { margin-top: 10px; }
+    .equipment-list { list-style: none; margin: 0; padding: 0; }
+    .equipment-list .ops-hint { margin: 0 0 8px; }
+    .equip-charge { display: flex; align-items: center; padding: 0 10px; font-variant-numeric: tabular-nums; }
     .profile-taps { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; }
     .profile-head { margin: 12px 0 4px; color: var(--lcars-tan); text-transform: uppercase; font-size: 16px; }
     /* Comms and the library offline: no console power or local RF. */
@@ -412,6 +423,8 @@
         <button type="button" class="lcars-nav-button" data-screen-tab="log" id="log-tab" style="--accent: var(--lcars-lilac)" hidden><span>Console log</span></button>
         <button type="button" class="lcars-nav-button" data-screen-tab="library" id="library-tab" style="--accent: var(--lcars-violet)" hidden><span>Library</span></button>
         <div class="lcars-sidebar__fill"></div>
+        <!-- The flashlight: only in a dark room. -->
+        <button type="button" class="lcars-nav-button" id="flashlight" aria-pressed="false" style="--accent: var(--lcars-gold)" hidden><span>Flashlight</span></button>
         <button type="button" class="lcars-nav-button" data-screen-tab="reassign" id="reassign-tab" style="--accent: var(--lcars-peach)" hidden><span>Station</span></button>
       </div>
       <div class="lcars-sidebar__col lcars-sidebar__col--right" aria-label="This station">
@@ -443,6 +456,8 @@
             <div class="tr-taps" id="station-taps" role="group" aria-label="stations aboard"></div>
             <h3 class="profile-head">You</h3>
             <div class="profile-taps" id="station-profile" data-profile-taps></div>
+            <!-- Personal equipment: a list (the environmental shield, for now). -->
+            <section class="equipment" id="station-equipment" aria-label="Equipment"></section>
             <form class="ops-form" id="reassign-form" hidden>
               <input class="ops-input" id="reassign-key" type="password" placeholder="Authorization code" autocomplete="off" aria-label="operator authorization code">
               <button class="lcars-button lcars-button--pill" id="reassign-ops">Take the ops station</button>
@@ -688,5 +703,6 @@
   <script src="ops.js"></script>
   <script src="msd.js"></script>
   <script src="client.js"></script>
+  <div id="darkness" hidden></div>
 </body>
 </html>

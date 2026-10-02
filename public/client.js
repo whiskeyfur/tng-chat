@@ -191,6 +191,23 @@ document.getElementById('link')?.addEventListener('click', (ev) => {
   window.open('admin', 'stchat-admin');
 });
 
+// Crew personal equipment (the Station screen): a list, each item a pill bar.
+// The personal environmental shield: on, safe where there's no atmosphere, heat or
+// gravity; it runs down its cell, and recharges off, somewhere with power.
+const EQUIPMENT = [{ id: 'shield', name: 'Environmental shield', hint: 'Protects against no atmosphere, no heat and no gravity. About 3 minutes on a full cell; it recharges while off, somewhere with power.' }];
+function renderEquipment() {
+  const box = document.getElementById('station-equipment');
+  if (!box) return;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  box.replaceChildren(el('h3', { className: 'ops-subhead', textContent: 'Equipment' }), el('ul', { className: 'equipment-list' }, ...EQUIPMENT.map((it) => {
+    const st = me?.equipment?.[it.id] || { on: false, charge: 100 };
+    const tap = (text, on) => { const b = el('button', { type: 'button', className: 'lcars-button tr-tap', id: `equip-${it.id}-${on ? 'on' : 'off'}`, textContent: text }); b.setAttribute('aria-pressed', String(st.on === on)); b.disabled = on && !st.on && st.charge < 1; b.onclick = () => send({ type: 'equipment', [it.id]: on }); return b; };
+    const li = el('li', {}, pillBar(it.name, [tap('On', true), tap('Off', false), el('span', { className: 'equip-charge', id: `equip-${it.id}-charge`, textContent: `Charge ${st.charge}%` })]), el('p', { className: 'ops-hint', textContent: it.hint }));
+    li.dataset.equipment = it.id;
+    return li;
+  })));
+}
+
 // Species and gender: picked by taps at sign-in or on the Station screen,
 // remembered with the name in this browser; shown to people in the same place.
 // (Rank comes with a position on the org chart, picked at sign-in: it shows with your name everywhere.)
@@ -278,6 +295,7 @@ function signedOut(reason) {
   stationView = null;
   navPanel = null;
   lastNav = null;
+  renderDarkness(); // (lights back on, the flashlight off)
   document.body.dataset.alert = 'green';
   ops = null;
   $('ops-view').hidden = true;
@@ -505,9 +523,13 @@ function renderShipState() {
   // Life support: any place with someone in it that has no atmosphere (switched off, or
   // unpowered) is named; otherwise a warning when life support runs low. Empty places don't warn.
   const ls = lastNav?.own?.grid?.ls;
-  const occupied = new Set(comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase()).map((u) => u.station));
+  const occupied = new Set(comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && !u.shielded).map((u) => u.station));
   const airless = ls ? Object.entries(ls).filter(([loc, x]) => occupied.has(loc) && !x.got.atmosphere).map(([loc]) => loc) : [];
   bc.setAlert('life', airless.length ? `NO ATMOSPHERE: ${airless.join(', ')}` : p && p.lifeSupport < 50 ? `Life support at ${p.lifeSupport}%` : null);
+  // (Where you are, without your environmental shield on: no heat, no gravity.)
+  const mine = ls?.[myPlace()], bare = !me.equipment?.shield?.on;
+  const exposed = mine && bare ? [!mine.got.thermal && 'NO HEAT', !mine.got.gravity && 'NO GRAVITY'].filter(Boolean) : [];
+  bc.setAlert('env', exposed.length ? `${exposed.join(', ')} here: put on your environmental shield (Station, Equipment)` : null, { level: 'yellow' });
   // Alert status: red or yellow frame and a bar on every console aboard.
   const alert = lastNav?.own?.alert || 'green';
   document.body.dataset.alert = alert;
@@ -891,7 +913,7 @@ function renderCrewPanels() {
   const status = (u) => (u.sickbay ? 'Sickbay' : u.confined ? 'Confined to quarters' : 'On duty');
   // Rebuild a panel only when what it shows has changed (buttons stay put).
   const changed = (node, ...state) => { const sig = JSON.stringify(state); if (node.dataset.sig === sig) return false; node.dataset.sig = sig; return true; };
-  const crewSig = crew.map((u) => [u.id, u.station, u.console, !!u.fielded, !!u.sickbay, !!u.confined]);
+  const crewSig = crew.map((u) => [u.id, u.station, u.console, !!u.fielded, !!u.sickbay, !!u.confined, !!u.shielded]);
   const pickCrew = (id, list, keep) => {
     const sel = el('select', { className: 'ops-select', id, ariaLabel: 'crew member' }, ...list.map((u) => new Option(u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`, u.id)));
     if (keep && list.some((u) => u.id === keep)) sel.value = keep;
@@ -980,6 +1002,13 @@ function renderCrewPanels() {
         button('Confine', () => send({ type: 'confine', who: who.value, on: true }), 'lcars-button--alert'),
         button('Release', () => send({ type: 'confine', who: who.value, on: false }))),
       el('p', { className: 'ops-hint', textContent: confined.length ? `Confined: ${confined.map((u) => u.name).join(', ')}` : 'Nobody is confined to quarters' }),
+      // Internal sensors: everyone aboard and where (environmental shields read "shielded").
+      el('h3', { className: 'ops-subhead', textContent: 'Internal sensors: life signs' }),
+      el('ul', { className: 'st-list', id: 'sec-lifesigns' }, ...(crew.length ? byPlace(crew, (u) => u.console || u.station).flatMap((g) => g.items.map((u) => {
+        const li = el('li', {}, el('span', { textContent: u.title || u.name }), el('span', { textContent: `${g.label}${u.shielded ? ' · shielded' : ''}` }));
+        li.dataset.person = u.id;
+        return li;
+      })) : [el('li', { className: 'empty', textContent: 'No life signs' })])),
       el('h3', { className: 'ops-subhead', textContent: 'Beam-in alerts' }),
       el('ul', { className: 'lcars-log', id: 'sec-alerts' }, ...(securityAlerts.length ? securityAlerts.slice(-8).reverse().map((t) => el('li', { className: 'lcars-log__line lcars-log__line--warn', textContent: t })) : [el('li', { className: 'lcars-log__line', textContent: 'No unauthorized arrivals' })])));
   }
@@ -1117,7 +1146,37 @@ function renderDarkness() {
   const dark = !!(here && !here.lit && unpowered);
   if (dark) document.body.dataset.blackout = myPlace() === 'Engineering' ? 'engineering' : 'all';
   else delete document.body.dataset.blackout;
+  $('flashlight').hidden = !dark;
+  // (On walking into the dark the flashlight comes on; it goes off when the lights do.)
+  if (dark !== wasDark) setFlashlight(dark);
+  wasDark = dark;
 }
+// The flashlight (a dark room): the screen black but a lit circle that follows the
+// pointer or a finger; only what's in the circle shows, and only that responds (a
+// tap outside it just moves the light there).
+let wasDark = false;
+const BEAM = 110, beam = { x: -500, y: -500 };
+function setFlashlight(on) {
+  document.body.toggleAttribute('data-flashlight', on);
+  $('flashlight').setAttribute('aria-pressed', String(on));
+  $('darkness').hidden = !on;
+}
+$('flashlight').onclick = () => setFlashlight(!document.body.hasAttribute('data-flashlight'));
+function aimFlashlight(ev) {
+  if (ev.clientX == null) return;
+  beam.x = ev.clientX; beam.y = ev.clientY;
+  $('darkness').style.setProperty('--fx', `${beam.x}px`);
+  $('darkness').style.setProperty('--fy', `${beam.y}px`);
+}
+let unlitTap = false;
+window.addEventListener('pointermove', aimFlashlight, { passive: true });
+window.addEventListener('pointerdown', (ev) => {
+  const lit = Math.hypot(ev.clientX - beam.x, ev.clientY - beam.y) <= BEAM + 20;
+  aimFlashlight(ev);
+  unlitTap = document.body.hasAttribute('data-flashlight') && !lit;
+  if (unlitTap) { ev.preventDefault(); ev.stopImmediatePropagation(); }
+}, true);
+window.addEventListener('click', (ev) => { if (unlitTap) { unlitTap = false; ev.preventDefault(); ev.stopImmediatePropagation(); } }, true);
 window.addEventListener('screenchange', updateCover);
 
 // --- combat and the power grid: Tactical's weapons, Engineering's grid and
@@ -2027,13 +2086,19 @@ async function onMessage(msg) {
   }
   if (await comms.handle(msg)) return;
   switch (msg.type) {
+    case 'equipment':
+      if (me) me.equipment = { shield: msg.shield };
+      renderEquipment();
+      renderShipState();
+      break;
     case 'profile':
       if (me) me.title = msg.title;
       if (msg.profile) setProfile(msg.profile, false);
       if (stationView) setHeader(stationView.code, `${me.title || me.name} · ${me.ship}`, me.station);
       break;
     case 'registered':
-      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, console: msg.console || null, title: msg.title, position: msg.position || null, post: msg.post || null };
+      me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, console: msg.console || null, title: msg.title, position: msg.position || null, post: msg.post || null, equipment: msg.equipment || null };
+      renderEquipment();
       applyPlaces();
       if (msg.profile) setProfile(msg.profile, false);
       token = msg.token;

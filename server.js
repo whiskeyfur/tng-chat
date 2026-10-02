@@ -149,10 +149,39 @@ const titled = (ws) => (ws.rank && RANK_TITLE[ws.rank] ? `${RANK_TITLE[ws.rank]}
 const samePlace = (a, b) => a.shipKey === b.shipKey && placeOf(a) === placeOf(b);
 // What others see of someone: in person adds species and gender.
 const seenBy = (viewer, u) => ({ ...info(u), ...(viewer && samePlace(viewer, u) ? { species: u.species || null, gender: u.gender || null } : {}) });
-const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station, ...(ws.rank ? { rank: ws.rank } : {}), title: titled(ws), ...(ws.position ? { position: ws.position, post: ws.post } : {}),
+const info = (ws) => ({ id: ws.id, name: ws.name, ship: ws.ship, station: ws.station, ...(ws.rank ? { rank: ws.rank } : {}), title: titled(ws), ...(ws.position ? { position: ws.position, post: ws.post } : {}), ...(ws.shield?.on ? { shielded: true } : {}),
   ...(ws.console ? { console: ws.console } : {}), ...(ws.fielded ? { fielded: true } : {}), ...(ws.sickbay ? { sickbay: true } : {}), ...(ws.confined ? { confined: true } : {}) });
 // The sign-in reply: who you are, all of it.
-const selfInfo = (ws) => ({ ...info(ws), profile: { species: ws.species || null, gender: ws.gender || null } });
+const selfInfo = (ws) => ({ ...info(ws), profile: { species: ws.species || null, gender: ws.gender || null }, equipment: equipmentOf(ws) });
+// Crew personal equipment. The personal environmental shield: on, it keeps its wearer
+// safe where there's no atmosphere, no heat or no gravity (and sensors read them
+// "shielded"); it drains its cell (EQUIP.drain a second) and switches off when that's
+// empty; off, it recharges (EQUIP.recharge a second), but only somewhere with power:
+// a place whose console or life support has it.
+const EQUIP = { drain: Number(process.env.SHIELD_DRAIN) || 0.5, recharge: Number(process.env.SHIELD_RECHARGE) || 1 };
+const shieldOf = (ws) => (ws.shield ||= { on: false, charge: 100 });
+const equipmentOf = (ws) => ({ shield: { on: shieldOf(ws).on, charge: Math.floor(shieldOf(ws).charge) } });
+const poweredAt = (u) => {
+  try {
+    const k = u.shipKey, f = flow(k), at = placeOf(u), on = engOf(k).ls?.[at];
+    return f.consoleOk?.[at] === true || (!!on && ['atmosphere', 'thermal'].some((x) => on[x] !== false && (f.delivered[x] || 0) > 0.5));
+  } catch { return false; }
+};
+function equipmentTick() {
+  for (const u of new Set(users.values())) {
+    if (!u.shield) continue;
+    const s = u.shield, was = [s.on, Math.floor(s.charge)];
+    if (s.on) s.charge = Math.max(0, s.charge - EQUIP.drain);
+    else if (s.charge < 100 && poweredAt(u)) s.charge = Math.min(100, s.charge + EQUIP.recharge);
+    if (s.on && s.charge <= 0) {
+      s.on = false;
+      send(u, { type: 'notice', text: 'Environmental shield: its power cell is exhausted' });
+      broadcastCrew(u.shipKey);
+    }
+    if (was[0] !== s.on || was[1] !== Math.floor(s.charge)) send(u, { type: 'equipment', ...equipmentOf(u) });
+  }
+}
+setInterval(equipmentTick, 1000);
 const crewOf = (key) => [...users.values()].filter((u) => u.shipKey === key);
 const opsOf = (key) => [...operators].filter((op) => op.shipKey === key);
 const shipName = (key) => ships.get(key) || key;
@@ -1336,7 +1365,7 @@ function scanData(key, t) {
   const stations = {};
   for (const u of crew) stations[u.station] = (stations[u.station] || 0) + 1;
   const loc = locatable(key, t);
-  const lifeforms = crew.map((u) => ({ name: titled(u), species: u.species || 'unknown', ...(loc.resolved ? { where: `${u.sickbay ? 'sickbay' : u.confined ? `${u.station} (confined)` : u.station}, the ${u.ship}` } : {}) }))
+  const lifeforms = crew.map((u) => ({ name: titled(u), species: u.species || 'unknown', ...(u.shield?.on ? { shielded: true } : {}), ...(loc.resolved ? { where: `${u.sickbay ? 'sickbay' : u.confined ? `${u.station} (confined)` : u.station}, the ${u.ship}` } : {}) }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const species = {};
   for (const l of lifeforms) species[l.species] = (species[l.species] || 0) + 1;
@@ -4915,6 +4944,18 @@ wss.on('connection', (ws, req) => {
       sendShipRadio(ws);
       joinBroadcasts(ws);
       return;
+    }
+
+    // Personal equipment: the environmental shield on or off.
+    if (msg.type === 'equipment' && ws.id) {
+      const s = shieldOf(ws);
+      if (typeof msg.shield === 'boolean' && msg.shield !== s.on) {
+        if (msg.shield && s.charge < 1) return send(ws, { type: 'notice', text: 'Environmental shield: no charge left (it recharges somewhere with power)' });
+        s.on = msg.shield;
+        broadcastCrew(ws.shipKey);
+        broadcastOps(ws.shipKey);
+      }
+      return send(ws, { type: 'equipment', ...equipmentOf(ws) });
     }
 
     // Species and gender, changed after sign-in (rank comes with a position).
