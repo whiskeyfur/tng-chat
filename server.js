@@ -1129,17 +1129,25 @@ function navCommand(ws, msg) {
     if (ws.station !== 'Science') return note('Only Science can run sensor scans');
     const t = shipKey(clean(msg.ship));
     if (!navState.has(t) || !sensorOk(key, t)) return note(`Sensors: the ${clean(msg.ship)} is out of sensor range`);
-    const crew = crewOf(t);
-    const stations = {};
-    for (const u of crew) stations[u.station] = (stations[u.station] || 0) + 1;
-    const n = navState.get(t);
-    return send(ws, { type: 'scan-result', ship: shipName(t), at: Date.now(), data: {
-      distance: t === key ? 0 : Math.round(distance(key, t)), x: n.x, y: n.y, heading: n.heading, warp: n.warp,
-      shields: shields.has(t), ops: opsOf(t).length > 0, crew: crew.length, stations,
-      inCommsRange: commsOk(key, t), inTransporterRange: transporterOk(key, t),
-      hull: Math.round(combatOf(t).hull), shieldStrength: Math.round(combatOf(t).shield), signature: Math.round(signatureOf(t) * 100),
-      damaged: DAMAGEABLE.filter((s) => combatOf(t).damage[s] >= 1).map((s) => SYSTEM_NAMES[s]), core: engOf(t).core, docked: engOf(t).docked,
-    } });
+    return send(ws, { type: 'scan-result', ship: shipName(t), at: Date.now(), data: scanData(key, t) });
+  }
+
+  // Science's target lock: the scan, tracked (again each second) until it's released or lost.
+  if (msg.type === 'sci-lock') {
+    if (ws.station !== 'Science') return note('Only Science can lock sensors on a target');
+    const t = msg.ship ? shipKey(clean(msg.ship)) : null;
+    if (!t) {
+      if (sciLocks.has(key)) { opLog(key, `Science (${ws.name}): sensor lock on the ${shipName(sciLocks.get(key))} released`); sciLocks.delete(key); }
+      tellScience(key, { type: 'sci-lock', ship: null });
+      return note('Sensor lock released');
+    }
+    if (t === key) return note('Sensors: that is this ship');
+    if (!navState.has(t) || !sensorOk(key, t)) return note(`Sensors: the ${clean(msg.ship)} is out of sensor range`);
+    sciLocks.set(key, t);
+    opLog(key, `Science (${ws.name}): sensors locked on the ${shipName(t)}`);
+    tellScience(key, { type: 'sci-lock', ship: shipName(t) });
+    tellScience(key, { type: 'scan-result', ship: shipName(t), at: Date.now(), tracking: true, data: scanData(key, t) });
+    return note(`Sensors locked on the ${shipName(t)}: tracking`);
   }
 
   if (msg.type === 'plot-course') {
@@ -1150,6 +1158,55 @@ function navCommand(ws, msg) {
     const helm = crewOf(key).filter((u) => u.station === 'Helm');
     for (const u of helm) send(u, { type: 'course-plotted', by: info(ws), dest, label: d.name ? d0(d.name) : `${Math.round(d.x)}, ${Math.round(d.y)}` });
     return note(helm.length ? `Course plotted for Helm: ${d.name ? d0(d.name) : `${Math.round(d.x)}, ${Math.round(d.y)}`}` : 'Course plotted, but nobody is at Helm');
+  }
+}
+
+// A sensor scan of a vessel. Lifeforms: who is aboard, by name and species
+// (each person's profile, "unknown" without one), with counts per species.
+// Exact locations (ship and station) only resolve with its shields down, or
+// our long-range sensors (delivered %, overdrive included) above its shields' strength.
+// Also its health (hull, damage) and its power: what it draws, and on what.
+const sensorPct = (k) => (isBase(k) ? 100 : Math.round(flow(k).delivered.sensors || 0));
+function locatable(from, t) {
+  const up = shields.has(t), sensors = sensorPct(from), shield = up ? Math.round(combatOf(t).shield) : 0;
+  return { up, sensors, shield, resolved: !up || sensors > shield };
+}
+function scanData(key, t) {
+  const crew = crewOf(t), n = navState.get(t);
+  const stations = {};
+  for (const u of crew) stations[u.station] = (stations[u.station] || 0) + 1;
+  const loc = locatable(key, t);
+  const lifeforms = crew.map((u) => ({ name: titled(u), species: u.species || 'unknown', ...(loc.resolved ? { where: `${u.sickbay ? 'sickbay' : u.confined ? `${u.station} (confined)` : u.station}, the ${u.ship}` } : {}) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const species = {};
+  for (const l of lifeforms) species[l.species] = (species[l.species] || 0) + 1;
+  // Its power: what each system draws now (as the power distribution table counts it).
+  const f = present(t) && !isBase(t) ? flow(t) : null;
+  const power = f ? SYSTEMS.map((x) => [SYSTEM_NAMES[x], Math.round(((f.delivered[x] || 0) * ratingOf(x)) / 100)]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]) : [];
+  return {
+    distance: t === key ? 0 : Math.round(distance(key, t)), x: n.x, y: n.y, heading: n.heading, warp: n.warp,
+    shields: shields.has(t), ops: opsOf(t).length > 0, crew: crew.length, stations, lifeforms, species,
+    sensors: loc.sensors, shieldLevel: loc.shield, resolved: loc.resolved,
+    inCommsRange: commsOk(key, t), inTransporterRange: transporterOk(key, t),
+    hull: Math.round(combatOf(t).hull), shieldStrength: Math.round(combatOf(t).shield), signature: Math.round(signatureOf(t) * 100),
+    damaged: DAMAGEABLE.filter((s) => combatOf(t).damage[s] >= 1).map((s) => SYSTEM_NAMES[s]), core: engOf(t).core, docked: engOf(t).docked,
+    power, powerTotal: power.reduce((a, [, v]) => a + v, 0),
+  };
+}
+// Science's sensor locks: ship key -> the target it tracks.
+const sciLocks = new Map();
+const tellScience = (k, data) => { for (const u of crewOf(k)) if (u.station === 'Science') send(u, data); };
+// Each second: a locked target's scan again; a lock drops when the target leaves sensor range.
+function scienceTick() {
+  for (const [k, t] of [...sciLocks]) {
+    if (!present(k) || !navState.has(t) || !present(t) || !sensorOk(k, t)) {
+      sciLocks.delete(k);
+      opLog(k, `Science: sensor lock on the ${shipName(t)} lost`);
+      tellScience(k, { type: 'sci-lock', ship: null });
+      tellScience(k, { type: 'notice', text: `Science: sensor lock on the ${shipName(t)} lost (out of sensor range)` });
+      continue;
+    }
+    tellScience(k, { type: 'scan-result', ship: shipName(t), at: Date.now(), tracking: true, data: scanData(k, t) });
   }
 }
 
@@ -2865,6 +2922,7 @@ let combatTick = 0;
 setInterval(() => {
   combatTick++;
   checkTransporterLocks();
+  scienceTick();
   dropPowerlessCalls();
   const now = Date.now();
   let changed = false;
@@ -3035,7 +3093,7 @@ function stationCommand(ws, msg) {
   const t = msg.type;
   // Off the ODN, the station's controls do nothing (answering an order needs no console).
   const odnOff = !odnLinked(ws.shipKey, ws.operator ? OPS_STATION : ws.station) && !['order-ack', 'order-decline'].includes(t);
-  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'scan', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'lock', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
+  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'lock', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
     send(ws, { type: 'notice', text: 'Disconnected from the optical data network' });
     return true;
   }
@@ -3044,7 +3102,7 @@ function stationCommand(ws, msg) {
   if (t === 'beam') return beamCommand(ws, msg), true;
   if (t === 'transporter-lock') return transporterLock(ws, msg), true;
   if (t === 'transporter-diagnostic') return transporterDiagnostic(ws), true;
-  if (['helm', 'autopilot', 'scan', 'plot-course'].includes(t)) return gate(navCommand);
+  if (['helm', 'autopilot', 'scan', 'sci-lock', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
   if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(t)) return gate(crewCommand);

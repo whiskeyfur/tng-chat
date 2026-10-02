@@ -201,3 +201,8 @@ body[data-alert='red'] .lcars-elbow, body[data-alert='red'] .lcars-bar__seg, bod
 body[data-alert='yellow'] .lcars-elbow, body[data-alert='yellow'] .lcars-bar__seg, body[data-alert='yellow'] .lcars-sidebar__fill { background: var(--lcars-gold) !important; }
 @media (prefers-reduced-motion: reduce) { body[data-alert='red'] .lcars-elbow { animation: none; } }
 .radio-ship-ctl { display: flex; justify-content: flex-end; }
+/* Science scans: lifeforms by name and species (and location when resolved), and the target's power use. */
+.nav-scan-lifeforms, .nav-scan-power { list-style: none; margin: 0.25rem 0; padding: 0; }
+.nav-scan-lifeforms li, .nav-scan-power li { padding: 0.1rem 0; }
+.nav-scan-power li { display: flex; justify-content: space-between; gap: 1rem; }
+.nav-scan-sub { margin: 0.5rem 0 0; color: var(--lcars-orange, #f90); font-size: 0.95em; }

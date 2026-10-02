@@ -1724,6 +1724,9 @@ async function onMessage(msg) {
     case 'scan-result':
       navPanel?.scanned(msg);
       break;
+    case 'sci-lock':
+      navPanel?.sciLocked(msg.ship);
+      break;
     case 'order-status': {
       // Orders we gave: who has acknowledged, who hasn't yet.
       sentOrders.set(msg.id, msg);

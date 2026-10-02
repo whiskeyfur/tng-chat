@@ -898,9 +898,12 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.match(await spock.textContent('.nav-scan'), /Distance\s*10 units \(transporter range\)/);
     assert.match(await spock.textContent('.nav-scan'), /Ops\s*On duty/);
     assert.match(await spock.textContent('.nav-scan'), /Shields\s*Down(?!\s*·)/); // not "Down · 100%"
+    // Lifeforms by name and species ("unknown" without a profile); shields down, their exact locations too.
+    assert.match(await spock.textContent('.nav-scan'), /Locations\s*Shields down: locations resolved/);
+    assert.match(await spock.textContent('.nav-scan-lifeforms'), /· unknown · [A-Za-z ]+, the Defiant/);
     await spock.click('.nav-contacts li[data-ship="Defiant"] button:has-text("Plot course")');
     await waitFor(() => suluMsgs.some((m) => m.type === 'course-plotted' && m.label === 'the Defiant'));
-    step('Science scanned the Defiant (distance, ops, life signs) and plotted a course for Helm');
+    step('Science scanned the Defiant (distance, ops, life signs by name and species, their locations with shields down) and plotted a course for Helm');
 
     // Helm takes the Enterprise out of subspace range: the data link drops,
     // and the Defiant is no longer in range to hail.
@@ -1108,6 +1111,17 @@ const audioBytes = (page) => page.evaluate(async () => {
     await carol.click('#fire-torpedo');
     await waitFor(() => kira.nav()?.own.combat.shield < 80 && kira.nav().own.combat.hull === 100);
     assert.equal(await carol.isDisabled('#fire-torpedo'), true, 'torpedo tubes should be reloading');
+    // Science locks sensors on the Defiant: tracked each second. With its shields up, locations
+    // resolve only while our sensors (delivered %) beat its shields' strength.
+    await spock.click('.nav-contacts li[data-ship="Defiant"] button.nav-sci-lock');
+    await spock.waitForSelector('.nav-scan:has-text("Tracking: the Defiant")');
+    await spock.waitForSelector('.nav-scan:has-text("vs shields")');
+    const [, sens, shld, res] = /Sensors (\d+)% vs shields (\d+)%: locations (resolved|unresolved)/.exec(await spock.textContent('.nav-scan'));
+    assert.equal(res, Number(sens) > Number(shld) ? 'resolved' : 'unresolved', `sensors ${sens}% vs shields ${shld}%`);
+    assert.equal(/, the Defiant/.test(await spock.textContent('.nav-scan-lifeforms')), res === 'resolved', 'locations shown only when resolved');
+    await spock.click('.nav-contacts li[data-ship="Defiant"] button.nav-sci-lock');
+    await spock.waitForSelector('.nav-contacts li[data-ship="Defiant"] button.nav-sci-lock[aria-pressed="false"]');
+    step(`Science locked sensors on the shielded Defiant and tracked it: sensors ${sens}% vs shields ${shld}%, locations ${res}; then released the lock`);
     await carol.waitForSelector('#wp-torpedoes:has-text("9 of 10")');
     await nog.waitForSelector('.bcast--alert:has-text("Taking fire from the Enterprise")', { state: 'attached' });
     step('a torpedo drained the Defiant\'s shields (hull untouched); the tubes reloaded, and every Defiant console showed "Taking fire"');
@@ -1682,9 +1696,8 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(cold.emerg.map((b) => b.pct), [100, 100, 100], 'a new ship starts with full emergency batteries');
     barclay.send({ type: 'grid', ties: { emerg1: ['B'] } });
     await waitFor(() => barclay.nav()?.own.grid.emerg[0].pct < 98);
-    barclay.send({ type: 'grid', emergReplace: 'emerg1' });
+    barclay.send({ type: 'grid', ties: { emerg1: [] }, emergReplace: 'emerg1' }); // (untied, so it isn't drawn on again)
     await waitFor(() => barclay.nav()?.own.grid.emerg[0].pct === 100);
-    barclay.send({ type: 'grid', ties: { emerg1: [] } });
     step('a new ship had three full, untied emergency batteries; tied to Bus B, one ran down carrying the loads, and the starbase replaced it with a full one');
     barclay.send({ type: 'grid', conn: { with: 'station', res: 'power', imp: true }, ties: { dock: ['B'], crosslink: ['A', 'B'] } }); // dock power: imported, on Bus B, shared with A
     await waitFor(() => barclay.nav()?.own.grid.consoleOk.Tactical && barclay.nav().own.power.lifeSupport === 100);

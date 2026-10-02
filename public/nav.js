@@ -181,6 +181,7 @@
     }
     const contacts = el('ul', { className: 'nav-contacts' });
     const scanOut = el('div', { className: 'nav-scan' });
+    let sciLock = null; // the contact Science's sensors are locked on (tracked)
 
     destSel.onchange = () => {
       const v = destSel.value;
@@ -256,6 +257,8 @@
             el('span', { className: 'nav-contact-name', textContent: s.name }),
             el('span', { className: 'nav-contact-info', textContent: `${Math.round(s.distance)} units · ${speedName(s.warp)}${s.distance <= nav.ranges.comms ? ' · in comms range' : ''}` }),
             button('Scan', '', () => { selected = s.name; send({ type: 'scan', ship: s.name }); renderControls(); draw(); }),
+            // Lock: the scan, tracked each second (tap again to release).
+            (() => { const b = button(sciLock === s.name ? 'Release lock' : 'Lock', '', () => { selected = s.name; send({ type: 'sci-lock', ship: sciLock === s.name ? null : s.name }); renderControls(); draw(); }, sciLock === s.name); b.classList.add('nav-sci-lock'); b.setAttribute('aria-pressed', String(sciLock === s.name)); return b; })(),
             button('Plot course', '', () => send({ type: 'plot-course', dest: { ship: s.name } })));
           li.dataset.ship = s.name;
           return li;
@@ -281,8 +284,13 @@
       scanned(msg) {
         const d = msg.data;
         const stations = Object.entries(d.stations).map(([st, n]) => `${st} ${n}`).join(', ') || 'nobody';
+        const species = Object.entries(d.species || {}).map(([sp, n]) => `${n} ${sp}`).join(', ');
+        // Lifeforms by name and species; their exact locations only when resolved (shields down, or sensors above shields).
+        const where = d.shields ? `Sensors ${d.sensors}% vs shields ${d.shieldLevel}%: locations ${d.resolved ? 'resolved' : 'unresolved'}` : 'Shields down: locations resolved';
+        const lifeforms = el('ul', { className: 'nav-scan-lifeforms' }, ...(d.lifeforms?.length ? d.lifeforms.map((l) => el('li', { textContent: `${l.name} · ${l.species}${l.where ? ` · ${l.where}` : ''}` })) : [el('li', { className: 'empty', textContent: 'No life signs' })]));
+        const power = d.power?.length ? [el('h4', { className: 'nav-scan-sub', textContent: `Power use: ${d.powerTotal}` }), el('ul', { className: 'nav-scan-power' }, ...d.power.map(([n, v]) => el('li', {}, el('span', { textContent: n }), el('b', { textContent: String(v) }))))] : [];
         scanOut.replaceChildren(
-          el('h3', { className: 'ops-subhead', textContent: `Scan: the ${msg.ship}` }),
+          el('h3', { className: 'ops-subhead', textContent: `${msg.tracking ? 'Tracking' : 'Scan'}: the ${msg.ship}` }),
           el('ul', { className: 'nav-scan-list' },
             ...[
               ['Distance', `${d.distance} units${d.inTransporterRange ? ' (transporter range)' : d.inCommsRange ? ' (comms range)' : ''}`],
@@ -292,9 +300,13 @@
               ...(d.hull != null ? [['Hull', `${d.hull}%${d.disabled ? ' · disabled' : ''}${d.damaged.length ? ` · damaged: ${d.damaged.join(', ')}` : ''}`]] : []),
               ...(d.signature != null ? [['Power signature', `${d.signature}%${d.signature < 60 ? ' (running quiet)' : ''}`]] : []),
               ['Ops', d.ops ? 'On duty' : 'None on duty'],
-              ['Life signs', `${d.crew} (${stations})`],
-            ].map(([k, v]) => el('li', {}, el('span', { textContent: k }), el('b', { textContent: v })))));
+              ['Life signs', `${d.crew}${species ? ` (${species})` : d.crew ? ` (${stations})` : ''}`],
+              ...(d.crew ? [['Locations', where]] : []),
+            ].map(([k, v]) => el('li', {}, el('span', { textContent: k }), el('b', { textContent: v })))),
+          lifeforms, ...power);
       },
+      // Science: the sensor lock (a contact's name, or null).
+      sciLocked(ship) { sciLock = ship; if (!ship && scanOut.querySelector('h3')?.textContent.startsWith('Tracking')) scanOut.querySelector('h3').textContent = scanOut.querySelector('h3').textContent.replace('Tracking', 'Scan'); renderControls(); },
       status,
       get nav() { return nav; },
     };
