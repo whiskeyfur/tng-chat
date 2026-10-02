@@ -182,11 +182,9 @@
     .grid-flow--in { color: #66cc66; }
     .grid-table tr.grid-crosslink th, .grid-table tr.grid-crosslink td { border-bottom: 4px solid var(--lcars-orange); }
     .grid-table tfoot td[data-over] { color: var(--lcars-red); }
-    /* The column headings and the used / available / max line stay in view while the panel scrolls. */
-    .grid-table thead { position: sticky; top: 0; z-index: 2; background: var(--lcars-bg, #000); }
-    .grid-table tfoot { position: sticky; bottom: 0; z-index: 2; background: var(--lcars-bg, #000); }
+    /* The column headings and the used / available / max line scroll with the table. */
     .grid-table thead th, .grid-table thead td, .grid-table tfoot th, .grid-table tfoot td { background: var(--lcars-bg, #000); }
-    /* A thick bar above and below each sticky block. */
+    /* A thick bar above and below the heading and footer blocks. */
     .grid-table thead tr:first-child > *, .grid-table tfoot tr:first-child > * { border-top: 4px solid var(--lcars-orange); }
     .grid-table thead tr:last-child > *, .grid-table tfoot tr:last-child > * { border-bottom: 4px solid var(--lcars-orange); }
     .grid-table .grid-stores td { white-space: nowrap; }

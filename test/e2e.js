@@ -1475,7 +1475,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await screen(geordi, 'st-grid');
     // The warp core's Start / Stop is on its row in the grid, in every order.
     await geordi.waitForSelector('#ties-core-parent #core-stop');
-    assert.deepEqual(await geordi.evaluate(() => ['#grid-table thead', '#grid-table tfoot'].map((q) => getComputedStyle(document.querySelector(q)).position)), ['sticky', 'sticky'], 'the headings and totals stay in view');
+    assert.deepEqual(await geordi.evaluate(() => ['#grid-table thead', '#grid-table tfoot'].map((q) => getComputedStyle(document.querySelector(q)).position)), ['static', 'static'], 'the headings and totals scroll with the table');
     // A refresh comes back signed in, at the same station, on the same screen.
     await geordi.reload();
     await geordi.waitForFunction(() => window.__voice.me?.station === 'Engineering' && window.__voice.myName === 'geordi');
