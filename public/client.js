@@ -897,45 +897,54 @@ function renderCombat() {
   document.body.toggleAttribute('data-console-dark', dark);
   if (!stationView) return;
 
-  // Tactical: target, lock, arm phasers, fire.
+  // Tactical: contacts (tap to lock; up to 6 locks, a starbase 24), the locks
+  // (pick one: aim its phasers at a system, fire), the tractor beam (only on a
+  // locked target), arm phasers, the arrays' charge and the torpedoes.
   const wp = document.querySelector('[data-weapons]');
   if (wp) {
     if (!wp.firstChild) {
-      const sel = el('select', { className: 'ops-select', id: 'weapons-target', ariaLabel: 'target' });
       wp.append(
-        el('div', { className: 'ops-form' }, el('span', { textContent: 'Target' }), sel,
-          button('Lock weapons', 'weapons-lock', () => sel.value && send({ type: 'lock', ship: sel.value }), 'lcars-button--alert'),
-          button('Release', 'weapons-release', () => send({ type: 'lock', ship: null }))),
+        el('h3', { className: 'ops-subhead', textContent: 'Contacts · tap to lock' }), el('div', { className: 'tr-taps', id: 'wp-contacts' }),
         el('p', { className: 'st-state', id: 'weapons-lock-state' }),
-        el('div', { className: 'ops-form' },
-          button('Tractor beam', 'tractor-lock', () => sel.value && send({ type: 'tractor', ship: sel.value })),
-          button('Release tractor', 'tractor-release', () => send({ type: 'tractor', ship: null })),
-          el('span', { className: 'ops-hint', id: 'tractor-state' })),
+        el('h3', { className: 'ops-subhead', id: 'wp-locks-head', textContent: 'Locks' }), el('div', { className: 'tr-taps', id: 'wp-locks' }),
+        el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Aim' }), el('div', { className: 'tr-taps', id: 'wp-aim' })),
         el('div', { className: 'ops-form wp-fire' },
           button('Arm phasers', 'arm-phasers', () => send({ type: 'arm', on: !lastNav?.own?.combat?.phaser.armed })),
-          button('Fire phasers', 'fire-phaser', () => send({ type: 'fire', weapon: 'phaser' }), 'lcars-button--alert'),
-          button('Fire torpedo', 'fire-torpedo', () => send({ type: 'fire', weapon: 'torpedo' }), 'lcars-button--alert')),
+          button('Fire phasers', 'fire-phaser', () => send({ type: 'fire', weapon: 'phaser', ...(wpFocus ? { ship: wpFocus } : {}) }), 'lcars-button--alert'),
+          button('Fire torpedo', 'fire-torpedo', () => send({ type: 'fire', weapon: 'torpedo', ...(wpFocus ? { ship: wpFocus } : {}) }), 'lcars-button--alert'),
+          button('Release all locks', 'weapons-release', () => send({ type: 'lock', ship: null }))),
+        el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Tractor' }), el('div', { className: 'tr-taps', id: 'tractor-targets' })),
+        el('div', { className: 'ops-form' }, button('Release tractor', 'tractor-release', () => send({ type: 'tractor', ship: null })), el('span', { className: 'ops-hint', id: 'tractor-state' })),
         el('div', { className: 'ops-readouts' },
           el('div', { className: 'lcars-readout', id: 'wp-phasers' }), el('div', { className: 'lcars-readout', id: 'wp-torpedoes' })),
         el('p', { className: 'st-state', id: 'wp-torpedo-am' }),
         el('p', { className: 'ops-notice', id: 'weapons-status' }),
-        el('p', { className: 'ops-hint', textContent: `Arm phasers to charge the banks (faster with more weapons power; armed weapons draw power, which shows on sensors). A full bank fires, up to ${c.phaser.range} units. Torpedoes reach ${c.torpedo.range} units and reload in ${c.torpedo.reload / 1000} s; ${c.carried} carried, restocked only when docked at a starbase. Shields soak hits until they fail; then the hull and systems take damage, and with no hull left the ship is destroyed.` }));
+        el('p', { className: 'ops-hint', textContent: `Arm phasers to charge the arrays (faster with more power to each array; armed weapons draw power, which shows on sensors). A charged array fires at the lock picked, up to ${c.phaser.range} units, aimed at a system if you pick one. Torpedoes reach ${c.torpedo.range} units and reload in ${c.torpedo.reload / 1000} s; ${c.carried} carried, restocked only when docked at a starbase. Shields soak hits until they fail; then the hull and systems take damage, and with no hull left the ship is destroyed.` }));
     }
-    const sel = wp.querySelector('#weapons-target');
-    const contacts = lastNav.ships.filter((s) => s.name !== own.name);
-    if (changed(sel, contacts.map((s) => s.name), c.lock?.name)) {
-      const keep = sel.value || c.lock?.name;
-      sel.replaceChildren(...contacts.map((s) => new Option(s.name, s.name)));
-      if (!contacts.length) sel.append(new Option('No contacts on sensors', ''));
-      if (keep && contacts.some((s) => s.name === keep)) sel.value = keep;
+    const locks = c.locks || [];
+    if (!locks.some((x) => x.name === wpFocus)) wpFocus = c.lock?.name || locks[0]?.name || null;
+    const focus = locks.find((x) => x.name === wpFocus) || null;
+    // Contacts: ships on sensors (and starbases, which can be locked for the tractor beam only).
+    const contacts = [...lastNav.ships.filter((s) => s.name !== own.name).map((s) => ({ name: s.name, distance: s.distance, shields: s.shields })), ...(lastNav.bases || []).filter((b) => b.name !== own.name).map((b) => ({ name: b.name, distance: b.distance, base: true }))];
+    const tap = (text, value, on, onclick, why = '') => { const b = button(why ? `${text} · ${why}` : text, '', onclick); b.classList.add('tr-tap'); b.dataset.ship = value; b.setAttribute('aria-pressed', String(!!on)); if (why) { b.disabled = true; b.title = why; } return b; };
+    const full = locks.length >= (c.lockMax || 6);
+    const sig = JSON.stringify([contacts.map((x) => [x.name, Math.round(x.distance), x.shields]), locks, wpFocus, grid.towing, c.aimable?.length]);
+    if (wp.dataset.sig !== sig) {
+      wp.dataset.sig = sig;
+      wp.querySelector('#wp-contacts').replaceChildren(...(contacts.length ? contacts.map((x) => { const on = locks.some((l) => l.name === x.name); return tap(`${x.base ? x.name : `The ${x.name}`} (${Math.round(x.distance)} units${x.shields ? ', shields up' : ''})`, x.name, on, () => send({ type: 'lock', ship: x.name }), !on && full ? 'all locks in use' : ''); }) : [el('span', { className: 'ops-hint', textContent: 'No contacts on sensors' })]));
+      wp.querySelector('#wp-locks-head').textContent = `Locks (${locks.length} of ${c.lockMax || 6}) · tap one to pick it`;
+      wp.querySelector('#wp-locks').replaceChildren(...(locks.length ? locks.map((l) => tap(`The ${l.name} · ${l.distance} units · shields ${l.shields ? `up ${l.shield}%` : 'down'} · hull ${l.hull}%${l.aimName ? ` · aimed: ${l.aimName}` : ''}`, l.name, l.name === wpFocus, () => { wpFocus = l.name; wp.dataset.sig = ''; renderCombat(); })) : [el('span', { className: 'ops-hint', textContent: 'No locks' })]));
+      // Aim the picked lock's phasers: anywhere, or one of its systems.
+      wp.querySelector('#wp-aim').replaceChildren(...(focus ? [['', 'Anywhere'], ...(c.aimable || [])].map(([x, n]) => { const b = tap(n, x, (focus.aim || '') === x, () => send({ type: 'aim', ship: focus.name, system: x || null })); b.dataset.system = x; return b; }) : [el('span', { className: 'ops-hint', textContent: 'Pick a lock to aim at its systems' })]));
+      // The tractor beam: only on a locked target.
+      wp.querySelector('#tractor-targets').replaceChildren(...(contacts.length ? contacts.map((x) => { const on = locks.some((l) => l.name === x.name); return tap(x.base ? x.name : `The ${x.name}`, x.name, grid.towing === x.name, () => send({ type: 'tractor', ship: x.name }), on ? '' : 'no Tactical lock'); }) : [el('span', { className: 'ops-hint', textContent: 'No contacts' })]));
     }
-    for (const s of contacts) [...sel.options].find((o) => o.value === s.name).textContent = `The ${s.name} (${Math.round(s.distance)} units${s.shields ? ', shields up' : ''})`;
     const lockState = wp.querySelector('#weapons-lock-state');
-    lockState.textContent = c.lock ? `Locked on the ${c.lock.name} · ${c.lock.distance} units · shields ${c.lock.shields ? `up, ${c.lock.shield}%` : 'down'} · hull ${c.lock.hull}%` : 'No weapons lock';
-    lockState.toggleAttribute('data-up', !!c.lock);
-    wp.querySelector('#weapons-release').disabled = !c.lock;
+    lockState.textContent = focus ? `Locked on the ${focus.name} · ${focus.distance} units · shields ${focus.shields ? `up, ${focus.shield}%` : 'down'} · hull ${focus.hull}%${locks.length > 1 ? ` (and ${locks.length - 1} more)` : ''}` : 'No weapons lock';
+    lockState.toggleAttribute('data-up', !!focus);
+    wp.querySelector('#weapons-release').disabled = !locks.length;
     wp.querySelector('#tractor-release').disabled = !grid.towing;
-    wp.querySelector('#tractor-state').textContent = grid.towing ? `Towing the ${grid.towing} (warp 3 at most)` : grid.towedBy ? `Held in the ${grid.towedBy}'s tractor beam` : 'Tractor beam: holds a ship within 20 units with its shields down';
+    wp.querySelector('#tractor-state').textContent = grid.towing ? `Towing the ${grid.towing} (warp 3 at most)` : grid.towedBy ? `Held in the ${grid.towedBy}'s tractor beam` : 'Tractor beam: holds a locked target within 20 units with its shields down';
     const arm = wp.querySelector('#arm-phasers');
     arm.textContent = c.phaser.armed ? 'Stand down phasers' : 'Arm phasers';
     arm.setAttribute('aria-pressed', String(c.phaser.armed));
@@ -1233,7 +1242,7 @@ function renderCombat() {
       return tr;
     };
     const table = () => {
-      const SYS = { ...Object.fromEntries(POWER), tractor: 'Tractor beam', drydock1: 'Drydock connection 1', drydock2: 'Drydock connection 2', drydock3: 'Drydock connection 3', industrial: 'Industrial replicators' };
+      const SYS = { ...Object.fromEntries(POWER), tractor: 'Tractor beam', drydock1: 'Drydock connection 1', drydock2: 'Drydock connection 2', drydock3: 'Drydock connection 3', industrial: 'Industrial replicators', phaser1: 'Phaser array 1', phaser2: 'Phaser array 2', phaser3: 'Phaser array 3', phaser4: 'Phaser array 4' };
       const crewAt = (st) => comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station === st).length;
       const consoles = Object.keys(grid.tieNodes).filter((x) => x.startsWith('console:')).map((x) => x.slice(8));
       // A console's rows: the console, its systems, and its subsystems (Engineering: the reactors too).
@@ -1259,7 +1268,8 @@ function renderCombat() {
           const up = (v) => Math.ceil(v - 1e-9);
           const want = up(sys === 'tractor' ? (grid.towing ? 30 : 0) : grid.demand[sys]), got = up(sys === 'tractor' ? want : grid.delivered[sys]);
           // A starbase's industrial replicators: a light bar (taps) for how hard they run.
-          const controls = sys === 'industrial' ? [(() => { const bar = lightBar('Industrial replicators', 100, (v) => send({ type: 'power', power: { industrial: v } })); bar.id = 'industrial-bar'; bar.set(lastNav?.own?.allocated?.industrial ?? 0); return bar; })()] : [];
+          // (And each phaser array's, ten taps for the power it may draw.)
+          const controls = sys === 'industrial' || /^phaser\d$/.test(sys) ? [(() => { const bar = lightBar(SYS[sys], 100, (v) => send({ type: 'power', power: { [sys]: v } })); bar.id = `${sys}-bar`; bar.set(lastNav?.own?.allocated?.[sys] ?? 0); return bar; })()] : [];
           const idle = /^drydock\d$/.test(sys) ? 'no ship in this berth' : 'off';
           rows.push(ties(`system:${sys}`, SYS[sys], `system:${sys}`, { level, controls, note: want ? `${got} of ${want}${got < want ? ' · SHORT' : ''}${got > 100 ? ' · OVERDRIVE' : ''}` : idle }));
           if (sys === 'weapons') rows.push(...tankRow('am', 'torpedo', level + 1)); // the torpedo bay's antimatter
@@ -1507,6 +1517,8 @@ function renderServices() {
   }));
 }
 
+// The lock Tactical has picked (fire, aim).
+let wpFocus = null;
 // Phaser charge and torpedo reload, between updates.
 function updateWeaponTimers() {
   const wp = document.querySelector('[data-weapons]');
@@ -1516,11 +1528,13 @@ function updateWeaponTimers() {
   const set = (id, label, value) => wp.querySelector(id).replaceChildren(
     Object.assign(document.createElement('span'), { className: 'lcars-readout__label', textContent: label }),
     Object.assign(document.createElement('span'), { className: 'lcars-readout__value', textContent: value }));
-  const weapons = ownPower()?.weapons ?? 0;
-  set('#wp-phasers', 'Phaser banks', !c.phaser.armed ? 'Not armed' : c.phaser.charge >= 100 ? 'Charged · ready' : weapons <= 0 ? `${c.phaser.charge}% · no power` : `Charging ${c.phaser.charge}%`);
+  const arrays = c.phaser.arrays || [c.phaser.charge];
+  set('#wp-phasers', arrays.length > 1 ? `Phaser arrays (${arrays.length})` : 'Phaser array', !c.phaser.armed ? 'Not armed' : arrays.length > 1 ? arrays.map((x) => (x >= 100 ? 'ready' : `${x}%`)).join(' · ') : c.phaser.charge >= 100 ? 'Charged · ready' : `Charging ${c.phaser.charge}%`);
   set('#wp-torpedoes', 'Photon torpedoes', `${c.torpedoes} of ${c.carried}${tp ? ' · reloading' : ''}`);
-  wp.querySelector('#fire-phaser').disabled = !c.lock || !c.phaser.armed || c.phaser.charge < 100 || c.lock.distance > c.phaser.range;
-  wp.querySelector('#fire-torpedo').disabled = !c.lock || tp > 0 || !c.torpedoes || c.lock.distance > c.torpedo.range;
+  const f = (c.locks || []).find((x) => x.name === wpFocus);
+  const base = f && (lastNav?.bases || []).some((b) => b.name === f.name); // (the weapons won't fire on a starbase)
+  wp.querySelector('#fire-phaser').disabled = !f || base || !c.phaser.armed || c.phaser.charge < 100 || f.distance > c.phaser.range;
+  wp.querySelector('#fire-torpedo').disabled = !f || base || tp > 0 || !c.torpedoes || f.distance > c.torpedo.range;
 }
 setInterval(updateWeaponTimers, 250);
 

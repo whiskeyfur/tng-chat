@@ -1141,10 +1141,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     const kira = await crewWs('kira', 'Defiant', 'Tactical');
     const obrien = await crewWs('obrien', 'Defiant', 'Engineering');
     await screen(carol, 'st-weapons');
-    await carol.waitForSelector('#weapons-target option[value="Defiant"]', { state: 'attached' });
-    await carol.selectOption('#weapons-target', 'Defiant');
-    await carol.click('#weapons-lock');
+    // Contacts are taps: tap one to lock on (up to 6 locks on a ship).
+    await carol.waitForSelector('#wp-contacts button[data-ship="Defiant"]', { state: 'attached' });
+    await carol.click('#wp-contacts button[data-ship="Defiant"]');
     await carol.waitForSelector('#weapons-lock-state:has-text("Locked on the Defiant")');
+    await carol.waitForSelector('#wp-locks-head:has-text("1 of 6")');
     await waitFor(() => kira.msgs.some((m) => m.type === 'notice' && /the Enterprise has locked weapons on us/.test(m.text)));
     await waitFor(() => kira.nav()?.own.combat.lockedBy.includes('Enterprise'));
     await carol.click('#arm-phasers'); // the banks charge while we go on
@@ -1176,15 +1177,19 @@ const audioBytes = (page) => page.evaluate(async () => {
     // Shields down: phasers hit the hull and damage a system, which caps its power.
     kira.send({ type: 'shields', up: false });
     await waitFor(async () => !(await carol.textContent('#weapons-lock-state')).includes('shields up'));
+    // Aimed: the phasers at the Defiant's lateral sensor arrays.
+    await carol.click('#wp-aim button[data-system="lateral"]');
+    await carol.waitForSelector('#wp-locks button:has-text("aimed: lateral sensor arrays")');
     await carol.waitForSelector('#fire-phaser:not([disabled])', { timeout: 20000 });
     await carol.click('#fire-phaser');
     await waitFor(() => kira.nav()?.own.combat.hull < 100);
     const hit = kira.nav().own;
-    const damaged = Object.entries(hit.combat.damage).find(([, d]) => d > 0);
+    assert.ok(hit.combat.damage.lateral > 0, 'the aimed phasers missed the lateral sensor arrays');
+    const damaged = ['lateral', hit.combat.damage.lateral];
     assert.ok(damaged, 'a system should be damaged');
     assert.ok(!(damaged[0] in hit.power) || hit.power[damaged[0]] <= 1.5 * (100 - damaged[1]) + 1, 'damage should cap the system\'s power'); // subsystems have no power level: they fail at 50%
     await waitFor(() => obrien.msgs.some((m) => m.type === 'notice' && /^Engineering: .* damaged/.test(m.text)));
-    step(`with shields down a phaser hit the hull (${hit.combat.hull}%) and damaged the ${damaged[0]}, capping its power`);
+    step(`with shields down a phaser hit, aimed at the lateral sensor arrays, took the hull to ${hit.combat.hull}% and damaged them, capping their power`);
 
     // Engineering directs repairs; the ship's computer keeps the damage.
     obrien.send({ type: 'repair', system: damaged[0] });
@@ -1416,6 +1421,11 @@ const audioBytes = (page) => page.evaluate(async () => {
     const at = laforge.nav().own;
     ezri.send({ type: 'helm', dest: { x: at.x, y: at.y - 4 }, warp: 7 });
     await waitFor(() => { const n = ezri.nav(); const e = n?.ships.find((x) => x.name === 'Enterprise'); return n?.own.warp === 0 && e && e.distance <= 20; }, 30000);
+    // The tractor beam only holds a target Tactical has locked.
+    tuvok.send({ type: 'tractor', ship: 'Enterprise' });
+    await waitFor(() => tuvok.msgs.some((m) => m.type === 'notice' && /no Tactical lock on the Enterprise/.test(m.text)));
+    tuvok.send({ type: 'lock', ship: 'Enterprise' });
+    await waitFor(() => tuvok.nav()?.own.combat.locks.some((l) => l.name === 'Enterprise'));
     tuvok.send({ type: 'tractor', ship: 'Enterprise' });
     await waitFor(() => suluMsgs.some((m) => m.type === 'notice' && /has us in a tractor beam/.test(m.text)));
     helm({ dest: { x: 500, y: 500 }, warp: 1 });
@@ -1499,6 +1509,10 @@ const audioBytes = (page) => page.evaluate(async () => {
       sbTac.send({ type: 'shields', up: true });
       await waitFor(() => sbTac.nav()?.own.combat.shieldsUp || sbTac.msgs.some((m) => m.type === 'ships' && m.ships.find((x) => x.name === 'Starbase 47')?.shields));
       sbTac.send({ type: 'shields', up: false });
+      // Four phaser arrays and up to 24 locks; an EPS that carries 3000.
+      assert.equal(sbTac.nav().own.combat.phaser.arrays.length, 4, 'a starbase has four phaser arrays');
+      assert.equal(sbTac.nav().own.combat.lockMax, 24);
+      assert.equal(sbEng.nav().own.grid.totals.EPS.fullMax, 3000);
       // Starbase to starbase: a data link across the system (Starbase 74 accepts by itself).
       const sbComms = await crewWs('odo', 'Starbase 47', 'Communications');
       await waitFor(() => sbComms.msgs.some((m) => m.type === 'comm-links' && m.ships.includes('Starbase 74')));
@@ -1507,7 +1521,7 @@ const audioBytes = (page) => page.evaluate(async () => {
       sbComms.send({ type: 'link-close', ship: 'Starbase 74' });
       sbComms.close();
       sbEng.close(); sbHelm.close(); sbTac.close();
-      step('Starbase 47 ran its own power grid (no warp drive; drydock connections and industrial replicators, set by a light bar), moved at impulse under its Helm (warp refused) and back, raised shields, and opened a data link with Starbase 74');
+      step('Starbase 47 ran its own power grid (no warp drive; drydock connections and industrial replicators, set by a light bar), moved at impulse under its Helm (warp refused) and back, raised shields, and opened a data link with Starbase 74; it has four phaser arrays, 24 locks and an EPS of 3000');
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;
