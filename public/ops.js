@@ -58,7 +58,6 @@
           broadcasts = msg.broadcasts || [];
           remoteBlock = !!msg.remoteBlock;
           renderDrydock(msg.drydock, msg.berths);
-          renderBayDoors(msg.bay);
           renderPrefix(msg.prefix);
           render();
           return true;
@@ -96,21 +95,6 @@
       prefixBox.hidden = prefix == null;
       document.getElementById('prefix-show').textContent = prefix == null ? '' : revealed ? prefix : '•••••';
       document.getElementById('prefix-reveal').textContent = revealed ? 'Hide' : 'Show';
-    }
-
-    // The shuttle bay's doors (with a bay): open or close them.
-    let bayOpen = false;
-    const bayBtn = document.getElementById('bay-doors');
-    if (bayBtn) bayBtn.onclick = () => send({ type: 'bay-doors', open: !bayOpen });
-    function renderBayDoors(bay) {
-      const box = document.getElementById('bay-box');
-      if (!box) return;
-      box.hidden = !bay;
-      if (!bay) return;
-      bayOpen = bay.open;
-      bayBtn.textContent = `Shuttle bay doors: ${bay.open ? 'open' : 'closed'}`;
-      bayBtn.setAttribute('aria-pressed', String(bay.open));
-      document.getElementById('bay-note').textContent = `${bay.landed.length} of ${bay.capacity} landed${bay.landed.length ? `: ${bay.landed.join(', ')}` : ''}`;
     }
 
     // The shipyard's drydock: each ship in it, its release (if requested) and our hold.

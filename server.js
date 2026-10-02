@@ -51,7 +51,7 @@ const OPS_STATION = 'Operations';   // operators only
 const STATIONS = ['Captain', 'First Officer', 'Helm', 'Tactical', 'Security', 'Engineering', 'Medical', 'Science', 'Communications', 'Transporter', 'Crew', 'Shuttle Bay'];
 // Operator commands (everything else from an operator is handled as crew).
 const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-hail', 'cancel-hail', 'transfer',
-  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock', 'bay-doors', 'prefix']);
+  'link-request', 'link-accept', 'link-decline', 'link-cancel', 'link-close', 'all-hands', 'all-hands-end', 'remote-block', 'drydock', 'prefix']);
 // Message types one user may send to another; the server adds `from` and forwards.
 const RELAYED = new Set(['call', 'accept', 'decline', 'hangup', 'signal']);
 const STATES = new Set(['idle', 'calling', 'ringing', 'in-call']);
@@ -200,7 +200,6 @@ function broadcastOps(key) {
     linkOutgoing: requests.filter((r) => r.from === key).map(({ id, toShip }) => ({ id, toShip })),
     graph: networkGraph(),
     remoteBlock: !!engOf(key).remoteBlock,
-    bay: bayCapacity(key) ? { open: !!engOf(key).bayOpen, capacity: bayCapacity(key), landed: landedIn(key).map(shipName) } : null,
     // The shipyard's drydock: the ships in it, any release under way, and holds.
     ...(isShipyard(shipName(key)) ? { drydock: drydocked().filter((o) => shipKey(engOf(o).docked || '') === key).map((o) => ({ ship: shipName(o), hold: !!engOf(o).hold, release: engOf(o).release ? Math.max(0, Math.ceil((engOf(o).release - Date.now()) / 1000)) : null, repair: combatOf(o).repair || null })), berths: DRYDOCK.berths } : {}),
     broadcasts: [...broadcasts.values()].filter((b) => b.ships.has(key) || users.get(b.speaker)?.shipKey === key)
@@ -470,20 +469,6 @@ function operatorMessage(op, msg) {
       checkRemotes(); // (sessions on the old one end)
       broadcastOps(op.shipKey);
       return ok('command prefix set');
-    }
-    case 'bay-doors': {
-      // Ops opens or closes the shuttle bay doors (they need power to move, and the containment field holds the air in).
-      const e = engOf(op.shipKey);
-      if (!bayCapacity(op.shipKey)) return fail('this vessel has no shuttle bay');
-      const open = !!msg.open;
-      if (open && !e.bayOpen) {
-        e.bayOpen = true; flowCache.delete(op.shipKey);
-        if (flow(op.shipKey).subOk.bayDoors === false) { e.bayOpen = false; flowCache.delete(op.shipKey); return fail('the shuttle bay doors have no power (Engineering: tie them in)'); }
-      } else e.bayOpen = open;
-      e.dirty = true;
-      opLog(op.shipKey, `${op.name}: shuttle bay doors ${open ? 'open' : 'closed'}`);
-      gridChanged(op.shipKey); broadcastOps(op.shipKey);
-      return ok(`shuttle bay doors ${open ? 'open' : 'closed'}`);
     }
     case 'drydock': {
       // The shipyard's ops: release a drydocked ship now, or hold it (or stop holding it).
@@ -1397,6 +1382,22 @@ function crewCommand(ws, msg) {
       if (!setShip({ lockout: !!msg.on })) return;
       opLog(key, `${ws.name}: transporter lockout ${msg.on ? 'on' : 'off'}`);
       return;
+    }
+    case 'bay-doors': {
+      // Hangar control (at the Shuttle Bay) opens or closes the bay doors: they
+      // need power to move, and the containment field holds the air in.
+      if (ws.station !== 'Shuttle Bay') return note('Only hangar control (in the Shuttle Bay) works the bay doors');
+      const e = engOf(key);
+      if (!bayCapacity(key)) return note('this vessel has no shuttle bay');
+      const open = !!msg.open;
+      if (open && !e.bayOpen) {
+        e.bayOpen = true; flowCache.delete(key);
+        if (flow(key).subOk.bayDoors === false) { e.bayOpen = false; flowCache.delete(key); return note('Hangar control: the shuttle bay doors have no power (Engineering: tie them in)'); }
+      } else e.bayOpen = open;
+      e.dirty = true;
+      opLog(key, `Hangar control (${ws.name}): shuttle bay doors ${open ? 'open' : 'closed'}`);
+      gridChanged(key); broadcastOps(key);
+      return note(`Hangar control: shuttle bay doors ${open ? 'open' : 'closed'}`);
     }
     case 'forcefield': {
       // Seal a console (or release it): nobody can use it while the field holds.
@@ -2602,7 +2603,7 @@ function dockCommand(ws, msg) {
   if (msg.takeoff) {
     if (!e.landed) return note('not landed in a shuttle bay');
     const m = e.landed;
-    if (present(m) && !engOf(m).bayOpen) return note(`the ${shipName(m)}'s shuttle bay doors are closed: ask their Ops to open them`);
+    if (present(m) && !engOf(m).bayOpen) return note(`the ${shipName(m)}'s shuttle bay doors are closed: ask their hangar control to open them`);
     e.landed = null; e.dirty = true;
     if (isBase(m) && e.docked === shipName(m)) e.docked = null;
     for (const slot of ['bay']) { e.feed[slot] = 0; e.fed[slot] = 0; e.feedEps[slot] = 0; e.fedEps[slot] = 0; }
@@ -2695,7 +2696,7 @@ function landFault(k, m) {
   if (classId(k) === 'runabout' && !isBase(m)) return `a ${c.name.toLowerCase()} only lands in a starbase's shuttle bay`;
   if (distance(k, m) > DOCK_RANGE) return `the ${shipName(m)} is out of range (${Math.round(distance(k, m))} units; get within ${DOCK_RANGE})`;
   if ((navState.get(k)?.warp || 0) > 0 || (navState.get(m)?.warp || 0) > 0) return 'come to all stop first (both of you)';
-  if (!engOf(m).bayOpen) return `the ${shipName(m)}'s shuttle bay doors are closed: ask their Ops to open them`;
+  if (!engOf(m).bayOpen) return `the ${shipName(m)}'s shuttle bay doors are closed: ask their hangar control to open them`;
   if (landedIn(m).length >= bayCapacity(m)) return `the ${shipName(m)}'s shuttle bay is full (${bayCapacity(m)})`;
   if (e.docked || shipsDocked(k).length) return 'undock first';
   return null;
@@ -3509,7 +3510,7 @@ function stationCommand(ws, msg) {
   const t = msg.type;
   // Off the ODN, the station's controls do nothing (answering an order needs no console).
   const odnOff = !odnLinked(ws.shipKey, ws.operator ? OPS_STATION : ws.station) && !['order-ack', 'order-decline'].includes(t);
-  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
+  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'bay-doors', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
     send(ws, { type: 'notice', text: 'Disconnected from the optical data network' });
     return true;
   }
@@ -3521,7 +3522,7 @@ function stationCommand(ws, msg) {
   if (['helm', 'autopilot', 'scan', 'sci-lock', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
-  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield'].includes(t)) return gate(crewCommand);
+  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'bay-doors'].includes(t)) return gate(crewCommand);
   if (['lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
   if (t === 'grid') return gridCommand(ws, msg), true; // emergency power: works with the console dark
   if (t === 'tractor') return gate(tractorCommand);
@@ -4311,6 +4312,7 @@ function adminRequest(ws, msg) {
 // the starbase picked) or a starbase (here, at the spot picked on the map; kept
 // in the starbase file). Names must be new.
 const pendingSpawn = new Map(); // ship key -> the starbase a new ship comes up docked at
+const createWaiting = new Map(); // admin request id -> { ws, name, text }: a ship being created
 function adminCreate(ws, msg) {
   const reply = (ok, text) => send(ws, { type: 'admin-created', ok, text });
   const name = clean(msg.name), cls = String(msg.cls || '').toLowerCase();
@@ -4329,9 +4331,12 @@ function adminCreate(ws, msg) {
   if (!at) return reply(false, 'pick where it is parked');
   if (!process.send) return reply(false, "no supervisor: the relay was started on its own (npm start runs the supervisor, which starts the new ship's computer)");
   pendingSpawn.set(shipKey(name), at.name);
-  process.send({ type: 'admin', reqId: ++adminSeq, action: 'create-ship', ship: name, cls });
-  console.log(`admin: ${name} (${CLASSES[cls].name} class) created, parked at ${at.name}`);
-  return reply(true, `the ${name} (${CLASSES[cls].name} class) is being created, parked at ${at.name}: its computer is starting`);
+  // (A supervisor started before ship creation existed answers without starting its computer.)
+  const reqId = ++adminSeq;
+  createWaiting.set(reqId, { ws, name, text: `the ${name} (${CLASSES[cls].name} class) is being created, parked at ${at.name}: its computer is starting` });
+  setTimeout(() => { if (createWaiting.delete(reqId)) { pendingSpawn.delete(shipKey(name)); reply(false, 'no answer from the supervisor'); } }, 10000);
+  process.send({ type: 'admin', reqId, action: 'create-ship', ship: name, cls });
+  console.log(`admin: creating the ${name} (${CLASSES[cls].name} class), parked at ${at.name}`);
 }
 function createStarbase(name, x, y) {
   STARBASES.push({ name, x, y, created: true });
@@ -4344,6 +4349,12 @@ function createStarbase(name, x, y) {
 }
 process.on('message', (m) => {
   if (m?.type !== 'admin-reply') return;
+  const made = createWaiting.get(m.reqId);
+  if (made) {
+    createWaiting.delete(m.reqId);
+    if (m.status?.ships?.some((x) => x.ship === made.name)) send(made.ws, { type: 'admin-created', ok: true, text: made.text }); // (its computer is running now)
+    else { pendingSpawn.delete(shipKey(made.name)); send(made.ws, { type: 'admin-created', ok: false, text: 'the supervisor running now predates ship creation: restart npm start to enable ship creation' }); }
+  }
   const ws = adminWaiting.get(m.reqId);
   adminWaiting.delete(m.reqId);
   if (!ws) return;

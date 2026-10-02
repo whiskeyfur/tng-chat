@@ -1613,10 +1613,12 @@ const audioBytes = (page) => page.evaluate(async () => {
       assert.deepEqual(pilot.nav().own.grid.tripped, [], 'a breaker tripped on the shuttle');
       await waitFor(() => pilot.nav()?.own?.grid?.bays?.some((b) => b.name === 'Enterprise'));
       assert.match(pilot.nav().own.grid.bays.find((b) => b.name === 'Enterprise').why, /doors are closed/);
-      await screen(op, 'status');
-      await op.waitForSelector('#bay-doors', { state: 'attached' });
-      await op.$eval('#bay-doors', (b) => b.click());
+      // Hangar control (at the Shuttle Bay) opens the doors.
+      const hangar = await openAs(browser, 'nog2', 'hangar', 'Enterprise', 'Shuttle Bay');
+      await hangar.waitForSelector('#bay-doors:has-text("Open the bay doors")', { state: 'attached' });
+      await hangar.$eval('#bay-doors', (b) => b.click());
       await waitFor(() => laforge.nav()?.own.grid.bay.open);
+      await hangar.waitForSelector('#bay-field-state:has-text("holding the air in")', { state: 'attached' });
       pilot.send({ type: 'dock', land: 'Enterprise' });
       await waitFor(() => pilot.nav()?.own.grid.landed === 'Enterprise' && laforge.nav()?.own.grid.bay.landed.includes('Galileo'));
       const conn = laforge.nav().own.grid.connections.find((x) => x.name === 'Galileo');
@@ -1629,11 +1631,13 @@ const audioBytes = (page) => page.evaluate(async () => {
       await waitFor(() => pilot.msgs.filter((m) => m.type === 'registered' && m.ship === 'Galileo').length >= 2);
       pilot.send({ type: 'dock', takeoff: true });
       await waitFor(() => !pilot.nav()?.own.grid.landed && !laforge.nav()?.own.grid.bay.landed.length);
-      await op.$eval('#bay-doors', (b) => b.click());
+      await hangar.waitForSelector('#bay-landed:has-text("Nothing landed")', { state: 'attached' });
+      await hangar.$eval('#bay-doors', (b) => b.click());
       await waitFor(() => !laforge.nav()?.own.grid.bay.open);
+      await hangar.close();
       pilot.close();
       await stopComputer(gc);
-      step('the shuttle bay: Enterprise ops opened the doors; the Galileo landed (a connection with nothing tied; Helm held), its pilot walked into the bay and back, and it took off');
+      step('the shuttle bay: hangar control opened the doors; the Galileo landed (a connection with nothing tied; Helm held), its pilot walked into the bay and back, and it took off');
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;

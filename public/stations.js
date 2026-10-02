@@ -432,7 +432,7 @@
     ] }),
     // The shuttle bay: where shuttles and runabouts land and crew board them (a bay status panel; Ops works the doors).
     'Shuttle Bay': (ship) => ({ code: 'SHB 12', color: 'peach', panels: [
-      panel('st-bay', 'Shuttle bay', 'peach', true, h('div', { 'data-bay': '' })),
+      panel('st-bay', 'Hangar control', 'peach', true, h('div', { 'data-bay': '' })),
     ] }),
     Crew: (ship) => ({ code: 'CRW 10', color: 'tan', panels: [
       // The master systems display, with the real alert status, replicators and

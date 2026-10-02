@@ -690,7 +690,8 @@ function openSystem(k) {
 }
 // Engineering's Life support panel: each place aboard, its atmosphere, heat,
 // gravity and lights (taps), and what it's actually getting.
-// The shuttle bay's status: its doors and containment field, room, and who's landed.
+// Hangar control (the Shuttle Bay's panel): the bay doors (tap to open or
+// close), the containment field, room, and who's landed.
 function renderBay() {
   const box = document.querySelector('[data-bay]');
   const b = lastNav?.own?.grid?.bay;
@@ -699,9 +700,13 @@ function renderBay() {
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig;
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const doors = el('button', { type: 'button', className: `lcars-button lcars-button--pill${b.open ? ' lcars-button--alert' : ''}`, id: 'bay-doors', textContent: b.open ? 'Close the bay doors' : 'Open the bay doors', disabled: !b.capacity, onclick: () => send({ type: 'bay-doors', open: !b.open }) });
+  doors.setAttribute('aria-pressed', String(!!b.open));
   box.replaceChildren(
-    el('p', { className: 'st-state', id: 'bay-doors-state', textContent: !b.capacity ? 'No shuttle bay aboard' : `Doors ${b.open ? 'open' : 'closed'}${b.open && !b.fieldOk ? ' · CONTAINMENT FIELD DOWN' : ''}${!b.doorsOk ? ' · doors have no power' : ''}` }),
-    el('p', { className: 'ops-hint', textContent: b.capacity ? `${b.landed.length} of ${b.capacity} landed · Ops opens and closes the doors` : '' }),
+    el('p', { className: 'st-state', id: 'bay-doors-state', textContent: !b.capacity ? 'No shuttle bay aboard' : `Doors ${b.open ? 'open' : 'closed'}${!b.doorsOk ? ' · doors have no power' : ''}` }),
+    el('div', { className: 'ops-form' }, doors),
+    el('p', { className: 'st-state', id: 'bay-field-state', textContent: !b.capacity ? '' : `Containment field: ${!b.open ? 'standing by (doors closed)' : b.fieldOk ? 'holding the air in' : 'DOWN: no power'}` }),
+    el('p', { className: 'ops-hint', textContent: b.capacity ? `${b.landed.length} of ${b.capacity} landed` : '' }),
     el('ul', { className: 'st-list', id: 'bay-landed' }, ...(b.landed.length ? b.landed.map((n) => el('li', { textContent: `The ${n}` })) : [el('li', { className: 'empty', textContent: 'Nothing landed' })])));
 }
 function renderLifeSupport() {
