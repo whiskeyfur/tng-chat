@@ -3182,7 +3182,25 @@ function shieldsCommand(ws, msg) {
 // limiter below 100, damage, or the bus can't supply it), the beam won't
 // start, or fails at the end.
 const BEAM_SECS = Number(process.env.BEAM_SECS) || 5;
-const transporters = new Map(); // ship key -> { lock: ship key, energizing: { who, station, at } }
+const transporters = new Map(); // ship key -> { lock: ship key, person?: user id, energizing: { who, station, at } }
+// A lock on a person aboard another vessel (to beam them aboard): only while
+// Science could place them, the scan's rule: on our sensors, their location
+// resolved (its shields down, or our sensors above its shields), in transporter range.
+function personLockFault(k, u) {
+  if (!u || users.get(u.id) !== u) return 'they are no longer there';
+  if (u.shipKey === k) return 'they are aboard: beam them from the Beam list';
+  if (u.operator) return 'the ops station cannot be beamed';
+  const t = u.shipKey;
+  if (!present(t) || !navState.has(t) || !sensorOk(k, t)) return 'not on sensors';
+  const loc = locatable(k, t);
+  if (!loc.resolved) return `location unresolved (sensors ${loc.sensors}% vs shields ${loc.shield}%)`;
+  if (!transporterOk(k, t)) return `out of range (${rangeText(k, t)})`;
+  return null;
+}
+// The people another vessel's transporter could lock on now (with why not, for those it can't).
+const lockablePeople = (k) => [...users.values()].filter((u) => u.shipKey !== k && !u.operator && present(u.shipKey) && navState.has(u.shipKey) && sensorOk(k, u.shipKey))
+  .map((u) => ({ id: u.id, name: titled(u), ship: u.ship, why: personLockFault(k, u), ...(locatable(k, u.shipKey).resolved ? { where: u.sickbay ? 'sickbay' : u.station } : {}) }))
+  .sort((a, b) => a.ship.localeCompare(b.ship) || a.name.localeCompare(b.name));
 // The transporter's subsystems (Transporter's console, low bus): pattern
 // buffers (15, they need the lateral sensors), targeting scanners (2, for a
 // lock), Heisenberg compensators and the biofilter (2 each), and the
@@ -3200,14 +3218,16 @@ function transporterFault(k, { lock = false } = {}) {
   return down.length ? `no power to its ${down.map((x) => SUBSYSTEMS[x].name).join(', ')}` : null;
 }
 const transporterDraw = (k) => { const t = transporters.get(k); return t?.energizing ? 100 : t?.lock ? 50 : 0; };
-const transporterView = (k) => { const t = transporters.get(k), d = engOf(k).trDiag; return { lock: t?.lock ? shipName(t.lock) : null, energizing: t?.energizing ? { who: t.energizing.who, until: t.energizing.at + BEAM_SECS * 1000 } : null, secs: BEAM_SECS, diag: { state: d.state, t: d.t, secs: TR.diagSecs }, fault: transporterFault(k) }; };
+const transporterView = (k) => { const t = transporters.get(k), d = engOf(k).trDiag, pu = t?.person && users.get(t.person); return { lock: t?.lock ? shipName(t.lock) : null,
+  person: pu ? { id: pu.id, name: titled(pu), ship: pu.ship, where: pu.sickbay ? 'sickbay' : pu.station } : null, people: isBase(k) ? [] : lockablePeople(k), energizing: t?.energizing ? { who: t.energizing.who, until: t.energizing.at + BEAM_SECS * 1000 } : null, secs: BEAM_SECS, diag: { state: d.state, t: d.t, secs: TR.diagSecs }, fault: transporterFault(k) }; };
 const transporterPower = (k) => { flowCache.delete(k); return powerOf(k).transporter; };
 function dropLock(k, why) {
   const t = transporters.get(k);
   if (!t?.lock) return;
   transporters.delete(k);
   gridChanged(k);
-  tellStations(k, ['Transporter'], `Transporter: lock on the ${shipName(t.lock)} lost (${why})`);
+  const pu = t.person && users.get(t.person);
+  tellStations(k, ['Transporter'], `Transporter: lock on ${t.person ? (pu ? titled(pu) : 'them') : `the ${shipName(t.lock)}`} lost (${why})`);
 }
 // Every tick: a lock on another ship holds only while it's there and in range.
 function checkTransporterLocks() {
@@ -3224,7 +3244,9 @@ function checkTransporterLocks() {
     }
     if (d.state === 'running' && ++d.t >= TR.diagSecs) { Object.assign(d, { state: 'passed', t: 0 }); engOf(k).dirty = true; tellStations(k, ['Transporter'], 'Transporter: level-3 diagnostic passed: ready to energize'); }
   }
-  for (const [k, t] of transporters) {
+  for (const [k, t] of [...transporters]) {
+    // A person lock: only while Science could still place them.
+    if (t.person && !t.energizing) { const why = personLockFault(k, users.get(t.person)); if (why) dropLock(k, why); continue; }
     if (t.energizing || !t.lock || t.lock === k) continue;
     if (!present(t.lock)) dropLock(k, `the ${shipName(t.lock)} has no ship's computer online`);
     else if (!transporterOk(k, t.lock)) dropLock(k, 'out of transporter range');
@@ -3250,6 +3272,19 @@ function transporterLock(ws, msg) {
   if (consoleDark(ws)) return fail('console offline, no power on its bus');
   const k = ws.shipKey, t = transporters.get(k);
   if (t?.energizing) return fail('energizing: wait for the beam to finish');
+  // A person aboard another vessel: { person: user id } (null lets go).
+  if (msg.person !== undefined) {
+    if (msg.person == null) { if (t?.person) { transporters.delete(k); gridChanged(k); } return broadcastShips(); }
+    const lockFault = transporterFault(k, { lock: true });
+    if (lockFault) return fail(`can't lock on: ${lockFault}`);
+    const u = users.get(msg.person);
+    const why = personLockFault(k, u);
+    if (why) return fail(`can't lock on ${u ? titled(u) : 'them'}: ${why}`);
+    transporters.set(k, { lock: u.shipKey, person: u.id });
+    gridChanged(k);
+    tellStations(k, ['Transporter'], `Transporter: locked on ${titled(u)} aboard the ${u.ship}`);
+    return broadcastShips();
+  }
   if (msg.ship == null) {
     if (t?.lock) { transporters.delete(k); gridChanged(k); }
     return broadcastShips();
@@ -3289,6 +3324,7 @@ function beamCommand(ws, msg) {
   if (station === undefined) return fail('no such station to beam to');
   if (t?.energizing) return fail('already energizing');
   if (!t?.lock) return fail('no lock: lock onto a destination first');
+  if (t.person) return beamAboard(ws, t, station);
   const toKey = t.lock;
   if (msg.ship != null && shipKey(clean(msg.ship)) !== toKey) return fail(`locked onto the ${shipName(toKey)}, not the ${clean(msg.ship)}: lock onto it first`);
   const why = beamBlocked(k, u, toKey, station);
@@ -3314,6 +3350,46 @@ function beamCommand(ws, msg) {
     if (lost) { tellStations(k, ['Transporter'], `Transporter: beam failed: ${lost}`); if (u.shipKey === k && u !== ws) send(u, { type: 'notice', text: 'The transporter beam failed: you are still here' }); return broadcastShips(); }
     beam(u, toKey, station);
     if (u !== ws) tellStations(k, ['Transporter'], `Transporter: ${u.name} beamed to ${where}`);
+    broadcastShips();
+  }, BEAM_SECS * 1000);
+}
+
+// Beam the person the transporter is locked on aboard (to the transporter
+// room, or the station picked): both ships' shields down, no lockout at either end.
+function beamAboard(ws, t, station) {
+  const fail = (text) => send(ws, { type: 'notice', text: `Transporter: ${text}` });
+  const k = ws.shipKey, u = users.get(t.person), to = station || 'Transporter';
+  const blocked = () => {
+    const why = personLockFault(k, u);
+    if (why) return why;
+    for (const x of [k, u.shipKey]) if (shields.has(x)) return `cannot beam through the shields of the ${shipName(x)}`;
+    for (const x of [k, u.shipKey]) if (lockoutOf(x)) return `the ${shipName(x)} has a transporter lockout: Security's force field is up`;
+    if (users.has(userId(u.name, shipName(k)))) return `someone called ${u.name} is already aboard the ${shipName(k)}`;
+    return null;
+  };
+  const why = blocked();
+  if (why) return fail(why);
+  if (allocOf(k).transporter < 100) return fail(`the transporter's limiter is at ${allocOf(k).transporter}%: it needs 100% to energize (ask Engineering)`);
+  const fault = transporterFault(k);
+  if (fault) return fail(`can't energize: ${fault}`);
+  if (engOf(k).trDiag.state !== 'passed') return fail(`run a level-3 diagnostic first (${TR.diagSecs} s)${engOf(k).trDiag.state === 'running' ? ': it\'s running' : ''}`);
+  t.energizing = { who: u.id, station: to, at: Date.now() };
+  const have = transporterPower(k);
+  if (have < 100 - 1e-6) { t.energizing = null; gridChanged(k); return fail(`not enough power to energize: ${have}% of 100% (ask Engineering)`); }
+  scheduleNav();
+  send(u, { type: 'notice', text: `You are being beamed aboard the ${shipName(k)}` });
+  send(ws, { type: 'notice', text: `Transporter: energizing (${BEAM_SECS} s)` });
+  setTimeout(() => {
+    if (transporters.get(k) !== t) return; // destroyed meanwhile
+    const have = transporterPower(k);
+    const lost = blocked() || (have < 100 - 1e-6 ? `power fell to ${have}% while energizing` : null) || transporterFault(k) || (flow(k).subOk.energizingCoils === false ? 'no power to its energizing coils' : null);
+    t.energizing = null;
+    gridChanged(k);
+    if (lost) { tellStations(k, ['Transporter'], `Transporter: beam failed: ${lost}`); if (users.get(u.id) === u) send(u, { type: 'notice', text: 'The transporter beam failed: you are still here' }); return broadcastShips(); }
+    const from = u.ship;
+    transporters.delete(k); // (they're aboard: the lock is done)
+    beam(u, k, to);
+    tellStations(k, ['Transporter'], `Transporter: ${u.name} beamed aboard from the ${from} to ${to}`);
     broadcastShips();
   }, BEAM_SECS * 1000);
 }

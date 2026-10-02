@@ -532,6 +532,8 @@ function renderTransporter(trEl, { crew, targets, up, p, range, where = () => un
     tr.replaceChildren(
       el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Beam' }), el('div', { className: 'tr-taps', id: 'beam-who' })),
       el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Lock' }), el('div', { className: 'tr-taps', id: 'beam-ship' })),
+      // A lock on someone aboard another vessel, to beam them aboard: only those Science can place.
+      el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Person' }), el('div', { className: 'tr-taps', id: 'beam-person' })),
       el('div', { className: 'tr-pick' }, el('span', { className: 'tr-label', textContent: 'Station' }), el('div', { className: 'tr-taps', id: 'beam-station' })),
       el('div', { className: 'tr-energize' }, sliders, el('span', { className: 'tr-label', textContent: 'Energize: all three up' })),
       el('p', { className: 'ops-notice', id: 'beam-status' }),
@@ -565,17 +567,21 @@ function renderTransporter(trEl, { crew, targets, up, p, range, where = () => un
   taps(tr.querySelector('#beam-who'), crew.map((u) => [u.id, u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.station}`]), beamSel.who, (v) => { beamSel.who = v; });
   // Tap a destination to lock on; tap the locked one again to let go (always allowed).
   taps(tr.querySelector('#beam-ship'), ships.map((x) => [x.name, x.here ? `The ${x.name} (site to site)` : /^(Starbase|Deep Space) /.test(x.name) ? x.name : `The ${x.name}`, x.name === tr2.lock ? '' : reach(x)]), beamSel.ship, (v) => { send({ type: 'transporter-lock', ship: v === tr2.lock ? null : v }); });
+  const people = tr2.people || [];
+  taps(tr.querySelector('#beam-person'), people.map((x) => [x.id, `${x.name} · the ${x.ship}${x.where ? ` (${x.where})` : ''}`, x.id === tr2.person?.id ? '' : x.why || '']), tr2.person?.id, (v) => { send({ type: 'transporter-lock', person: v === tr2.person?.id ? null : v }); });
+  if (!people.length) tr.querySelector('#beam-person').append(el('span', { className: 'ops-hint', textContent: 'Nobody on sensors' }));
   taps(tr.querySelector('#beam-station'), stations.map((n) => [n, n]), beamSel.station, (v) => { beamSel.station = v; });
   const limit = lastNav?.own?.allocated?.transporter ?? 100;
   // The level-3 diagnostic: it must pass before anyone is beamed.
   const diag = tr2.diag || { state: 'passed' };
   tr.querySelector('#beam-diag').textContent = diag.state === 'passed' ? 'Level-3 diagnostic: passed' : diag.state === 'running' ? `Level-3 diagnostic: running (${diag.t} of ${diag.secs} s)` : 'Level-3 diagnostic: required before beaming';
   tr.querySelector('#beam-diag-run').disabled = diag.state === 'running' || !!tr2.fault;
-  const blocked = tr2.energizing ? `Energizing · 100% power` : tr2.fault ? `Transporter offline: ${tr2.fault}` : !tr2.lock ? 'No lock · tap a destination to lock on (transporter idle, no power drawn)'
+  const blocked = tr2.energizing ? `Energizing · 100% power` : tr2.fault ? `Transporter offline: ${tr2.fault}` : !tr2.lock ? 'No lock · tap a destination (or a person) to lock on (transporter idle, no power drawn)'
+    : tr2.person ? `Locked on ${tr2.person.name} aboard the ${tr2.person.ship} (${tr2.person.where}) · energize to beam them aboard${beamSel.station === 'Same station' ? ' to the transporter room' : ` to ${beamSel.station}`}`
     : limit < 100 ? `Locked on the ${tr2.lock} · limiter at ${limit}%: energizing needs 100% (ask Engineering)`
     : up && tr2.lock !== me.ship ? `Locked on the ${tr2.lock} · shields are up aboard the ${me.ship}`
     : `Locked on the ${tr2.lock} · ${p?.transporter ?? 0}% power (energizing takes 100% for ${tr2.secs || 5} s)`;
-  for (const r of tr.querySelectorAll('.tr-slider')) r.disabled = !crew.length || !tr2.lock || !!tr2.energizing || limit < 100 || !!tr2.fault || diag.state !== 'passed';
+  for (const r of tr.querySelectorAll('.tr-slider')) r.disabled = (!crew.length && !tr2.person) || !tr2.lock || !!tr2.energizing || limit < 100 || !!tr2.fault || diag.state !== 'passed';
   tr.querySelector('#beam-status').textContent = blocked;
   tr.querySelector('#beam-range').textContent = range != null ? `Transporter range ${Math.round(range)} units (sensor power ${p?.sensors ?? 100}%)` : '';
 }
@@ -585,10 +591,12 @@ function renderTransporter(trEl, { crew, targets, up, p, range, where = () => un
 let energizing = false;
 function energizeCheck() {
   const rs = [...document.querySelectorAll('.tr-slider')];
-  if (energizing || !rs.length || rs.some((r) => Number(r.value) < 95) || !beamSel.who || !beamSel.ship) return;
+  const person = lastNav?.own?.transporter?.person;
+  if (energizing || !rs.length || rs.some((r) => Number(r.value) < 95) || (!person && !beamSel.who) || !beamSel.ship) return;
   energizing = true;
   stationView?.energize();
-  send({ type: 'beam', who: beamSel.who, ...(beamSel.station !== 'Same station' ? { station: beamSel.station } : {}) });
+  // Locked on a person elsewhere: beam them aboard (to the station picked, else the transporter room).
+  send({ type: 'beam', ...(person ? {} : { who: beamSel.who }), ...(beamSel.station !== 'Same station' ? { station: beamSel.station } : {}) });
   setTimeout(() => { rs.forEach((r) => { r.value = 0; }); energizing = false; }, 900);
 }
 

@@ -1091,6 +1091,21 @@ const audioBytes = (page) => page.evaluate(async () => {
       if (refused) throw new Error(`${name} could not report aboard the ${ship}: ${refused.reason}`);
       return { msgs, send: (m) => sock.send(JSON.stringify(m)), close: () => sock.close(), nav: () => [...msgs].reverse().find((m) => m.type === 'nav') };
     };
+    // A transporter lock on a person aboard another vessel (Science can place them: the Defiant's
+    // shields are down), then beaming them aboard, to the transporter room.
+    {
+      const lwaxana = await crewWs('lwaxana', 'Defiant', 'Crew');
+      const chief2 = await crewWs('chief2', 'Enterprise', 'Transporter');
+      await waitFor(() => chief2.nav()?.own.transporter.people?.some((x) => x.id === id('lwaxana', 'Defiant') && !x.why && x.where === 'Crew'));
+      chief2.send({ type: 'transporter-lock', person: id('lwaxana', 'Defiant') });
+      await waitFor(() => chief2.nav()?.own.transporter.person?.ship === 'Defiant');
+      assert.equal(chief2.nav().own.transporter.lock, 'Defiant');
+      chief2.send({ type: 'beam' });
+      await waitFor(() => lwaxana.msgs.some((m) => m.type === 'registered' && m.ship === 'Enterprise' && m.station === 'Transporter'), 15000);
+      await waitFor(() => !chief2.nav()?.own.transporter.lock);
+      lwaxana.close(); chief2.close();
+      step('the Enterprise\'s transporter locked on lwaxana aboard the Defiant (located: its shields down) and beamed them aboard to the transporter room');
+    }
     const kira = await crewWs('kira', 'Defiant', 'Tactical');
     const obrien = await crewWs('obrien', 'Defiant', 'Engineering');
     await screen(carol, 'st-weapons');
