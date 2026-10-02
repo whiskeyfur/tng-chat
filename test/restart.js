@@ -70,10 +70,22 @@ async function look() {
     assert.equal(g.totals.A.max, 300);
     step(`a damaged Bus B (saved at 50%, now ${g.totals.B.condition}%) carries ${g.totals.B.max} of its 300`);
 
+    // A data link with Starbase 12 (it accepts by itself), to see it come back after the restart.
+    const opsWs = async () => { const w = new WebSocket(`ws://localhost:${PORT}`); const m = []; w.on('message', (x) => m.push(JSON.parse(x))); await new Promise((res) => w.on('open', res)); w.send(JSON.stringify({ type: 'operator', name: `ops${Date.now() % 1000}`, ship: 'Oldship' })); return { w, m, net: () => [...m].reverse().find((x) => x.type === 'roster')?.network || [] }; };
+    const waitFor = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return; await wait(100); } throw new Error('timed out'); };
+    let o = await opsWs();
+    await wait(500);
+    o.w.send(JSON.stringify({ type: 'link-request', ship: 'Starbase 12' }));
+    await waitFor(() => o.net().includes('Starbase 12'));
+    o.w.close();
     await wait(5500); // the relay hands the computer a copy every 5 s
     await stop(r); r = relay(); await wait(4000);
     assert.equal((await look()).docked, 'Starbase 47');
     step('still docked at Starbase 47 after the relay restarted');
+    o = await opsWs();
+    await waitFor(() => o.net().includes('Starbase 12'), 10000);
+    o.w.close();
+    step('the data link with Starbase 12 came back after the relay restarted');
 
     await stop(c); c = computer(); await wait(4000);
     assert.equal((await look()).docked, 'Starbase 47');

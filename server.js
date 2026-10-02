@@ -92,6 +92,8 @@ const shields = new Set();   // ship keys with shields up
 const hails = new Map();     // hail id -> { id, fromShip, toShip, caller (user id) }
 const links = new Set();     // data links: "shipKeyA|shipKeyB", sorted
 const hardLinks = new Set(); // those that are a docked ship's hard link to its starbase (ODN tied through the docking port)
+const pendingLinks = new Map(); // link key -> when it was saved: links waiting to be restored after a relay restart
+const LINK_WAIT_MS = 60000;
 const linkRequests = new Map(); // request id -> { id, fromShip, toShip }
 
 const clean = (s) => (typeof s === 'string' ? s.trim().replace(/\s+/g, ' ') : '');
@@ -1036,6 +1038,7 @@ function coreNav(c, key, nav) {
   if (!combat.get(key)?.loaded) {
     combat.set(key, { ...freshCombat(nav.combat), loaded: true });
     eng.set(key, freshEng(nav.eng, { cold: !nav.eng && !nav.warm }));
+    restoreLinks(key, nav.eng?.links);
     if (!classOf(key).warpCore) Object.assign(engOf(key), { core: 'ejected', antimatter: 0 }); // (a shuttle has no warp core: impulse and batteries)
     // A small craft brought up ready to go: wiring that fits its buses, and EPS taps no wider than they are.
     if (!nav.eng && nav.warm) {
@@ -2012,11 +2015,13 @@ for (const [name, sv] of Object.entries(baseSettings)) if (sv?.created && Number
   STARBASES.push({ name, x: sv.nav.x, y: sv.nav.y, created: true });
   const k = registerShip(name); BASE_KEYS.add(k); navState.set(k, { x: sv.nav.x, y: sv.nav.y, heading: 0, warp: 0, dest: null });
 }
+// (Their data links come back too, once the other ends are here.)
 // Where each starbase was left (it can move: impulse, or a tow), and its limiters.
 for (const b of STARBASES) {
   const sv = baseSettings[b.name], k = shipKey(b.name);
   if (Number.isFinite(sv?.nav?.x) && Number.isFinite(sv?.nav?.y)) setBasePos(k, sv.nav.x, sv.nav.y, sv.nav.heading);
   if (sv?.power && typeof sv.power === 'object') navState.get(k).power = { ...sv.power };
+  restoreLinks(k, sv?.eng?.links);
 }
 function saveBaseSettings() {
   // Each starbase: its settings, its grid, its condition, where it is and its limiters.
@@ -2032,7 +2037,9 @@ const savedEng = (k) => {
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, prefix: e.prefix, orderLog: e.orderLog, drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, prefix: e.prefix, orderLog: e.orderLog,
+    // Its open data links over subspace (hard links come back by themselves while docked and tied).
+    links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
   };
 };
@@ -2794,7 +2801,31 @@ const hardLine = (a, b) => present(a) && present(b) && dockedWith(a).includes(b)
 // ODN tied has a hard link to it (up whatever its relays, and Ops can't close
 // it); that ends only when the tie is cut or the ship undocks. Other links
 // drop when a vessel leaves the star system or a subspace relay is down.
+// Data links saved with each vessel come back when the relay restarts: once
+// both ends are here, if the link still holds (else dropped, saying why).
+function restoreLinks(k, names) {
+  if (!Array.isArray(names)) return;
+  for (const n of names) if (typeof n === 'string' && n) { const l = linkKey(k, shipKey(n)); if (!links.has(l)) pendingLinks.set(l, Date.now()); }
+}
 function linkTick() {
+  for (const [l, at] of [...pendingLinks]) {
+    const [a, b] = l.split('|');
+    if (links.has(l)) { pendingLinks.delete(l); continue; }
+    if (!present(a) || !present(b) || !navState.has(a) || !navState.has(b)) {
+      if (Date.now() - at > LINK_WAIT_MS) { pendingLinks.delete(l); for (const k of [a, b]) opLog(k, `the data link with the ${shipName(k === a ? b : a)} wasn't restored: it didn't come back`); }
+      continue;
+    }
+    pendingLinks.delete(l);
+    if (linkReach(a, b)) {
+      links.add(l);
+      for (const k of [a, b]) opLog(k, `data link with the ${shipName(k === a ? b : a)} restored`);
+      refreshNetworks([a, b]); broadcastAllOps();
+    } else {
+      const why = !subspaceOk(a, b) ? 'not in the same star system' : 'a subspace relay is down';
+      for (const k of [a, b]) opLog(k, `the data link with the ${shipName(k === a ? b : a)} wasn't restored: ${why}`);
+      console.log(`data link ${shipName(a)} - ${shipName(b)} not restored: ${why}`);
+    }
+  }
   for (const [k, e] of eng) {
     const b = e.docked && shipKey(e.docked), l = b && linkKey(k, b);
     if (!b || !hardLine(k, b) || hardLinks.has(l)) continue;
@@ -3558,6 +3589,7 @@ setInterval(() => {
       changed = true;
     }
     if (state() !== before || e.selfDestruct) { c.dirty = true; changed = true; enforcePower(k); }
+    { const sig = linkedTo(k).join(','); if (sig !== e.linkSig) { if (e.linkSig !== undefined) e.dirty = true; e.linkSig = sig; } } // (saved when its links change)
     if ((c.dirty || e.dirty) && combatTick % 5 === 0 && isBase(k)) { c.dirty = e.dirty = false; saveBaseSettings(); }
     if ((c.dirty || e.dirty) && combatTick % 5 === 0 && primaryCore.has(k)) {
       send(primaryCore.get(k), { type: 'core-set', ship: shipName(k), set: { combat: savedCombat(k), eng: savedEng(k) } });
