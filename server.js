@@ -2927,14 +2927,15 @@ function gridCommand(ws, msg) {
   // antimatter contained: a tank's containment while that tank holds antimatter, the AM bus's magnetic
   // containment while there's antimatter on the AM bus, the warp core's constriction while it runs, and
   // the Engineering console. Breakers, the crosslink and the EPS taps aren't touched.
-  if (msg.busAll && (msg.busAll.bus === 'all' || [...NODES, 'Deu', 'AM'].includes(msg.busAll.bus))) {
-    const on = !!msg.busAll.on, cols = msg.busAll.bus === 'all' ? [...NODES, 'Deu', 'AM'] : [msg.busAll.bus];
+  // (The ODN too: every console linked, or cut off but Engineering's and your own.)
+  if (msg.busAll && (msg.busAll.bus === 'all' || [...NODES, 'Deu', 'AM', 'ODN'].includes(msg.busAll.bus))) {
+    const on = !!msg.busAll.on, cols = msg.busAll.bus === 'all' ? ['ODN', ...NODES, 'Deu', 'AM'] : [msg.busAll.bus];
     // (Only what this vessel has: its stations' consoles, its class's systems.)
     const sysGone = (x) => (BASE_ONLY.includes(x) && !isBase(key)) || PHASER_ARRAYS.indexOf(x) >= arraysOf(key) || (x === 'transporter' && !isBase(key) && !classOf(key).transporter)
       || (WARP_DRIVE.includes(x) && (isBase(key) || !classOf(key).maxWarp)) || (x === 'spore' && (isBase(key) || !classOf(key).spore));
     const aboard = (k2) => (k2.startsWith('console:') ? hasStation(key, k2.slice(8)) : k2.startsWith('place:') ? placesOf(key).some((pl) => `place:${pl.name}` === k2) : k2.startsWith('system:') ? !sysGone(k2.slice(7)) : true);
     const amOnBus = Object.keys(TANKS.am).some((n) => e.tankCfg[`am:${n}`]?.tied && tankLevel(e, 'am', n) > 0);
-    const keep = (k2) => (k2 === 'console:Engineering' ? 'the Engineering console'
+    const keep = (k2) => (k2 === 'console:Engineering' ? 'the Engineering console' : k2 === `console:${placeOf(ws)}` ? 'your own console'
       : k2 === 'containment' && tankLevel(e, 'am', 'main') > 0 ? 'antimatter containment (antimatter in the pods)'
       : Object.entries(AM_CONTAIN).find(([n, c]) => c === k2 && tankLevel(e, 'am', n) > 0) ? `${TANKS.am[Object.entries(AM_CONTAIN).find(([, c]) => c === k2)[0]].label} containment (antimatter in it)`
       : k2 === 'sub:constriction' && e.core !== 'offline' && e.core !== 'ejected' ? 'the warp core\'s constriction (the core is running)'
@@ -2943,6 +2944,13 @@ function gridCommand(ws, msg) {
     // (What's kept tied keeps its way to the bus too: the conduits above it.)
     const keptPaths = new Set(Object.keys(e.ties).filter((k2) => keep(k2)).flatMap((k2) => conduitsOf(key, k2)));
     for (const X of cols) {
+      if (X === 'ODN') {
+        for (const st of [...STATIONS, OPS_STATION].filter((s2) => s2 === OPS_STATION || hasStation(key, s2))) {
+          if (!on && (st === 'Engineering' || st === placeOf(ws))) { if (e.odn[st] !== false) kept.add(st === 'Engineering' ? "Engineering's ODN link" : 'your own ODN link'); continue; }
+          if ((e.odn[st] !== false) !== on) { e.odn[st] = on; changed.push(X); }
+        }
+        continue;
+      }
       if (X === 'Deu' || X === 'AM') {
         const bus = X === 'Deu' ? 'deu' : 'am';
         for (const n of Object.keys(TANKS[bus])) { const cfg = e.tankCfg[`${bus}:${n}`]; if (cfg && cfg.tied !== on) { cfg.tied = on; changed.push(X); } }
@@ -5264,7 +5272,7 @@ let adminSeq = 0;
 // The vessels as the admin page shows them: class, crew, ops, where.
 // (The classes this relay has loaded, for the admin page: did a reload apply a design?)
 const adminClasses = () => Object.fromEntries(Object.entries(CLASSES).map(([id, c]) => [id, { name: c.name, bus: c.bus, eps: c.eps }]));
-const adminFleet = () => networkGraph().ships.map((v) => ({ name: v.name, class: v.class, starbase: !!v.starbase, crew: v.crew, ops: v.ops, computer: v.computer, x: v.x, y: v.y }));
+const adminFleet = () => networkGraph().ships.map((v) => ({ name: v.name, class: v.class, classId: navState.has(shipKey(v.name)) && !v.starbase ? classId(shipKey(v.name)) : null, starbase: !!v.starbase, crew: v.crew, ops: v.ops, computer: v.computer, x: v.x, y: v.y }));
 // The account API: GET me; POST register, login, logout (JSON). A login sets the session
 // cookie (HttpOnly, SameSite=Lax); a page from another origin gets the token to send by message.
 function accountRequest(req, res, what) {
@@ -5316,6 +5324,7 @@ function adminRequest(ws, msg) {
     if (ws.account?.role !== 'admin') return send(ws, { type: 'admin-status', error: 'refused: the admin page needs an admin login' });
   }
   if (msg.action === 'settings' || msg.action === 'settings-save') return adminSettings(ws, msg);
+  if (msg.action === 'set-class') return adminSetClass(ws, msg);
   if (['users', 'user', 'user-create'].includes(msg.action)) return adminUsers(ws, msg);
   if (msg.action === 'create') return adminCreate(ws, msg);
   if (msg.action === 'designs' || msg.action === 'design-save') return adminDesigns(ws, msg);
@@ -5353,6 +5362,23 @@ async function adminSettings(ws, msg) {
   SETTINGS.save(change);
   console.log(`admin: settings saved (${Object.keys(change).join(', ')})`);
   reply({ saved: true, moving });
+}
+// A ship's class changed from the admin page (one whose save lost it, say): its design from now
+// on, its power paths reconciled as on a design change, and its computer saves it.
+function adminSetClass(ws, msg) {
+  const k = shipKey(clean(msg.name || '')), cls = String(msg.cls || '');
+  const note = (ok, text) => send(ws, { type: 'admin-created', ok, text });
+  if (!navState.has(k) || isBase(k) || isRelay(k)) return note(false, 'no such ship');
+  if (!CLASSES[cls]) return note(false, `no class ${cls}`);
+  const paths = eng.has(k) ? savedEng(k).paths : null;
+  shipClasses.set(k, cls);
+  if (eng.has(k)) { engOf(k).restore = { paths, newConduits: [] }; reconcileConduits(k); }
+  flowCache.delete(k);
+  const core = primaryCore.get(k);
+  if (core) send(core, { type: 'core-primary', ship: shipName(k), primary: true, nav: coreCopy(k) });
+  broadcastShips();
+  console.log(`admin: the ${shipName(k)} is ${CLASSES[cls].name} class now`);
+  note(true, `the ${shipName(k)} is ${CLASSES[cls].name} class now`);
 }
 // The user manager: every account (role, status, created, last login, characters it has used
 // and those aboard now); approve or reject, promote or demote, disable or enable, a new

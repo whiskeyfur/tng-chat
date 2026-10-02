@@ -464,8 +464,9 @@
   window.PLACES = window.PLACES || [];
   // Things grouped by where their station is, in deck order: [{ name, label, items }]
   // (in a place, by seat; the same station keeps the order given).
-  window.byPlace = (items, stationOf = (x) => x) => {
-    const PLACES = window.PLACES || [], PLACE_ORDER = PLACES.flatMap((p) => p.stations);
+  // (places: another vessel's design, when it's another vessel's stations; else this one's.)
+  window.byPlace = (items, stationOf = (x) => x, places = window.PLACES) => {
+    const PLACES = places || [], PLACE_ORDER = PLACES.flatMap((p) => p.stations);
     const at = (x) => PLACES.findIndex((p) => p.stations.includes(stationOf(x)));
     const groups = [...PLACES.map((p) => ({ name: p.name, deck: p.deck, label: `Deck ${p.deck} · ${p.name}`, items: [] })), { name: 'Elsewhere', label: 'Elsewhere', items: [] }];
     for (const x of items) groups[at(x) < 0 ? PLACES.length : at(x)].items.push(x);
@@ -474,7 +475,7 @@
   };
   // Station lists as LCARS bars, one a place: a rounded cap, "Deck N - Place", its
   // stations' taps, a rounded cap (wrapping onto the next line, caps only at the ends).
-  window.placeBars = (items, stationOf, render) => byPlace(items, stationOf).map((g) => {
+  window.placeBars = (items, stationOf, render, places) => byPlace(items, stationOf, places).map((g) => {
     const bar = document.createElement('div');
     bar.className = 'place-bar';
     bar.dataset.place = g.name;
@@ -483,7 +484,7 @@
     return bar;
   });
   // The same as elements: a heading (a <p>, or the tag given) before each place's own.
-  window.placeNodes = (items, stationOf, render, tag = 'p') => byPlace(items, stationOf).flatMap((g) => {
+  window.placeNodes = (items, stationOf, render, tag = 'p', places) => byPlace(items, stationOf, places).flatMap((g) => {
     const head = document.createElement(tag);
     head.className = 'place-head';
     head.textContent = g.label;

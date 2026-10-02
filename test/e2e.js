@@ -2047,9 +2047,14 @@ const audioBytes = (page) => page.evaluate(async () => {
       await waitFor(() => { const t = eng.nav().own.grid.ties; return t.containment.length > 0 && t['console:Engineering'].length > 0 && !t['console:Helm'].length && !t['system:shields'].length && !t['system:atmosphere'].length; });
       eng.send({ type: 'grid', busAll: { bus: 'all', on: true } });
       await waitFor(() => { const t = eng.nav().own.grid.ties; return t['console:Helm'].length && t['system:shields'].includes('EPS'); });
+      // The consoles' ODN links too: all off cuts them all but Engineering's (yours); all on links them.
+      eng.send({ type: 'grid', busAll: { bus: 'ODN', on: false } });
+      await waitFor(() => { const o = eng.nav().own.grid.odn; return o.Engineering !== false && o.Helm === false && o.Tactical === false; });
+      eng.send({ type: 'grid', busAll: { bus: 'ODN', on: true } });
+      await waitFor(() => Object.values(eng.nav().own.grid.odn).every((v) => v !== false));
       eng.close();
       await stopComputer(bc);
-      step('All on / All off: Bus A all off kept only the pods\' containment (antimatter in them) and the Engineering console; all on tied it all back; All buses off left only what keeps antimatter contained; All buses on tied everything again');
+      step('All on / All off: Bus A all off kept only the pods\' containment (antimatter in them) and the Engineering console; all on tied it all back; All buses off left only what keeps antimatter contained; All buses on tied everything again; under the ODN, all off cut every console link but Engineering, and all on linked them again');
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;

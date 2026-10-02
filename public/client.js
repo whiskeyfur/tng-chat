@@ -19,11 +19,17 @@ let navPanel = null; // Helm or Science navigation controls (nav.js)
 let ships = [];     // [{ name, ops, shields }]
 // Where consoles are aboard (the places of the ship's design, from config/ships via the relay)
 // and the bridge's seats (the room mic): for my ship, or the one picked to sign in to.
+// (Remote control: the vessel controlled.)
 function applyPlaces() {
-  const pick = (me?.ship || document.getElementById('ship')?.value || '').toLowerCase();
+  const pick = (controllingVessel || me?.ship || document.getElementById('ship')?.value || '').toLowerCase();
   const d = window.DESIGNS?.[ships.find((s) => s.name.toLowerCase() === pick)?.classId] || window.DESIGNS?.galaxy;
   window.PLACES = d?.places || [];
   window.SEATS = d?.seats || {};
+}
+// Another vessel's design: its places, and its stations (null: all of them, a starbase's).
+function vesselDesign(name) {
+  const v = ships.find((s) => s.name.toLowerCase() === String(name || '').toLowerCase());
+  return { places: window.DESIGNS?.[v?.classId]?.places || [], stations: v && !v.starbase ? v.stations || null : null };
 }
 let relayName = 'Comm relay';   // the relay's name, from its hello
 let opsKeyRequired = true;      // whether the relay asks ops for an authorization code (from its hello)
@@ -467,14 +473,15 @@ function fillReassign() {
   const own = all.filter((n) => n !== 'Spore Lab' || lastNav?.own?.grid?.spore);
   $('station-taps').replaceChildren(...placeBars(own, (n) => n, (n) => tap(n)));
   const across = lastNav?.own?.grid?.dockedWith || [];
-  dockSig = JSON.stringify([across, !!lastNav?.own?.grid?.spore]);
+  dockSig = JSON.stringify([across, !!lastNav?.own?.grid?.spore, across.map((v) => vesselDesign(v).places.length)]);
   $('dock-stations').replaceChildren(...across.map((v) => {
     const box = document.createElement('div');
     box.className = 'dock-stations';
     box.dataset.vessel = v;
     box.append(Object.assign(document.createElement('h3'), { className: 'ops-subhead', textContent: `Across the dock: ${/^(Starbase|Deep Space) /.test(v) ? v : `the ${v}`}` }),
       Object.assign(document.createElement('div'), { className: 'tr-taps' }));
-    box.lastChild.append(...placeBars(all.filter((n) => n !== 'Spore Lab'), (n) => n, (n) => tap(n, v)));
+    const d = vesselDesign(v);
+    box.lastChild.append(...placeBars(all.filter((n) => (d.stations ? n === 'Operations' || d.stations.includes(n) : n !== 'Spore Lab')), (n) => n, (n) => tap(n, v), d.places));
     return box;
   }));
   $('reassign-form').hidden = true;
@@ -655,10 +662,12 @@ function renderTransporter(trEl, { crew, targets, up, p, range, where = () => un
     if (up) return 'our shields up';
     return '';
   };
-  const stations = ['Same station', ...STATION_NAMES.filter((n) => n !== 'Operations')];
+  // (To: the locked vessel's stations, by its places.)
+  const dest = vesselDesign(tr2.lock || me.ship);
+  const stations = ['Same station', ...STATION_NAMES.filter((n) => n !== 'Operations' && (!dest.stations || dest.stations.includes(n)))];
   if (!stations.includes(beamSel.station)) beamSel.station = 'Same station';
   // (Station taps: grouped by where they are aboard.)
-  const taps = (box, items, isOn, set, places = false) => {
+  const taps = (box, items, isOn, set, places = false, design = window.PLACES) => {
     const tapOf = ([value, text, why]) => {
       const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: why ? `${text} · ${why}` : text });
       b.dataset.value = value;
@@ -667,13 +676,13 @@ function renderTransporter(trEl, { crew, targets, up, p, range, where = () => un
       b.onclick = () => { set(value); rerender(); };
       return b;
     };
-    box.replaceChildren(...(places ? [...items.filter(([v]) => v === 'Same station').map(tapOf), ...placeNodes(items.filter(([v]) => v !== 'Same station'), ([v]) => v, tapOf)] : items.map(tapOf)));
+    box.replaceChildren(...(places ? [...items.filter(([v]) => v === 'Same station').map(tapOf), ...placeNodes(items.filter(([v]) => v !== 'Same station'), ([v]) => v, tapOf, 'p', design)] : items.map(tapOf)));
   };
   const vesselName = (n, here) => (here ? `The ${n} (here)` : /^(Starbase|Deep Space|Utopia) /.test(n) ? n : `The ${n}`);
   taps(tr.querySelector('#beam-from-ship'), sources.map((v) => [v.ship, vesselName(v.ship, v.here)]), (v) => v === beamSel.fromShip,
     (v) => { if (v !== beamSel.fromShip) { beamSel.fromShip = v; beamSel.fromStation = null; beamSel.who.clear(); } });
   taps(tr.querySelector('#beam-from-station'), (src?.stations || []).map((x) => [x.station, `${x.station} (${x.people.length})`]), (v) => v === beamSel.fromStation,
-    (v) => { if (v !== beamSel.fromStation) { beamSel.fromStation = v; beamSel.who.clear(); } }, true);
+    (v) => { if (v !== beamSel.fromStation) { beamSel.fromStation = v; beamSel.who.clear(); } }, true, vesselDesign(src?.ship || me.ship).places);
   if (!src?.stations.length) tr.querySelector('#beam-from-station').append(el('span', { className: 'ops-hint', textContent: 'Nobody aboard to beam' }));
   // People: one or more (tap to add or remove).
   taps(tr.querySelector('#beam-who'), people.map((u) => [u.id, u.id === me.id ? `${u.name} (you)` : u.name]), (v) => beamSel.who.has(v),
@@ -681,7 +690,7 @@ function renderTransporter(trEl, { crew, targets, up, p, range, where = () => un
   // Tap a destination to lock on; tap the locked one again to let go (always allowed).
   taps(tr.querySelector('#beam-ship'), ships.map((x) => [x.name, x.here ? `The ${x.name} (site to site)` : vesselName(x.name), x.name === tr2.lock ? '' : reach(x)]), (v) => v === tr2.lock,
     (v) => { send({ type: 'transporter-lock', ship: v === tr2.lock ? null : v }); });
-  taps(tr.querySelector('#beam-station'), stations.map((n) => [n, n]), (v) => v === beamSel.station, (v) => { beamSel.station = v; }, true);
+  taps(tr.querySelector('#beam-station'), stations.map((n) => [n, n]), (v) => v === beamSel.station, (v) => { beamSel.station = v; }, true, dest.places);
   const limit = lastNav?.own?.allocated?.transporter ?? 100;
   // The level-3 diagnostic: it must pass before anyone is beamed.
   const diag = tr2.diag || { state: 'passed' };
@@ -1162,7 +1171,7 @@ function askPrefix(ship) {
 }
 function renderVesselBar(remote) {
   const bar = $('vessel-bar');
-  controllingVessel = remote?.controlling || null;
+  if ((remote?.controlling || null) !== controllingVessel) { controllingVessel = remote?.controlling || null; applyPlaces(); } // (its places, not ours)
   const vessels = remote?.vessels || [];
   const sig = JSON.stringify([vessels, remote?.controlling, me?.station]);
   bc.setAlert('remote', remote?.controlling ? `Remote control: the ${remote.controlling}'s ${me.station}` : null, { level: 'yellow' });
@@ -1445,7 +1454,7 @@ function renderCombat() {
     const busAllRow = () => {
       const pair = (bus) => [small('All on', `bus-all-on-${bus}`, () => send({ type: 'grid', busAll: { bus, on: true } })), small('All off', `bus-all-off-${bus}`, () => send({ type: 'grid', busAll: { bus, on: false } }), true)];
       return el('tr', { className: 'grid-busall', id: 'grid-busall' }, el('th', { scope: 'row', textContent: 'All buses' }), el('td', { className: 'grid-controls' }, ...pair('all')),
-        ...COLS.map((n) => (n === 'ODN' ? el('td') : el('td', { className: 'grid-busall-cell' }, ...pair(n)))));
+        ...COLS.map((n) => el('td', { className: 'grid-busall-cell' }, ...pair(n))));
     };
     const small = (text, id, onclick, alert) => { const b = button(text, id, onclick, alert ? 'lcars-button--alert' : ''); b.classList.add('grid-mini'); return b; };
     const subRow = (name, level, note) => ties(`sub:${name}`, grid.subsystems[name].name, `sub:${name}`, { level, note: note ?? (grid.subOk[name] === false ? 'NO POWER' : '') });
@@ -2241,7 +2250,7 @@ async function onMessage(msg) {
       renderCrewPanels();
       renderCombat();
       renderServices();
-      if (JSON.stringify([msg.own?.grid?.dockedWith || [], !!msg.own?.grid?.spore]) !== dockSig && !msg.remote?.controlling) fillReassign();
+      if (JSON.stringify([msg.own?.grid?.dockedWith || [], !!msg.own?.grid?.spore, (msg.own?.grid?.dockedWith || []).map((v) => vesselDesign(v).places.length)]) !== dockSig && !msg.remote?.controlling) fillReassign();
       renderVesselBar(msg.remote);
       break;
     case 'course-plotted':

@@ -41,6 +41,7 @@
   }
 
   // Fleet: every vessel (the relay's picture) and its computer (the supervisor's).
+  let classOpen = null; // (the ship whose class taps are open)
   function renderFleet() {
     const fleet = status.fleet || [], computers = new Map((status.ships || []).map((x) => [x.ship, x]));
     $('admin-fleet').replaceChildren(
@@ -54,13 +55,20 @@
       }),
       ...fleet.map((v) => {
         const c = computers.get(v.name);
-        const tr = el('tr', {}, el('td', { textContent: v.name }), el('td', { textContent: v.starbase ? 'Starbase' : v.class || '' }), el('td', { textContent: String(v.crew ?? '') }),
+        const tr = el('tr', {}, el('td', { textContent: v.name }), el('td', {}, v.starbase || !v.classId ? (v.starbase ? 'Starbase' : v.class || '') : btn(`${v.class} ▸`, `admin-class-${v.name}`, () => { classOpen = classOpen === v.name ? null : v.name; renderFleet(); })), el('td', { textContent: String(v.crew ?? '') }),
           el('td', { textContent: v.ops ? 'manned' : '—' }), el('td', { textContent: v.x != null ? `${v.x}, ${v.y}` : '' }),
           el('td', { textContent: v.starbase ? 'automated (the relay)' : c ? `${c.connected ? 'connected' : 'not connected'}${c.primary?.length ? ', flying it' : ''} · ${ago(c.since)}` : v.computer ? 'connected (not the supervisor\'s)' : 'offline' }),
           el('td', {}, ...(c ? [btn('Restart', `admin-restart-${v.name}`, () => send({ type: 'admin', action: 'restart-ship', ship: v.name }))] : [])));
         tr.dataset.vessel = v.name;
-        return tr;
-      }));
+        // (Its class: a tap opens the classes as taps, under it; one picked is its design from then on.)
+        if (classOpen !== v.name) return tr;
+        const pick = el('tr', { className: 'admin-class-pick' }, el('td', { colSpan: 7 }, pillBar(`${v.name}: class`, Object.entries(status.classes || {}).map(([id, c]) => {
+          const b = tap(c.name || id, id, id === v.classId, () => { if (id !== v.classId && confirm(`Make the ${v.name} a ${c.name || id}? Its design (places, systems, limits) changes now.`)) send({ type: 'admin', action: 'set-class', name: v.name, cls: id }); classOpen = null; renderFleet(); });
+          b.id = `admin-class-${v.name}-${id}`;
+          return b;
+        }))));
+        return [tr, pick];
+      }).flat());
   }
 
   // Create ship: a name; a class (taps); for a ship, the starbase it's parked at (taps);

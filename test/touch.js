@@ -21,6 +21,7 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     run(['server.js']);
     await wait(800);
     run(['tools/shipcore.js', '--relay', `ws://localhost:${PORT}`, '--data', DATA, '--warm', '--class', 'crossfield', 'Tabletship']); // (a Crossfield, docked at a starbase: the spore drive's rows, and its Connections)
+    run(['tools/shipcore.js', '--relay', `ws://localhost:${PORT}`, '--data', DATA, '--warm', '--class', 'runabout', 'Tundra']); // (a runabout: another vessel's places)
     await wait(2500);
     browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
     // A tablet held landscape, short enough that the grid and the sidebar overflow.
@@ -44,6 +45,23 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     await page.click('#signin-ships button[data-ship="Tabletship"]');
     await page.click('#signin-unassigned button[data-station="Engineering"]');
     await page.click('#register-go');
+    // Another vessel's stations by its own places: the Tundra (a runabout) across the dock, as the
+    // transporter's destination, and under remote control, never this Crossfield's decks.
+    await page.waitForFunction(() => window.__nav?.last?.own?.grid && ships.some((v) => v.name === 'Tundra' && v.classId === 'runabout'));
+    const runabout = await page.evaluate(() => window.DESIGNS.runabout.places.map((pl) => pl.name));
+    const across = await page.evaluate(() => {
+      lastNav = { ...lastNav, own: { ...lastNav.own, grid: { ...lastNav.own.grid, dockedWith: ['Tundra'] } } };
+      fillReassign();
+      const box = document.querySelector('#dock-stations [data-vessel="Tundra"]');
+      return { places: [...box.querySelectorAll('.place-bar')].map((b) => b.dataset.place), stations: [...box.querySelectorAll('button[data-station]')].map((b) => b.dataset.station) };
+    });
+    assert.ok(across.places.length && across.places.every((pl) => runabout.includes(pl)), `across the dock: the runabout's places only (${across.places})`);
+    assert.ok(!across.stations.includes('Captain') && !across.stations.includes('Brig'), `the runabout's stations only (${across.stations})`);
+    const controlled = await page.evaluate(() => { renderVesselBar({ controlling: 'Tundra', vessels: ['Tundra'], home: 'Tabletship' }); const v = window.PLACES.map((pl) => pl.name); renderVesselBar({ vessels: ['Tundra'], home: 'Tabletship' }); return [v, window.PLACES.map((pl) => pl.name)]; });
+    assert.deepEqual(controlled[0], runabout, 'remote control: the controlled vessel\'s places');
+    assert.ok(controlled[1].includes('Spore Propulsion Laboratory'), 'back home: the Crossfield\'s own');
+    await page.evaluate(() => { lastNav = { ...lastNav, own: { ...lastNav.own, grid: { ...lastNav.own.grid, dockedWith: [] } } }; fillReassign(); });
+    step(`the Tundra (a runabout): across the dock and under remote control, its own places (${across.places.join(', ')}) and stations (${across.stations.join(', ')}), not the Crossfield's`);
     // The power grid: its panel body scrolls with a drag.
     await page.waitForSelector('#grid-table', { state: 'attached' });
     await page.evaluate(() => document.querySelector('[data-screen-tab="st-grid"]')?.click());
