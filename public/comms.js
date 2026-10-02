@@ -127,13 +127,14 @@
           const station = document.createElement('small');
           // Species and gender come only for people in the same place.
           const inPerson = [u.species, u.gender].filter(Boolean).join(', ');
-          station.textContent = `${isHome ? u.station : `${u.station}, ${u.ship}`}${inPerson ? ` · ${inPerson}` : ''}${u.sickbay ? ' · sickbay' : ''}${u.confined ? ' · confined' : ''}`;
+          station.textContent = `${isHome ? u.station : `${u.station}, ${u.ship}`}${inPerson ? ` · ${inPerson}` : ''}${u.hologram ? ' · hologram' : ''}${u.sickbay ? ' · sickbay' : ''}${u.confined ? ' · confined' : ''}`;
           name.append(station);
           const btn = document.createElement('button');
           btn.type = 'button';
           btn.className = 'lcars-button lcars-button--pill';
           btn.textContent = u.station === 'Operations' ? 'Call ops' : 'Call';
-          btn.disabled = voice.state !== 'idle';
+          btn.disabled = voice.state !== 'idle' || !!u.hologram;
+          if (u.hologram) btn.title = 'a hologram: no comm badge';
           btn.onclick = () => voice.placeCall(u);
           const msgBtn = document.createElement('button');
           msgBtn.type = 'button';
@@ -143,6 +144,7 @@
           msgBtn.setAttribute('aria-pressed', String(recipients.has(u.id)));
           msgBtn.onclick = () => { if (recipients.has(u.id)) recipients.delete(u.id); else recipients.add(u.id); renderDirectory(); renderCompose(); };
           if (textBlocked) { msgBtn.disabled = true; msgBtn.title = textBlocked; }
+          if (u.hologram) { msgBtn.disabled = true; msgBtn.title = 'a hologram: no comm badge'; }
           li.append(name, btn, msgBtn);
           ul.append(li);
         }

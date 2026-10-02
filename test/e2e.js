@@ -15,6 +15,7 @@ process.env.PORT = process.env.PORT || '8099';
 process.env.BEAM_SECS = process.env.BEAM_SECS || '2'; // the transporter energizes this long (5 s in play)
 process.env.RESERVE_SECS = process.env.RESERVE_SECS || '3';
 process.env.STARBASES_FILE = process.env.STARBASES_FILE || require('path').join(require('os').tmpdir(), `tng-chat-starbases-${process.pid}.json`); // (never the live file)
+process.env.EMH_TREAT_SECS = process.env.EMH_TREAT_SECS || '4'; // the holographic doctor treats a patient this long (60 s in play)
 process.env.SPORE_CHARGE_SECS = process.env.SPORE_CHARGE_SECS || '3'; // a spore jump charges this long (10 s in play)
 process.env.PREFIX_LOCK_SECS = process.env.PREFIX_LOCK_SECS || '2'; // a wrong command prefix three times locks out this long (60 s in play)
 process.env.DRYDOCK_RELEASE_SECS = process.env.DRYDOCK_RELEASE_SECS || '3'; // release from drydock (30 s in play)
@@ -1752,7 +1753,7 @@ const audioBytes = (page) => page.evaluate(async () => {
       assert.deepEqual([down.core, down.ties.containment, down.ties.dock, down.ties['console:Engineering']], ['offline', [], [], []]);
       step('automation: Shutdown brought the Lexington back to cold iron, its antimatter and deuterium offloaded to the starbase');
       // (Ops' own console lists the panels it can automate: never Ops itself.)
-      assert.deepEqual(await op.$$eval('#automation-list li[data-panel]', (ls) => ls.map((l) => l.dataset.panel)), ['engineering', 'lifeSupport', 'tactical', 'science', 'transporter', 'comms', 'hangar']);
+      assert.deepEqual(await op.$$eval('#automation-list li[data-panel]', (ls) => ls.map((l) => l.dataset.panel)), ['engineering', 'lifeSupport', 'tactical', 'science', 'transporter', 'comms', 'hangar', 'medical']);
       lops.close(); scotty3.close();
       await stopComputer(lc);
     }
@@ -1886,6 +1887,31 @@ const audioBytes = (page) => page.evaluate(async () => {
       await troi.waitForSelector('#room-mic[aria-pressed="false"]');
       for (const page of [troi, crusher, ogawa]) await page.close();
       step('the room mic: troi at Bridge 1 spoke and crusher at Helm heard her, panned left and fainter (seats on the bridge); ogawa in sickbay did not; crusher walking off the bridge stopped hearing her');
+    }
+
+    // The holographic doctor: Medical activates it; it greets, shows in the rosters as a hologram,
+    // answers Medical's readiness check, treats and discharges a patient; without power to its
+    // holo-emitters it goes offline.
+    {
+      const bones = await crewWs('mccoy', 'Enterprise', 'Medical');
+      const yeoman = await crewWs('rand2', 'Enterprise', 'Crew');
+      const kirk = await crewWs('kirk', 'Enterprise', 'Captain');
+      const yid = [...yeoman.msgs].reverse().find((m) => m.type === 'registered').id;
+      bones.send({ type: 'sickbay', who: yid, on: true });
+      await waitFor(() => yeoman.msgs.some((m) => m.type === 'notice' && /you are in sickbay/.test(m.text)));
+      bones.send({ type: 'emh', on: true });
+      await waitFor(() => bones.msgs.some((m) => m.type === 'notice' && /The Doctor: Please state the nature of the medical emergency/.test(m.text)), 15000);
+      await waitFor(() => [...yeoman.msgs].reverse().find((m) => m.type === 'users')?.users.some((u) => u.name === 'The Doctor' && u.hologram && u.station === 'Medical' && u.ship === 'Enterprise'));
+      kirk.send({ type: 'readiness', dept: 'Medical' });
+      await waitFor(() => kirk.nav()?.own.readiness?.Medical?.ready?.includes('The Doctor'), 15000);
+      await waitFor(() => yeoman.msgs.some((m) => m.type === 'notice' && /The Doctor: you are discharged from sickbay, fit for duty/.test(m.text)), 20000);
+      laforge.send({ type: 'grid', ties: { 'sub:holoEmitters': [] } });
+      await waitFor(() => bones.msgs.some((m) => m.type === 'notice' && /EMH offline \(no power to the holo-emitters\)/.test(m.text)), 15000);
+      await waitFor(() => !kirk.nav()?.own.automation?.medical);
+      await waitFor(() => ![...yeoman.msgs].reverse().find((m) => m.type === 'users')?.users.some((u) => u.name === 'The Doctor'));
+      laforge.send({ type: 'grid', ties: { 'sub:holoEmitters': ['B'] } });
+      bones.close(); yeoman.close(); kirk.close();
+      step('the holographic doctor: Medical activated it; it asked the nature of the medical emergency, showed in the rosters as a hologram, answered the readiness check, treated and discharged a patient; untied, its holo-emitters took it offline');
     }
 
     // The antimatter bus: without its magnetic containment, or its transfer power, nothing moves on it;

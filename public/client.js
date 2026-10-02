@@ -556,7 +556,7 @@ function renderShipState() {
   bc.setAlert('alert', alert === 'green' ? null : `${{ red: 'Red', yellow: 'Yellow', black: 'Black' }[alert] || 'Yellow'} alert`, { level: alert });
   if (!stationView) return;
   const up = !!ownShip()?.shields;
-  const crew = comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station !== 'Operations');
+  const crew = comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && u.station !== 'Operations' && !u.hologram);
   const targets = ships.filter((s) => s.computer && s.name.toLowerCase() !== me.ship.toLowerCase());
   const range = lastNav?.ranges?.transporter;
   const strength = lastNav?.own?.combat?.shield;
@@ -907,9 +907,13 @@ function renderCrewPanels() {
 
   // Medical: sickbay and life signs.
   const med = document.querySelector('[data-medical]');
-  if (med && changed(med, crewSig, ownPower()?.lifeSupport)) {
+  const emhOn = !!lastNav?.own?.automation?.medical;
+  if (med && changed(med, crewSig, ownPower()?.lifeSupport, emhOn)) {
     const p = ownPower();
     med.replaceChildren(
+      el('div', { className: 'st-control' },
+        el('p', { className: 'st-state', id: 'emh-state', textContent: emhOn ? 'Emergency medical hologram: active' : 'Emergency medical hologram: off' }),
+        button(emhOn ? 'Deactivate EMH' : 'Activate EMH', () => send({ type: 'emh', on: !emhOn }), emhOn ? '' : 'lcars-button--alert')),
       el('p', { className: 'ops-hint', textContent: p ? `Life support ${p.lifeSupport}%${p.lifeSupport < 50 ? ': crew at risk' : ''}` : '' }),
       el('ul', { className: 'st-list st-patients' }, ...crew.map((u) => {
         const li = el('li', {}, `${u.name}${u.id === me.id ? ' (you)' : ''}`, el('span', { textContent: `${u.station} · ${status(u)}` }),
@@ -1983,7 +1987,10 @@ async function onMessage(msg) {
     case 'nav':
       lastNav = msg;
       // An automated panel at this station: a bar says so (a tap here by hand takes it back).
-      { const mine = Object.values(msg.own?.automation || {}).filter((a) => a.station === me?.station);
+      { const all = Object.entries(msg.own?.automation || {}).filter(([, a]) => a.station === me?.station);
+        // (The holographic doctor has its own bar: it works alongside Medical, it doesn't take the console.)
+        const emh = all.find(([p]) => p === 'medical')?.[1], mine = all.filter(([p]) => p !== 'medical').map(([, a]) => a);
+        bc.setAlert('emh', emh ? `EMH active: ${emh.status || 'running'}` : null, { level: 'yellow' });
         bc.setAlert('automation', mine.length ? `Automation (Ops): ${mine.map((a) => `${a.name}${typeof a.mode === 'string' ? ` ${a.mode}` : ''}: ${a.status || 'running'}`).join(' · ')}. A tap here by hand takes it over.` : null, { level: 'yellow' }); }
       // The brig's force field changes which stations can be walked to.
       if (!!msg.own?.grid?.brigSealed !== !!window.__brigSealed) { window.__brigSealed = !!msg.own?.grid?.brigSealed; fillReassign(); }

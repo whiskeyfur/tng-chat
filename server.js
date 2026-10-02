@@ -167,10 +167,12 @@ function broadcastCrew(key) {
   scheduleNav();
   const net = network(key);
   const everyone = [...net].flatMap(crewOf).sort((a, b) => a.ship.localeCompare(b.ship) || a.name.localeCompare(b.name));
+  // (The holographic doctor, where one is active: in rosters and the directory, not to be called.)
+  const doctors = [...net].filter(emhActive).map((k) => ({ id: `emh@${k}`, name: 'The Doctor', ship: shipName(k), station: 'Medical', title: 'The Doctor', species: 'Hologram', hologram: true }));
   for (const k of net) {
     const ops = opsOf(k).length > 0;
     for (const u of crewOf(k)) {
-      send(u, { type: 'users', users: everyone.map((x) => seenBy(u, x)), ops, network: [...net].map(shipName).sort(), hardLinks: linkedTo(k).filter((o) => hardLinks.has(linkKey(k, o))).map(shipName) });
+      send(u, { type: 'users', users: [...everyone.map((x) => seenBy(u, x)), ...doctors], ops, network: [...net].map(shipName).sort(), hardLinks: linkedTo(k).filter((o) => hardLinks.has(linkKey(k, o))).map(shipName) });
       sendLibrary(u);
     }
     broadcastOps(k);
@@ -1344,7 +1346,7 @@ const DEPARTMENTS = ['Operations', 'Helm', 'Tactical', 'Security', 'Engineering'
 const readiness = new Map(); // ship key -> { dept -> { id, pending: Set, ready: Set, at } }
 function readinessView(k) {
   const r = readiness.get(k) || {};
-  const names = (ids) => [...ids].map((id) => users.get(id)?.name).filter(Boolean);
+  const names = (ids) => [...ids].map((id) => (id === EMH_ID ? 'The Doctor' : users.get(id)?.name)).filter(Boolean);
   return Object.fromEntries(DEPARTMENTS.filter((d) => hasStation(k, d)).map((d) => {
     const c = r[d];
     if (!c) return [d, { state: 'idle' }];
@@ -1558,6 +1560,13 @@ function crewCommand(ws, msg) {
       broadcastCrew(key);
       opLog(key, `${ws.name} ${u.confined ? 'confined' : 'released'} ${u.name}`);
       return note(`${u.name} ${u.confined ? 'confined to quarters' : 'released'}`);
+    }
+    case 'emh': {
+      // Medical activates or deactivates the holographic doctor (as Ops can, from its automation list).
+      if (ws.station !== 'Medical') return note('Only Medical activates the holographic doctor');
+      if (isBase(key)) return note('a starbase has no holographic doctor');
+      setAuto(key, 'medical', !!msg.on);
+      return note(msg.on ? 'Computer: activate the emergency medical hologram' : 'Computer: deactivate the EMH');
     }
     case 'sickbay': {
       if (ws.station !== 'Medical') return note('Only Medical admits crew to sickbay');
@@ -1892,6 +1901,8 @@ const SUBSYSTEMS = {
   amTransfer: { parent: 'fuel', ties: ['B'], name: 'AM bus transfer' },
   // The brig's force field (Security): while it's up, nobody walks into or out of the Brig.
   brigField: { parent: 'Security', ties: ['B'], name: 'brig force field' },
+  // Sickbay's holo-emitters (Medical): the holographic doctor, 10 while it's active.
+  holoEmitters: { parent: 'Medical', ties: ['B'], name: 'holo-emitters' },
   // The shuttle bay: its doors and the containment field that holds the air in while they're open.
   bayDoors: { parent: 'Shuttle Bay', ties: ['B'], name: 'shuttle bay doors' },
   bayField: { parent: 'Shuttle Bay', ties: ['B'], name: 'shuttle bay containment field' },
@@ -2336,6 +2347,7 @@ function flow(k) {
     ...['rf', 'radio', 'subspace'].map((x) => [`sub:${x}`, GRID.comms]),
     ['sub:forcefields', (e.forcefields.length + crew.filter((u) => u.fielded).length) * GRID.forcefield],
     ['sub:brigField', e.brigField && hasStation(k, 'Brig') ? GRID.forcefield : 0],
+    ['sub:holoEmitters', !isBase(k) && e.auto?.medical ? EMH.draw : 0],
     ['sub:bayDoors', e.bayOpen ? BAY.doors : 0], ['sub:bayField', e.bayOpen ? BAY.field : 0],
     ['sub:patternBuffers', TR.buffers], ['sub:targetingScanners', TR.small], ['sub:heisenberg', TR.small], ['sub:biofilter', TR.small],
     ['sub:energizingCoils', transporters.get(k)?.energizing ? TR.coils : 0],
@@ -3746,10 +3758,18 @@ setInterval(() => {
 // its console is on the ODN; it never repairs anything, can't be run by remote
 // control, and any tap on it by hand hands it back (Auto off). Each step goes
 // through the same commands a crewman's taps do, so the same rules hold.
-const AUTO_PANELS = ['engineering', 'lifeSupport', 'tactical', 'science', 'transporter', 'comms', 'hangar'];
-const AUTO_STATION = { engineering: 'Engineering', lifeSupport: 'Engineering', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Shuttle Bay' };
+const AUTO_PANELS = ['engineering', 'lifeSupport', 'tactical', 'science', 'transporter', 'comms', 'hangar', 'medical'];
+const AUTO_STATION = { engineering: 'Engineering', lifeSupport: 'Engineering', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Shuttle Bay', medical: 'Medical' };
 const AUTO_BUILT = new Set(AUTO_PANELS);
-const AUTO_NAMES = { engineering: 'Engineering', lifeSupport: 'Life support', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Hangar control' };
+const AUTO_NAMES = { engineering: 'Engineering', lifeSupport: 'Life support', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Hangar control', medical: 'Medical: holographic doctor' };
+// The holographic doctor (Medical's automation): it runs while a computer core is
+// online, Medical is on the ODN and the sickbay holo-emitters have power (10 while
+// it's active; without them it goes offline). Every 2 s it greets, answers
+// Medical's readiness checks, treats sickbay's patients (one at a time,
+// discharged after EMH.treatSecs) and warns of crew at risk from life support.
+const EMH_ID = 'emh';
+const EMH = { draw: 10, treatSecs: Number(process.env.EMH_TREAT_SECS) || 60 };
+const emhActive = (k) => !isBase(k) && autoOn(k, 'medical') && hasStation(k, 'Medical') && coresOnline(k) && odnLinked(k, 'Medical') && flow(k).subOk.holoEmitters !== false;
 // The panel a crewman's command works (to hand it back when they tap it).
 function panelOfCommand(station, msg) {
   const t = msg.type;
@@ -3770,6 +3790,7 @@ function setAuto(k, p, v, why) {
   (e.autoStep ||= {})[p] = 0;
   e.dirty = true;
   opLog(k, `automation: ${AUTO_NAMES[p]}${p === 'engineering' && v ? ` (${v})` : ''} ${v ? 'on' : `off${why ? `: ${why}` : ''}`}`);
+  if (p === 'medical') { e.emh = { greeted: false, tick: 0, treating: null, warned: '' }; flowCache.delete(k); broadcastCrew(k); }
   if (!v) tellStations(k, [AUTO_STATION[p]], `Automation: ${AUTO_NAMES[p]} off${why ? ` (${why})` : ''}`);
   broadcastOps(k); scheduleNav();
 }
@@ -3860,6 +3881,7 @@ function engineeringSteps(k, mode) {
 const bayRequests = new Map(); // craft key -> { m: mothership key, kind: 'land' | 'takeoff', at }
 function panelRoutine(k, p) {
   const e = engOf(k), c = combatOf(k);
+  if (p === 'medical') return doctorRoutine(k, e);
   if (p === 'lifeSupport') {
     // Atmosphere, heat, gravity and lights on where there are people, off where there aren't.
     const a = automaton(k, 'Engineering');
@@ -3935,6 +3957,38 @@ function panelRoutine(k, p) {
   }
   return '';
 }
+// The holographic doctor's list, a step every 2 s (the first that has something to do).
+function doctorRoutine(k, e) {
+  const d = (e.emh ||= { greeted: false, tick: 0, treating: null, warned: '' });
+  if (!d.shown) { d.shown = true; broadcastCrew(k); }
+  if (d.tick++ % 2) return e.autoStatus.medical || 'standing by in sickbay';
+  const say = (stations, text) => tellStations(k, stations, `The Doctor: ${text}`);
+  // 1. Activated: the greeting.
+  if (!d.greeted) { d.greeted = true; say(['Medical'], 'Please state the nature of the medical emergency.'); opLog(k, 'the holographic doctor activated'); return 'activated'; }
+  // 2. A readiness check for Medical: Ready.
+  const rc = readiness.get(k)?.Medical;
+  if (rc && !rc.ready.has(EMH_ID)) { rc.ready.add(EMH_ID); scheduleNav(); return 'readiness: Medical ready'; }
+  // 3. Sickbay's patients, one at a time: treated, then discharged fit for duty.
+  const patients = crewOf(k).filter((u) => u.sickbay);
+  if (d.treating && !patients.some((u) => u.id === d.treating.id)) d.treating = null;
+  if (!d.treating && patients.length) d.treating = { id: patients[0].id, since: Date.now() };
+  if (d.treating) {
+    const u = users.get(d.treating.id), left = Math.ceil(EMH.treatSecs - (Date.now() - d.treating.since) / 1000);
+    if (left > 0) return `treating ${u.name} (${left} s)`;
+    u.sickbay = false; d.treating = null;
+    send(u, { type: 'notice', text: 'The Doctor: you are discharged from sickbay, fit for duty' });
+    say(['Medical', 'Captain'], `${u.name} discharged from sickbay, fit for duty`);
+    opLog(k, `the holographic doctor discharged ${u.name} from sickbay`);
+    broadcastCrew(k);
+    return `discharged ${u.name}`;
+  }
+  // 4. Life support: crew at risk (warned once a problem).
+  const g = gridView(k), p = powerOf(k), here = new Set(crewOf(k).map(placeOf));
+  const airless = Object.entries(g.ls || {}).filter(([l, x]) => here.has(l) && !x.got.atmosphere).map(([l]) => l);
+  const risk = airless.length ? `no atmosphere at ${airless.join(', ')}` : p.lifeSupport < 50 ? `life support at ${p.lifeSupport}%` : '';
+  if (risk !== d.warned) { d.warned = risk; if (risk) { say(['Captain', 'Medical'], `crew at risk: ${risk}`); return `warned: crew at risk (${risk})`; } }
+  return 'standing by in sickbay';
+}
 // Once a second: every automated panel takes its next step.
 function automationTick() {
   for (const [k, e] of eng) {
@@ -3957,6 +4011,7 @@ function automateVessel(k, e) {
       if (p === 'engineering' && !next) { finish(); continue; }
       if (!coresOnline(k)) { e.autoStatus[p] = `waiting: no computer core online${next ? ` (next: ${next.what})` : ''}`; continue; }
       if (!odnLinked(k, station)) { e.autoStatus[p] = `waiting: the ${station} console is off the ODN`; continue; }
+      if (p === 'medical' && flow(k).subOk.holoEmitters === false) { setAuto(k, p, false, 'EMH offline: no power to the holo-emitters'); tellStations(k, ['Medical', 'Captain'], 'Medical: EMH offline (no power to the holo-emitters)'); continue; }
       if (p !== 'engineering') { try { e.autoStatus[p] = panelRoutine(k, p); } catch (err) { e.autoStatus[p] = `stopped: ${err.message}`; console.warn(`automation ${p}: ${err.stack}`); } continue; }
       if (p === 'engineering') {
         flowCache.delete(k);
@@ -3978,7 +4033,7 @@ function stationCommand(ws, msg) {
   { const p = !ws.automaton && panelOfCommand(ws.station, msg); if (p && autoOn(ws.shipKey, p)) setAuto(ws.shipKey, p, null, `${ws.name} took over`); }
   // Off the ODN, the station's controls do nothing (answering an order needs no console).
   const odnOff = !odnLinked(ws.shipKey, placeOf(ws)) && !['order-ack', 'order-decline'].includes(t);
-  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'brig-field', 'person-field', 'bay-doors', 'readiness', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
+  if (odnOff && ['shields', 'beam', 'transporter-lock', 'transporter-diagnostic', 'helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course', 'power', 'alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'emh', 'forcefield', 'brig-field', 'person-field', 'bay-doors', 'readiness', 'lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm', 'grid', 'tractor', 'dock', 'self-destruct'].includes(t)) {
     send(ws, { type: 'notice', text: 'Disconnected from the optical data network' });
     return true;
   }
@@ -3990,7 +4045,7 @@ function stationCommand(ws, msg) {
   if (['helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
-  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'forcefield', 'brig-field', 'person-field', 'bay-doors', 'readiness'].includes(t)) return gate(crewCommand);
+  if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'emh', 'forcefield', 'brig-field', 'person-field', 'bay-doors', 'readiness'].includes(t)) return gate(crewCommand);
   if (['lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
   if (t === 'grid') return gridCommand(ws, msg), true; // emergency power: works with the console dark
   if (t === 'tractor') return gate(tractorCommand);
