@@ -94,12 +94,15 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     await page.waitForFunction(() => !document.body.dataset.pane);
     step('the Station panel slid in beside the station screen, and out again on a second tap');
     // The admin panel: its bottom (Create ship) is reachable by dragging.
-    await page.click('#link', { modifiers: ['Shift'] }); // (shift-click the relay's name at the foot)
-    await page.waitForSelector('.admin-dialog[open] #admin-create');
-    for (let i = 0; i < 6; i++) await drag('.admin-dialog', -500);
-    await page.waitForFunction(() => { const d = document.querySelector('.admin-dialog'); return d.scrollTop + d.clientHeight >= d.scrollHeight - 4; });
-    assert.ok(await page.locator('#admin-create').isVisible());
-    step('touch drags reached the bottom of the admin panel (Create ship)');
+    await page.goto(`${URL}admin`);
+    await page.waitForSelector('#admin-create #create-name');
+    const fleetBody = '[data-screen="fleet"] .lcars-panel__body';
+    if (await page.$eval(fleetBody, (e) => e.scrollHeight > e.clientHeight + 4)) {
+      for (let i = 0; i < 6; i++) await drag(fleetBody, -500);
+      await page.waitForFunction((s) => { const d = document.querySelector(s); return d.scrollTop + d.clientHeight >= d.scrollHeight - 4; }, fleetBody);
+    }
+    assert.ok(await page.locator('#admin-create #create-name').isVisible());
+    step('touch drags reached the bottom of the admin page\'s Fleet (Create ship)');
     ok = true;
   } catch (err) {
     console.error('FAIL:', err.message);

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LCARS: Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&display=swap">
+  <link rel="stylesheet" href="lcars.css">
+  <link rel="stylesheet" href="console.css">
+  <style>
+    .admin-banner { margin: 0 0 4px; padding: 6px 16px; border-radius: 18px; background: var(--lcars-red); color: #000; text-transform: uppercase; letter-spacing: 0.05em; font-size: 15px; }
+    .tr-taps { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tr-tap { min-height: 32px; font-size: 13px; }
+    .tr-pick { display: flex; gap: 10px; align-items: flex-start; margin: 6px 0; }
+    .tr-label { color: var(--lcars-gold); text-transform: uppercase; min-width: 90px; padding-top: 6px; }
+    .admin-log { max-height: 340px; overflow: auto; font-size: 12px; background: #111; padding: 8px; white-space: pre-wrap; text-transform: none; letter-spacing: 0.02em; }
+    .admin-log .failed { color: var(--lcars-red); font-weight: bold; }
+    .fleet-table { width: 100%; border-collapse: collapse; text-transform: uppercase; font-size: 14px; }
+    .fleet-table th, .fleet-table td { text-align: left; padding: 4px 8px; border-bottom: 1px dotted #444; }
+    .fleet-table th { color: var(--lcars-gold); font-weight: normal; }
+    .chart { display: block; width: 100%; max-width: 760px; height: auto; background: #050505; border-radius: 12px; }
+    .chart text { font-family: var(--font); letter-spacing: 0.05em; }
+    .place-head { color: var(--lcars-orange); font-size: 13px; text-transform: uppercase; list-style: none; margin-top: 6px; }
+    .ok-note { color: #66cc66; }
+    .err-note { color: var(--lcars-red); }
+    .design-num { width: 90px; }
+    .design-place { border-left: 6px solid var(--lcars-orange); border-radius: 12px 0 0 12px; padding: 6px 10px; margin: 8px 0; }
+    .design-field[data-field] .tr-pick { flex-wrap: wrap; }
+    .place-bar { display: flex; flex-wrap: wrap; align-items: stretch; gap: 4px; margin: 0 0 8px; }
+    .place-bar .place-label { display: flex; align-items: center; padding: 0 12px; min-height: 32px; background: var(--lcars-orange); color: #000; text-transform: uppercase; font-size: 13px; border-radius: 16px 0 0 16px; }
+    .place-bar .place-cap--r { width: 22px; background: var(--lcars-orange); border-radius: 0 16px 16px 0; }
+    .place-bar .tr-tap { border-radius: 0; }
+  </style>
+</head>
+<body>
+  <div class="lcars-app">
+    <header class="lcars-header">
+      <div class="lcars-elbow lcars-elbow--top"><span>ADM 00</span></div>
+      <div class="lcars-bar">
+        <span class="lcars-bar__seg lcars-bar__seg--a"></span>
+        <span class="lcars-header__console" id="admin-relay-name">Relay admin</span>
+        <span class="lcars-bar__seg lcars-bar__seg--b"></span>
+        <h1 class="lcars-header__title">Admin</h1>
+      </div>
+    </header>
+
+    <nav class="lcars-sidebar" aria-label="Admin">
+      <div class="lcars-sidebar__col lcars-sidebar__col--left" aria-label="Back">
+        <a class="lcars-nav-button" href="./" style="--accent: var(--lcars-peach)"><span>Consoles</span></a>
+        <div class="lcars-sidebar__fill"></div>
+      </div>
+      <div class="lcars-sidebar__col lcars-sidebar__col--right" aria-label="Admin sections">
+        <button type="button" class="lcars-nav-button" data-screen-tab="fleet" style="--accent: var(--lcars-gold)"><span>Fleet</span></button>
+        <button type="button" class="lcars-nav-button" data-screen-tab="chart" style="--accent: var(--lcars-sky)"><span>Star chart</span></button>
+        <button type="button" class="lcars-nav-button" data-screen-tab="supervisor" style="--accent: var(--lcars-lilac)"><span>Relay &amp; supervisor</span></button>
+        <button type="button" class="lcars-nav-button" data-screen-tab="designs" style="--accent: var(--lcars-orange)"><span>Ship designs</span></button>
+        <div class="lcars-sidebar__fill"></div>
+      </div>
+    </nav>
+    <aside class="lcars-pane" id="left-pane"></aside>
+
+    <main class="lcars-content" tabindex="-1">
+      <p class="admin-banner" id="admin-banner">Admin: localhost only. Add access control before going live.</p>
+      <div class="screen" data-screen="fleet">
+        <section class="lcars-panel" style="--accent: var(--lcars-gold)">
+          <h2 class="lcars-panel__title"><span>Fleet</span></h2>
+          <div class="lcars-panel__body">
+            <p class="ops-notice" id="admin-error" hidden></p>
+            <table class="fleet-table" id="admin-fleet"></table>
+            <section id="admin-create"></section>
+          </div>
+        </section>
+      </div>
+      <div class="screen" data-screen="chart" hidden>
+        <section class="lcars-panel" style="--accent: var(--lcars-sky)">
+          <h2 class="lcars-panel__title"><span>Star chart</span></h2>
+          <div class="lcars-panel__body"><div id="admin-chart"></div></div>
+        </section>
+      </div>
+      <div class="screen" data-screen="supervisor" hidden>
+        <section class="lcars-panel" style="--accent: var(--lcars-lilac)">
+          <h2 class="lcars-panel__title"><span>Relay &amp; supervisor</span></h2>
+          <div class="lcars-panel__body" id="admin-supervisor"></div>
+        </section>
+      </div>
+      <div class="screen" data-screen="designs" hidden>
+        <section class="lcars-panel" style="--accent: var(--lcars-orange)">
+          <h2 class="lcars-panel__title"><span>Ship designs</span></h2>
+          <div class="lcars-panel__body" id="admin-designs"><p class="ops-hint">The design editor: coming next.</p></div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="lcars-footer">
+      <div class="lcars-elbow lcars-elbow--bottom"><span>ADMIN</span></div>
+      <div class="lcars-bar">
+        <span class="lcars-status" id="admin-link" data-status="connecting">Comm relay</span>
+        <span class="lcars-bar__seg lcars-bar__seg--c"></span>
+      </div>
+    </footer>
+  </div>
+  <script src="screens.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>

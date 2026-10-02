@@ -73,8 +73,14 @@ const OP_COMMANDS = new Set(['connect', 'add', 'end', 'hail', 'route', 'decline-
 const RELAYED = new Set(['call', 'accept', 'decline', 'hangup', 'signal']);
 const STATES = new Set(['idle', 'calling', 'ringing', 'in-call']);
 
+// The admin page and its requests: from this machine only (no access control yet).
+const isLocal = (addr) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(addr);
 const server = http.createServer((req, res) => {
-  const urlPath = new URL(req.url, 'http://x').pathname;
+  let urlPath = new URL(req.url, 'http://x').pathname;
+  if (/^\/admin(\.html|\.js|\/)?$/.test(urlPath)) {
+    if (!isLocal(req.socket.remoteAddress)) { res.writeHead(403, { 'Content-Type': 'text/plain' }).end('Admin: localhost only (add access control before going live)'); return; }
+    if (urlPath === '/admin' || urlPath === '/admin/') urlPath = '/admin.html';
+  }
   if (urlPath.startsWith('/api/library')) {
     // Pages hosted on another origin use this server as their relay. Auth is
     // the X-Token header (no cookies), so any origin may call.
@@ -4705,8 +4711,9 @@ function sendShipRadio(u) {
 
 // --- connections -------------------------------------------------------------
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   sockets.add(ws);
+  ws.local = isLocal(req?.socket?.remoteAddress); // (admin requests: from this machine only)
   ws.id = null;
   ws.state = 'idle';
   ws.peers = [];
@@ -5002,9 +5009,12 @@ server.listen(PORT, () => console.log(`${RELAY_NAME} on http://localhost:${PORT}
 // TODO: no access control yet (fine on localhost): add it before this goes live.
 const adminWaiting = new Map(); // request id -> socket
 let adminSeq = 0;
+// The vessels as the admin page shows them: class, crew, ops, where.
+const adminFleet = () => networkGraph().ships.map((v) => ({ name: v.name, class: v.class, starbase: !!v.starbase, crew: v.crew, ops: v.ops, computer: v.computer, x: v.x, y: v.y }));
 function adminRequest(ws, msg) {
+  if (!ws.local) return send(ws, { type: 'admin-status', error: 'refused: the admin page is for this machine only (localhost)' });
   if (msg.action === 'create') return adminCreate(ws, msg);
-  if (!process.send) return send(ws, { type: 'admin-status', error: 'no supervisor: the relay was started on its own (npm start runs the supervisor)', bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
+  if (!process.send) return send(ws, { type: 'admin-status', error: 'no supervisor: the relay was started on its own (npm start runs the supervisor)', relayName: RELAY_NAME, fleet: adminFleet(), consoles: [...users.values()].map((u) => ({ name: u.name, ship: shipName(u.shipKey), station: u.station })), bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
   const reqId = ++adminSeq;
   adminWaiting.set(reqId, ws);
   setTimeout(() => adminWaiting.delete(reqId), 10000);
@@ -5061,7 +5071,7 @@ process.on('message', (m) => {
   adminWaiting.delete(m.reqId);
   if (!ws) return;
   const consoles = [...users.values()].map((u) => ({ name: u.name, ship: shipName(u.shipKey), station: u.station }));
-  send(ws, { type: 'admin-status', ...m.status, note: m.note, consoles, relayName: RELAY_NAME, bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
+  send(ws, { type: 'admin-status', ...m.status, note: m.note, consoles, relayName: RELAY_NAME, fleet: adminFleet(), bases: STARBASES.map((b) => ({ name: b.name, x: b.x, y: b.y })) });
 });
 process.on('message', (m) => {
   if (m?.type !== 'reload') return;

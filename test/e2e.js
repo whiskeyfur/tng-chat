@@ -1527,33 +1527,51 @@ const audioBytes = (page) => page.evaluate(async () => {
     assert.deepEqual(await geordi.evaluate(() => [document.getElementById('name').value, document.getElementById('ship').value]), ['geordi', ''], 'the name kept, the ship forgotten');
     await op.waitForFunction(() => !window.__operator.roster.some((u) => u.name === 'geordi'));
     step('shift-clicking the name in the header signed geordi out to the sign-in screen, name kept, ship and station forgotten');
-    // Shift-click the relay's name at the foot: the admin panel (here the relay runs without the supervisor).
-    await geordi.click('#link', { modifiers: ['Shift'] });
-    await geordi.waitForSelector('#admin-dialog:has-text("no supervisor")');
+    // Shift-click the relay's name at the foot: the admin page opens (here the relay runs without the supervisor).
+    const [adminPage] = await Promise.all([geordi.context().waitForEvent('page'), geordi.click('#link', { modifiers: ['Shift'] })]);
+    await adminPage.waitForLoadState();
+    assert.match(adminPage.url(), /\/admin$/);
+    const adm = adminPage;
+    await adm.waitForSelector('#admin-error:has-text("no supervisor")');
+    assert.match(await adm.textContent('#admin-banner'), /localhost only/i);
+    // The fleet: every vessel, with its class.
+    await adm.waitForSelector('#admin-fleet tr[data-vessel="Enterprise"]:has-text("Galaxy")');
+    await adm.waitForSelector('#admin-fleet tr[data-vessel="Starbase 47"]:has-text("Starbase")');
+    // Not from another machine: the page and its requests are refused off localhost.
+    const lan = Object.values(require('os').networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address;
+    if (lan) {
+      const code = await new Promise((r) => require('http').get(`http://${lan}:${process.env.PORT}/admin`, (res) => { res.resume(); r(res.statusCode); }).on('error', () => r('error')));
+      assert.equal(code, 403, 'the admin page from another address');
+      const far = new WebSocket(`ws://${lan}:${process.env.PORT}`), farMsgs = [];
+      far.on('message', (m) => farMsgs.push(JSON.parse(m)));
+      await new Promise((r) => far.on('open', r));
+      far.send(JSON.stringify({ type: 'admin', action: 'status' }));
+      await waitFor(() => farMsgs.some((m) => m.type === 'admin-status' && /localhost/.test(m.error)));
+      far.close();
+    }
+    step(`the admin page (shift-click the relay's name): the localhost-only banner, the fleet with classes${lan ? '; refused from another address (the page and its requests)' : ''}`);
     // Create ship: a name, a class (taps, none picked to start), and for a starbase a spot on the map.
     // Create stays off until it's all there. (A ship needs the supervisor to start its computer.)
-    // (The panel scrolls on its own, within the window: Create ship is below the status.)
-    assert.deepEqual(await geordi.$eval('#admin-dialog', (d) => [getComputedStyle(d).overflowY, d.getBoundingClientRect().bottom <= window.innerHeight + 1]), ['auto', true]);
-    await geordi.fill('#create-name', 'Starbase 99');
-    assert.equal(await geordi.isDisabled('#create-go'), true, 'Create should wait for a class');
-    await geordi.click('#create-class button[data-value="starbase"]');
-    assert.equal(await geordi.isDisabled('#create-go'), true, 'Create should wait for a spot on the map');
-    const mapBox = await geordi.locator('#create-map').boundingBox();
-    await geordi.mouse.click(mapBox.x + mapBox.width * 0.3, mapBox.y + mapBox.height * 0.6);
-    await geordi.click('#create-go');
-    await geordi.waitForSelector('#create-status:has-text("Starbase 99 created at")');
+    await adm.fill('#create-name', 'Starbase 99');
+    assert.equal(await adm.isDisabled('#create-go'), true, 'Create should wait for a class');
+    await adm.click('#create-class button[data-value="starbase"]');
+    assert.equal(await adm.isDisabled('#create-go'), true, 'Create should wait for a spot on the map');
+    await adm.locator('#create-map').scrollIntoViewIfNeeded(); // (the page scrolls: Create ship is below the fleet)
+    const mapBox = await adm.locator('#create-map').boundingBox();
+    await adm.mouse.click(mapBox.x + mapBox.width * 0.3, mapBox.y + mapBox.height * 0.6);
+    await adm.click('#create-go');
+    await adm.waitForSelector('#create-status:has-text("Starbase 99 created at")');
     await waitFor(() => [...laforge.msgs].reverse().find((m) => m.type === 'ships')?.ships.some((x) => x.name === 'Starbase 99' && x.starbase));
-    await geordi.fill('#create-name', 'Starbase 99');
-    await geordi.click('#create-class button[data-value="runabout"]');
-    await geordi.click('#create-at button[data-value="Starbase 12"]');
-    await geordi.click('#create-go');
-    await geordi.waitForSelector('#create-status:has-text("already a vessel called Starbase 99")');
-    await geordi.fill('#create-name', 'Rubicon2');
-    await geordi.click('#create-go');
-    await geordi.waitForSelector('#create-status:has-text("no supervisor")');
+    await adm.fill('#create-name', 'Starbase 99');
+    await adm.click('#create-class button[data-value="runabout"]');
+    await adm.click('#create-at button[data-value="Starbase 12"]');
+    await adm.click('#create-go');
+    await adm.waitForSelector('#create-status:has-text("already a vessel called Starbase 99")');
+    await adm.fill('#create-name', 'Rubicon2');
+    await adm.click('#create-go');
+    await adm.waitForSelector('#create-status:has-text("no supervisor")');
     step('the admin panel created Starbase 99 where its map was clicked (Create waited for a class and a spot), refused the name again, and needs the supervisor to create a ship');
-    await geordi.click('#admin-close');
-    step('shift-clicking the relay name opened the admin panel (no supervisor here, and it said so)');
+    await adm.close();
     await geordi.close();
 
     // The Defiant comes alongside and tows the crippled Enterprise with a tractor beam.
