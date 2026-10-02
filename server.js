@@ -220,6 +220,7 @@ function networkGraph() {
   return {
     ships: shipList().filter((sh) => sh.active).map((sh) => ({ ...sh, crew: crewOf(shipKey(sh.name)).length })),
     links: [...links].map((l) => l.split('|').map(shipName)),
+    hard: [...hardLinks].filter((l) => links.has(l)).map((l) => l.split('|').map(shipName)), // (docking-port hard links)
     requests: [...linkRequests.values()].map((r) => [shipName(r.fromShip), shipName(r.toShip)]),
   };
 }

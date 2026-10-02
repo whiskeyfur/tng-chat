@@ -86,7 +86,8 @@
     let prefix = null, revealed = false;
     const prefixBox = document.getElementById('prefix-box');
     if (prefixBox) {
-      prefixBox.querySelector('#prefix-pad-slot').replaceWith(makeKeypad('prefix-pad', 'Set prefix', (code) => send({ type: 'prefix', code })));
+      // (The page can make the ops console more than once, signing in again: replace whichever is there.)
+      prefixBox.querySelector('#prefix-pad-slot, #prefix-pad')?.replaceWith(makeKeypad('prefix-pad', 'Set prefix', (code) => send({ type: 'prefix', code })));
       document.getElementById('prefix-reveal').onclick = () => { revealed = !revealed; renderPrefix(prefix); };
     }
     function renderPrefix(p) {
@@ -178,23 +179,76 @@
       const own = ship.toLowerCase();
       const onNet = new Set([own, ...network.map((n) => n.toLowerCase())]);
       const list = [...graph.ships].sort((a, b) => (b.name.toLowerCase() === own) - (a.name.toLowerCase() === own) || a.name.localeCompare(b.name));
-      const W = 600, H = 400, cx = W / 2, cy = H / 2 + 6, R = list.length > 1 ? 145 : 0;
-      const pos = new Map(list.map((sh, i) => {
-        const a = -Math.PI / 2 + (i * 2 * Math.PI) / list.length;
-        return [sh.name.toLowerCase(), { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) }];
-      }));
+      const W = 600, H = 400, cx = W / 2, cy = H / 2, NH = 52;
+      const widthOf = (sh) => Math.max(120, sh.name.length * 11 + 36);
+      // A force-directed layout: our own ship pinned at the centre; every vessel
+      // pushes the others away (so labels never overlap), open data links pull
+      // their two ends together; unlinked vessels drift outward but stay inside.
+      // Positions are kept between refreshes, so the picture settles and stays put.
+      const keys = list.map((sh) => sh.name.toLowerCase());
+      for (const k of [...layout.keys()]) if (!keys.includes(k)) layout.delete(k);
+      list.forEach((sh, i) => {
+        const k = sh.name.toLowerCase();
+        if (!layout.has(k)) { const a = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(1, list.length); layout.set(k, { x: cx + 160 * Math.cos(a), y: cy + 120 * Math.sin(a) }); }
+        layout.get(k).w = widthOf(sh);
+      });
+      if (layout.has(own)) Object.assign(layout.get(own), { x: cx, y: cy });
+      const linked = graph.links.map(([a, b]) => [a.toLowerCase(), b.toLowerCase()]).filter(([a, b]) => layout.has(a) && layout.has(b));
+      const nodes = [...layout.entries()];
+      for (let it = 0, n = settled ? 40 : 300; it < n; it++) {
+        const f = new Map(nodes.map(([k]) => [k, { x: 0, y: 0 }]));
+        for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+          const [ka, p] = nodes[i], [kb, q] = nodes[j];
+          let dx = p.x - q.x, dy = p.y - q.y;
+          if (!dx && !dy) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; }
+          const d = Math.hypot(dx, dy), want = (p.w + q.w) / 2 + 30, rep = (want * want) / Math.max(d, 1) * 0.05;
+          f.get(ka).x += (dx / d) * rep; f.get(ka).y += (dy / d) * rep * 1.6;
+          f.get(kb).x -= (dx / d) * rep; f.get(kb).y -= (dy / d) * rep * 1.6;
+        }
+        for (const [a, b] of linked) {
+          const p = layout.get(a), q = layout.get(b), dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1, pull = (d - 170) * 0.05;
+          f.get(a).x += (dx / d) * pull; f.get(a).y += (dy / d) * pull; f.get(b).x -= (dx / d) * pull; f.get(b).y -= (dy / d) * pull;
+        }
+        for (const [k, p] of nodes) {
+          if (k === own) continue;
+          const v = f.get(k), step = Math.min(12, Math.hypot(v.x, v.y)), m = Math.hypot(v.x, v.y) || 1;
+          p.x = Math.max(p.w / 2 + 4, Math.min(W - p.w / 2 - 4, p.x + (v.x / m) * step));
+          p.y = Math.max(NH / 2 + 4, Math.min(H - NH / 2 - 4, p.y + (v.y / m) * step));
+        }
+      }
+      // (Then any labels still touching, pushed apart: no overlaps.)
+      for (let pass = 0; pass < 60; pass++) {
+        let moved = false;
+        for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+          const [ka, p] = nodes[i], [kb, q] = nodes[j], ox = (p.w + q.w) / 2 + 6 - Math.abs(p.x - q.x), oy = NH + 6 - Math.abs(p.y - q.y);
+          if (ox <= 0 || oy <= 0) continue;
+          const d = (oy / 2 + 1) * (p.y <= q.y ? -1 : 1);
+          if (ka !== own) p.y = Math.max(NH / 2, Math.min(H - NH / 2, p.y + d));
+          if (kb !== own) q.y = Math.max(NH / 2, Math.min(H - NH / 2, q.y - d));
+          moved = true;
+        }
+        if (!moved) break;
+      }
+      settled = true;
+      const pos = layout;
       svg.replaceChildren();
+      // Links: subspace in sky blue; a docking port's hard link thicker, in orange; requests dashed gold.
+      const hardSet = new Set((graph.hard || []).map(([a, b]) => [a, b].map((x) => x.toLowerCase()).sort().join('|')));
       const edge = ([a, b], pending) => {
         const p = pos.get(a.toLowerCase()), q = pos.get(b.toLowerCase());
         if (!p || !q) return;
-        svg.append(node('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: color(pending ? 'gold' : 'sky'), 'stroke-width': pending ? 3 : 5,
-          'stroke-dasharray': pending ? '10 8' : 'none', 'stroke-linecap': 'round', opacity: pending ? 0.8 : 1 }));
+        const hard = !pending && hardSet.has([a, b].map((x) => x.toLowerCase()).sort().join('|'));
+        const line = node('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: color(pending ? 'gold' : hard ? 'orange' : 'sky'), 'stroke-width': pending ? 3 : hard ? 9 : 5,
+          'stroke-dasharray': pending ? '10 8' : 'none', 'stroke-linecap': 'round', opacity: pending ? 0.8 : 1 });
+        if (hard) line.setAttribute('data-hard', '');
+        svg.append(line);
       };
       graph.links.forEach((l) => edge(l, false));
       graph.requests.forEach((l) => edge(l, true));
       for (const sh of list) {
         const key = sh.name.toLowerCase();
         const { x, y } = pos.get(key);
+        // (Each node keeps the label width the layout spaced it by.)
         const fill = key === own ? 'gold' : !sh.ops ? 'tan' : onNet.has(key) ? 'sky' : 'lilac';
         const label = sh.name.toUpperCase();
         const w = Math.max(120, label.length * 11 + 36), h = 52;
@@ -206,7 +260,7 @@
             `${sh.crew} aboard${sh.shields ? ' · shields up' : ''}${sh.ops ? '' : ' · no ops'}`));
         if (sh.shields) g.append(node('rect', { x: -5, y: -5, width: w + 10, height: h + 10, rx: h / 2 + 5, fill: 'none', stroke: color('red'), 'stroke-width': 2 }));
         if (key !== own) {
-          const pick = () => { const sel = $('link-ship'); if ([...sel.options].some((o) => o.value === sh.name)) { sel.value = sh.name; sel.focus(); } };
+          const pick = () => document.querySelector(`#link-taps button[data-ship="${CSS.escape(sh.name)}"]`)?.focus();
           g.addEventListener('click', pick);
           g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
         }
@@ -215,6 +269,9 @@
       if (!list.length) svg.append(node('text', { x: cx, y: cy, 'text-anchor': 'middle', fill: color('tan'), 'font-size': 18 }, 'No ships'));
     }
 
+    // The map's layout, kept between refreshes (vessel key -> { x, y, w }).
+    const layout = new Map();
+    let settled = false;
     function render() {
       renderRemoteBlock();
       renderMap();
@@ -259,12 +316,10 @@
           el('span', { className: 'ops-hail__text', textContent: `Requesting a data link with the ${r.toShip}` }),
           el('button', { className: 'lcars-button lcars-button--pill lcars-button--alert', textContent: 'Withdraw', onclick: () => send({ type: 'link-cancel', request: r.id }) }))));
       if (!reqList.children.length) reqList.append(el('li', { className: 'empty', textContent: 'No link requests' }));
-      const linkable = linkShips.filter((s) => !links.includes(s));
-      const linkSel = $('link-ship');
-      const keepLink = linkSel.value;
-      linkSel.replaceChildren(...linkable.map((s) => new Option(s, s)));
-      if (linkable.includes(keepLink)) linkSel.value = keepLink;
-      $('link-form').querySelector('button').disabled = !linkable.length;
+      // Every other vessel as a tap: one that can be linked requests it; the rest greyed with why.
+      const why = (s) => (links.includes(s) ? 'linked' : linkOutgoing.some((r) => r.toShip === s) || linkIncoming.some((r) => r.fromShip === s) ? 'requested' : linkShips.includes(s) ? '' : 'out of reach: a subspace relay down');
+      const others = [...new Set([...graph.ships.map((x) => x.name), ...linkShips])].filter((s) => s.toLowerCase() !== ship.toLowerCase()).sort();
+      $('link-taps').replaceChildren(...(others.length ? others.map((s) => { const w = why(s); const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: w ? `${s} · ${w}` : s, disabled: !!w, title: w, onclick: () => send({ type: 'link-request', ship: s }) }); b.dataset.ship = s; return b; }) : [el('span', { className: 'ops-hint', textContent: 'No other vessels' })]));
 
       // Roster
       const body = $('roster');
@@ -374,7 +429,6 @@
     action('connect-form', () => ({ type: 'connect', a: $('a').value, b: $('b').value }));
     action('add-form', () => ({ type: 'add', name: $('newcomer').value, into: $('host').value }));
     action('hail-form', () => ({ type: 'hail', ship: $('hail-ship').value, crew: $('hail-crew').value }));
-    action('link-form', () => ({ type: 'link-request', ship: $('link-ship').value }));
     action('allhands-form', () => ({ type: 'all-hands', speaker: $('ah-speaker').value, scope: $('ah-scope').value }));
     action('transfer-form', () => {
       const v = $('transfer-to').value;

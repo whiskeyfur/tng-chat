@@ -450,11 +450,9 @@
               <h2 class="lcars-panel__title"><span>Data link</span></h2>
               <div class="lcars-panel__body">
                 <p class="ops-network" id="network">Not linked</p>
-                <form class="ops-form" id="link-form">
-                  <span>Request a data link with</span>
-                  <select class="ops-select" id="link-ship" aria-label="ship to link with"></select>
-                  <button class="lcars-button lcars-button--pill">Request link</button>
-                </form>
+                <!-- Tap a vessel to request a data link (greyed, with the reason, when it can't be linked). -->
+                <h3 class="ops-subhead">Request a data link with</h3>
+                <div class="tr-taps" id="link-taps"></div>
                 <p class="ops-hint">Both operators must agree. Everyone on linked ships sees and can call everyone on the data network, and sees each other's libraries.</p>
                 <h3 class="ops-subhead">Open links</h3>
                 <ul class="ops-hails" id="links"></ul>

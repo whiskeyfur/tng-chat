@@ -518,11 +518,16 @@ const audioBytes = (page) => page.evaluate(async () => {
     await closeComms(kops);
     await screen(op, 'link');
     await screen(kops, 'link');
-    await op.selectOption('#link-ship', "K'Vatch");
-    await op.click('#link-form button');
+    await op.click(`#link-taps button[data-ship="K'Vatch"]`);
     // The data network map: a pending request is a dashed line, then solid.
     await kops.waitForSelector('#net-map line[stroke-dasharray="10 8"]', { state: 'attached' });
-    assert.equal(await kops.locator('#net-map .net-node').count(), 8); // Enterprise, K'Vatch, the Defiant (kept alive by its computer), the four starbases and the shipyard
+    assert.equal(await kops.locator('#net-map .net-node').count(), 8);
+    // A force-directed map: our own ship at the centre, and no two labels overlap.
+    const boxes = await kops.$$eval('#net-map .net-node', (gs) => gs.map((g) => { const r = g.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, name: g.getAttribute('aria-label') }; }));
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+      const p = boxes[i], q = boxes[j];
+      assert.ok(p.x + p.w <= q.x + 1 || q.x + q.w <= p.x + 1 || p.y + p.h <= q.y + 1 || q.y + q.h <= p.y + 1, `${p.name} overlaps ${q.name} on the map`);
+    } // Enterprise, K'Vatch, the Defiant (kept alive by its computer), the four starbases and the shipyard
     await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await op.waitForFunction(() => window.__operator.network.includes("K'Vatch"));
     await op.waitForFunction(() => window.__operator.graph.links.some((l) => l.includes('Enterprise') && l.includes("K'Vatch")));
@@ -718,8 +723,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await chief.waitForSelector('[data-screen="status"]:not([hidden])');
     await op.waitForFunction(() => window.__operator.roster.find((u) => u.name === 'chief')?.station === 'Operations');
     await screen(chief, 'link');
-    await chief.selectOption('#link-ship', "K'Vatch");
-    await chief.click('#link-form button');
+    await chief.click(`#link-taps button[data-ship="K'Vatch"]`);
     await op.waitForSelector('#link-requests li:has-text("Requesting a data link with the K\'Vatch")', { state: 'attached' });
     await screen(kops, 'link');
     await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
@@ -762,8 +766,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // the data link up.
     await screen(op, 'link');
     await screen(kops, 'link');
-    await op.selectOption('#link-ship', "K'Vatch");
-    await op.click('#link-form button');
+    await op.click(`#link-taps button[data-ship="K'Vatch"]`);
     await kops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await bob.waitForSelector('#users li:has-text("kor")', { state: 'attached' });
     await kops.close();
@@ -844,8 +847,7 @@ const audioBytes = (page) => page.evaluate(async () => {
 
     // All hands to the fleet (data network), ended by ops.
     await screen(op, 'link');
-    await op.selectOption('#link-ship', 'Defiant');
-    await op.click('#link-form button');
+    await op.click(`#link-taps button[data-ship="Defiant"]`);
     await screen(dops, 'link');
     await dops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await op.waitForFunction(() => window.__operator.network.includes('Defiant'));
@@ -938,8 +940,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     kyle.send(JSON.stringify({ type: 'grid', ties: { 'sub:subspace': ['B'] } }));
     await op.waitForFunction(() => window.__operator.linkShips.includes('Defiant'), null, { timeout: 15000 });
     await screen(op, 'link');
-    await op.selectOption('#link-ship', 'Defiant');
-    await op.click('#link-form button');
+    await op.click(`#link-taps button[data-ship="Defiant"]`);
     await screen(dops, 'link');
     await dops.click('#link-requests li:has-text("Enterprise") button:has-text("Accept")');
     await op.waitForFunction(() => window.__operator.network.includes('Defiant'));
@@ -1533,6 +1534,16 @@ const audioBytes = (page) => page.evaluate(async () => {
       assert.equal(sbTac.nav().own.combat.phaser.arrays.length, 4, 'a starbase has four phaser arrays');
       assert.equal(sbTac.nav().own.combat.lockMax, 24);
       assert.equal(sbEng.nav().own.grid.totals.EPS.fullMax, 3000);
+      // At a starbase, someone in its Shuttle Bay takes Ops: the ops console draws (the prefix
+      // keypad and the ships it can link with), with no error in the console log.
+      const nerys = await openAs(browser, 'nerys', 'nerys', 'Starbase 74', 'Shuttle Bay');
+      await nerys.waitForFunction(() => window.__voice?.me?.station === 'Shuttle Bay');
+      await screen(nerys, 'reassign');
+      await nerys.click('#station-taps button[data-station="Operations"]');
+      await nerys.waitForSelector('#prefix-box:not([hidden]) #prefix-pad', { state: 'attached' });
+      await nerys.waitForSelector('#link-taps button[data-ship="Starbase 47"]', { state: 'attached', timeout: 15000 });
+      assert.ok(!/ERROR/.test(await nerys.textContent('#log')), `an error in the console log: ${await nerys.textContent('#log')}`);
+      await nerys.close();
       // Starbase to starbase: a data link across the system (Starbase 74 accepts by itself).
       const sbComms = await crewWs('odo', 'Starbase 47', 'Communications');
       await waitFor(() => sbComms.msgs.some((m) => m.type === 'comm-links' && m.ships.includes('Starbase 74')));
@@ -1722,8 +1733,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     await op.click('#hail-form button');
     await op.waitForSelector('#ops-log li:has-text("(automated): nobody aboard")', { state: 'attached' });
     await screen(op, 'link');
-    await op.selectOption('#link-ship', reborn.base);
-    await op.click('#link-form button');
+    await op.click(`#link-taps button[data-ship="${reborn.base}"]`);
     await op.waitForFunction((b) => window.__operator.network.includes(b), reborn.base, { timeout: 10000 });
     await op.waitForSelector('#ops-log li:has-text("(automated) accepted")', { state: 'attached' });
     step(`${reborn.base} (automated) answered a hail with nobody aboard, and accepted a data link by itself`);
@@ -1746,8 +1756,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     const reliantCore = startComputer('r', 'Reliant', { position: `${Math.round(here.x + 8)},${Math.round(here.y)}` });
     await op.waitForFunction(() => window.__operator.ships.includes('Reliant'), null, { timeout: 15000 });
     await screen(op, 'link');
-    await op.selectOption('#link-ship', 'Reliant');
-    await op.click('#link-form button');
+    await op.click(`#link-taps button[data-ship="Reliant"]`);
     await op.waitForFunction(() => window.__operator.network.includes('Reliant'));
     await op.waitForSelector('#ops-log li:has-text("forced")', { state: 'attached' });
     // Remote control: the Enterprise's Helm runs the Reliant's (unmanned) Helm
@@ -1786,8 +1795,7 @@ const audioBytes = (page) => page.evaluate(async () => {
     // A starbase blocks remote control by default, even with nobody at its ops.
     await screen(op, 'link');
     if (!(await op.evaluate((b) => window.__operator.network.includes(b), reborn.base))) { // (linked earlier, still open)
-      await op.selectOption('#link-ship', reborn.base);
-      await op.click('#link-form button');
+      await op.click(`#link-taps button[data-ship="${reborn.base}"]`);
       await op.waitForFunction((b) => window.__operator.network.includes(b), reborn.base, { timeout: 10000 });
     }
     await new Promise((r) => setTimeout(r, 1200));
