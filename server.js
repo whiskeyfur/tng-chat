@@ -57,10 +57,11 @@ const OPERATOR_KEY = process.env.OPERATOR_KEY || '';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const RELAY_NAME = process.env.RELAY_NAME || 'Subspace Relay Station 47';
 const MAX_UPLOAD = Number(process.env.MAX_UPLOAD_MB || 200) * 1024 * 1024;
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, ...
 // The designs (config/ships/<class>.json; see tools/config.js).
 const CONFIG = require('./tools/config');
+const LAYOUTS = require('./tools/layouts');
 const { classes: CLASSES, starbase: BASE_DESIGN, relay: RELAY_FILE } = CONFIG.loadShips((line) => console.warn(line));
 // The subspace relays' design (config/ships/<id>.json, kind "relay"): a pure-solar platform.
 const RELAY_DESIGN = RELAY_FILE || { id: 'subspace-relay', kind: 'relay', name: 'Subspace Relay', bus: 100, eps: 0, core: 0, maxWarp: 0, shields: 0, arrays: 0, warpCore: false, transporter: false, ports: 0, bay: 0, refit: false, spore: false, torpedoes: 0, stations: [], ties: {}, places: [], seats: {}, solar: { output: 80 }, fusion: false };
@@ -100,13 +101,16 @@ const server = http.createServer((req, res) => {
   if (urlPath.startsWith('/api/account/')) return accountRequest(req, res, urlPath.slice(13));
   if (urlPath.startsWith('/api/poll/')) return pollRequest(req, res, urlPath.slice(10));
   const account = needLogin() ? ACCOUNTS.session(sessionToken(req)) : null;
-  if (/^\/admin(\.html|\.js|\/)?$/.test(urlPath)) {
+  if (urlPath === '/api/layouts' || urlPath.startsWith('/api/layouts/') || urlPath.startsWith('/layouts/assets/')) return layoutRequest(req, res, urlPath, account);
+  // The admin pages: the admin page and the layout designer.
+  const adminPage = urlPath.match(/^\/(admin|designer)(\.html|\.js|\/)?$/);
+  if (adminPage) {
     if (!adminReach(req.socket.remoteAddress)) { res.writeHead(403, { 'Content-Type': 'text/plain' }).end(`Admin: ${SETTINGS.read().adminAccess === 'lan' ? 'this network' : 'this machine'} only (Settings, Admin reachable from)`); return; }
     if (needLogin() && account?.role !== 'admin') {
       if (urlPath.endsWith('.js')) { res.writeHead(403).end(); return; }
-      res.writeHead(302, { Location: `/login.html?next=${encodeURIComponent('/admin')}${account ? '&admin=1' : ''}` }).end(); return;
+      res.writeHead(302, { Location: `/login.html?next=${encodeURIComponent(`/${adminPage[1]}`)}${account ? '&admin=1' : ''}` }).end(); return;
     }
-    if (urlPath === '/admin' || urlPath === '/admin/') urlPath = '/admin.html';
+    if (!adminPage[2] || adminPage[2] === '/') urlPath = `/${adminPage[1]}.html`;
   }
   // The consoles: logged in first, once there are accounts.
   if ((urlPath === '/' || urlPath === '/index.html') && needLogin() && !account) { res.writeHead(302, { Location: '/login.html' }).end(); return; }
@@ -144,6 +148,54 @@ const server = http.createServer((req, res) => {
     res.end(data);
   });
 });
+
+// LCARS layouts (the layout designer; tools/layouts.js): GET /api/layouts lists them and the
+// images; GET /api/layouts/<name> is one; PUT saves one, POST /api/layouts/assets adds an image
+// (X-Filename), both an admin's (as the admin page is); /layouts/assets/<file> serves an image.
+// Reading them is anyone's who may use the consoles (a screen may show one).
+function layoutRequest(req, res, urlPath, account) {
+  const json = (code, v) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(v));
+  const reader = !needLogin() || !!account;
+  const admin = adminReach(req.socket.remoteAddress) && (!needLogin() || account?.role === 'admin');
+  if (urlPath.startsWith('/layouts/assets/')) {
+    if (!reader) return res.writeHead(401).end();
+    const a = LAYOUTS.assetPath(decodeURIComponent(urlPath.slice(16)));
+    if (!a || req.method !== 'GET') return res.writeHead(404).end('Not found');
+    return fs.readFile(a.path, (err, data) => (err ? res.writeHead(404).end() : res.writeHead(200, { 'Content-Type': a.type, 'Cache-Control': 'no-cache', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'", 'X-Content-Type-Options': 'nosniff' }).end(data)));
+  }
+  if (!reader) return json(401, { error: 'log in first' });
+  const what = decodeURIComponent(urlPath.slice(12).replace(/^\//, ''));
+  const body = (max, done) => {
+    const parts = []; let size = 0, over = false;
+    req.on('data', (c) => { size += c.length; if (size > max) { over = true; req.destroy(); } else parts.push(c); });
+    req.on('end', () => (over ? null : done(Buffer.concat(parts))));
+    req.on('close', () => { if (over && !res.headersSent) json(413, { error: 'too big' }); });
+  };
+  if (!what && req.method === 'GET') return json(200, { layouts: LAYOUTS.list(), assets: LAYOUTS.assets() });
+  if (what === 'assets' && req.method === 'POST') {
+    if (!admin) return json(403, { error: 'adding images is for an admin' });
+    return body(LAYOUTS.MAX_ASSET, (data) => {
+      let name = ''; try { name = decodeURIComponent(String(req.headers['x-filename'] || '')); } catch { /* (a bad name: refused below) */ }
+      const r = LAYOUTS.addAsset(name, data);
+      if (r.error) return json(400, r);
+      console.log(`layouts: image ${r.file} added`);
+      json(200, r);
+    });
+  }
+  if (!LAYOUTS.NAME_RE.test(what)) return json(404, { error: 'no such layout' });
+  if (req.method === 'GET') { const v = LAYOUTS.read(what); return v ? json(200, { layout: v }) : json(404, { error: 'no such layout' }); }
+  if (req.method === 'PUT') {
+    if (!admin) return json(403, { error: 'saving layouts is for an admin' });
+    return body(LAYOUTS.MAX_LAYOUT, (data) => {
+      let v; try { v = JSON.parse(data.toString('utf8')); } catch { return json(400, { error: 'not JSON' }); }
+      const err = LAYOUTS.save(what, v);
+      if (err) return json(400, { error: err });
+      console.log(`layouts: ${what} saved`);
+      json(200, { saved: what });
+    });
+  }
+  json(405, { error: 'GET, PUT' });
+}
 
 const wss = new WebSocketServer({ server, perMessageDeflate: false }); // (no compression: Safari drops connections that use it)
 

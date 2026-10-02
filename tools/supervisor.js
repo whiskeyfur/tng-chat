@@ -137,6 +137,7 @@ let timer = null;
 const changed = new Set();
 function onChange(file) {
   if (!file || IGNORE.includes(file) || /(^|[/\\])\.|~$|\.swp$|\.tmp$/.test(path.basename(file))) return;
+  if (/[/\\]layouts([/\\]|$)/.test(path.relative(ROOT, file))) return; // (config/layouts: the layout designer's, nothing running uses them)
   changed.add(file);
   clearTimeout(timer);
   timer = setTimeout(apply, DELAY);

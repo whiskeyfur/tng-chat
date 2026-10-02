@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LCARS: Layout designer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&display=swap">
+  <link rel="stylesheet" href="lcars.css">
+  <link rel="stylesheet" href="console.css">
+  <link rel="stylesheet" href="lcars-layout.css">
+</head>
+<body class="designer">
+  <div class="lcars-app">
+    <header class="lcars-header">
+      <div class="lcars-elbow lcars-elbow--top" style="--elbow: var(--lcars-lilac)"><span>LYT 01</span></div>
+      <div class="lcars-bar">
+        <span class="lcars-bar__seg lcars-bar__seg--a"></span>
+        <span class="lcars-header__console" id="lyt-name-shown">New layout</span>
+        <span class="lcars-bar__seg lcars-bar__seg--b"></span>
+        <h1 class="lcars-header__title">Layouts</h1>
+      </div>
+    </header>
+
+    <nav class="lcars-sidebar" aria-label="Designer">
+      <div class="lcars-sidebar__col lcars-sidebar__col--left" aria-label="Back">
+        <a class="lcars-nav-button" href="/admin" style="--accent: var(--lcars-peach)"><span>Admin</span></a>
+        <a class="lcars-nav-button" href="./" style="--accent: var(--lcars-tan)"><span>Consoles</span></a>
+        <div class="lcars-sidebar__fill"></div>
+      </div>
+      <div class="lcars-sidebar__col lcars-sidebar__col--right" id="lyt-palette" aria-label="Parts: drag one onto the canvas, or tap to add it"></div>
+    </nav>
+    <aside class="lcars-pane" id="left-pane"></aside>
+
+    <main class="lcars-content" tabindex="-1">
+      <section class="lcars-panel" style="--accent: var(--lcars-lilac)">
+        <h2 class="lcars-panel__title"><span>Layout</span></h2>
+        <div class="lcars-panel__body">
+          <div class="lyt-file">
+            <label class="lyt-field"><span class="tr-label">Name</span><input id="lyt-name" autocomplete="off" spellcheck="false" placeholder="my-layout"></label>
+            <label class="lyt-field"><span class="tr-label">Title</span><input id="lyt-title" autocomplete="off" placeholder="Title"></label>
+            <span class="lyt-status" id="lyt-status" role="status"></span>
+          </div>
+          <div id="lyt-filebar"></div>
+          <div id="lyt-saved"></div>
+          <div id="lyt-toolbar"></div>
+        </div>
+      </section>
+      <div class="lyt-work">
+        <div class="lyt-canvas-wrap"><div class="lyt-canvas" id="lyt-canvas" tabindex="0" aria-label="Canvas"></div></div>
+        <section class="lcars-panel lyt-props" style="--accent: var(--lcars-orange)">
+          <h2 class="lcars-panel__title"><span id="lyt-props-title">Properties</span></h2>
+          <div class="lcars-panel__body" id="lyt-props"></div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="lcars-footer">
+      <div class="lcars-elbow lcars-elbow--bottom"><span>DESIGN</span></div>
+      <div class="lcars-bar">
+        <span class="lcars-status" id="lyt-hint" data-status="online">Drag parts on · Shift-tap to select more · arrows nudge · Ctrl-Z undo</span>
+        <span class="lcars-bar__seg lcars-bar__seg--c"></span>
+      </div>
+    </footer>
+  </div>
+  <div class="lyt-preview" id="lyt-preview" hidden><div class="lyt-preview-host" id="lyt-preview-host"></div></div>
+  <div class="lyt-ghost" id="lyt-ghost" hidden></div>
+  <script src="screens.js"></script>
+  <script src="lcars-layout.js"></script>
+  <script src="designer.js"></script>
+</body>
+</html>

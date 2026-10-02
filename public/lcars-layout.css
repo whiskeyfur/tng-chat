@@ -1,0 +1,59 @@
+/* LCARS layouts (lcars-layout.js): the parts, and the designer around them. */
+.lyt-stage { position: relative; background: #000; overflow: hidden; font-family: var(--font, 'Antonio', sans-serif); text-transform: uppercase; letter-spacing: 0.04em; }
+.lyt-item { position: absolute; box-sizing: border-box; }
+.lyt-shape { position: absolute; inset: 0; overflow: visible; }
+.lyt-label { position: absolute; display: flex; align-items: flex-end; white-space: nowrap; line-height: 1; overflow: hidden; }
+.lyt-pillbar-row { display: flex; gap: 3px; height: 100%; }
+.lyt-pb-cap { flex: none; height: 100%; }
+.lyt-pb-seg { display: flex; align-items: flex-end; justify-content: flex-end; padding: 0 8px 2px; white-space: nowrap; color: #000; flex: 1; }
+.lyt-pb-label { flex: 2; }
+.lyt-pb-opt { border: 2px solid; background: transparent; }
+.lyt-bracket { position: absolute; top: 0; bottom: 0; box-sizing: border-box; }
+.lyt-img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.lyt-callouts { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.lyt-callout-label { position: absolute; transform: translateY(-50%); white-space: nowrap; line-height: 1; }
+
+/* the designer */
+.designer .lcars-content { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+#lyt-palette .lcars-nav-button { touch-action: none; user-select: none; cursor: grab; min-height: 40px; font-size: 15px; }
+.lyt-file { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.lyt-field { display: flex; align-items: center; gap: 8px; }
+.lyt-field input, .lyt-prop input { background: #111; color: var(--lcars-text); border: 2px solid var(--lcars-tan); border-radius: 14px; padding: 4px 10px; font: inherit; font-size: 15px; min-width: 0; }
+.lyt-field input { width: 220px; }
+.lyt-status { text-transform: uppercase; font-size: 14px; }
+.lyt-status.err { color: var(--lcars-red); }
+.lyt-status.ok { color: #66cc66; }
+.lyt-work { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 10px; align-items: start; }
+@media (max-width: 1100px) { .lyt-work { grid-template-columns: minmax(0, 1fr); } }
+.lyt-canvas-wrap { min-width: 0; }
+.lyt-canvas { position: relative; overflow: hidden; touch-action: none; user-select: none; outline: none; border-radius: 4px; }
+.lyt-canvas:focus-visible { box-shadow: 0 0 0 2px var(--lcars-sky); }
+.lyt-canvas .lyt-stage.lyt-grid { background-image: linear-gradient(#1a1a1a 1px, transparent 1px), linear-gradient(90deg, #1a1a1a 1px, transparent 1px); background-size: 16px 16px; background-color: #000; }
+.lyt-canvas .lyt-item, .lyt-canvas .lyt-callout-label { cursor: move; }
+.lyt-canvas .lyt-container { outline: 1px dashed #333; }
+.lyt-canvas .lyt-empty { outline: 2px dashed #444; display: flex; }
+.lyt-canvas .lyt-callout-hit { pointer-events: stroke; cursor: move; }
+.lyt-overlay { position: absolute; inset: 0; pointer-events: none; }
+.lyt-sel { position: absolute; outline: 2px solid var(--lcars-sky); outline-offset: 1px; }
+.lyt-sel--ghost { outline: 2px dashed var(--lcars-gold); }
+.lyt-target { position: absolute; outline: 3px solid #66cc66; background: rgba(102, 204, 102, 0.12); }
+.lyt-handle { position: absolute; background: var(--lcars-sky); border: 1px solid #000; pointer-events: auto; touch-action: none; border-radius: 2px; }
+.lyt-handle--point { border-radius: 50%; background: var(--lcars-gold); }
+.lyt-props .tr-pick { flex-wrap: wrap; }
+.lyt-prop { display: flex; gap: 8px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+.lyt-prop input { width: 100%; }
+.lyt-step { display: inline-flex; align-items: center; gap: 4px; }
+.lyt-step output { min-width: 36px; text-align: center; color: var(--lcars-gold); }
+.lyt-swatch { width: 34px; min-height: 30px; border-radius: 15px; border: 3px solid transparent; padding: 0; cursor: pointer; }
+.lyt-swatch[aria-pressed='true'] { border-color: #fff; }
+.lyt-swatch--none { background: repeating-linear-gradient(45deg, #222 0 4px, #444 4px 8px); }
+.lyt-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.lyt-nums label { display: flex; flex-direction: column; font-size: 12px; color: var(--lcars-gold); }
+.lyt-nums input { width: 100%; }
+.lyt-upload { position: relative; overflow: hidden; }
+.lyt-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.lyt-ghost { position: fixed; pointer-events: none; z-index: 50; padding: 4px 12px; border-radius: 14px; background: var(--lcars-gold); color: #000; text-transform: uppercase; font-size: 14px; transform: translate(-50%, -50%); opacity: 0.85; }
+.lyt-preview { position: fixed; inset: 0; background: #000; z-index: 60; display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+.lyt-preview[hidden] { display: none; }
+.lyt-preview-host { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+.lyt-preview-host .lyt-stage { position: absolute; }

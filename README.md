@@ -40,6 +40,35 @@ Players: the header shows your account (tap to log out); Log out is on the Stati
 
 **When WebSockets can't get through** (a proxy or network that blocks them): after three failed tries a console falls back to plain HTTP (long polling: `/api/poll`), and the footer says **HTTP fallback**. Everything works the same (sign-in, ship state, messages, calls' signaling; the calls' audio and video stay peer to peer); every 30 s it tries a WebSocket again and moves back to one, between calls. `?transport=http` starts a page on HTTP.
 
+### LCARS layouts (Admin → Layouts)
+
+`/designer` (admin only, as the admin page is) designs LCARS screens: MSD frames, header-and-menu pages, panels.
+
+- **Parts** are on the left: elbows (any corner; spine, arm and inner curve; an **open** end, meaning there's more below, or a **closed C**, meaning everything is shown), a header + body pair (two Ls back to back: a header, a body and a spine for menu blocks), bars, columns, end caps, pills, pill bars, panels, labels, titles, number blocks, capsules, panel stacks, images and callouts.
+- **Adding parts:** drag a part onto the canvas, or tap it to add it in the middle (or into the container that's selected).
+- **Editing:**
+  - Move a part by dragging it, and resize it by its handles; everything snaps to the grid unless Snap is off.
+  - Shift-tap selects more than one.
+  - Arrow keys nudge (Shift: 4 cells). Delete removes a part; Ctrl-D duplicates; Ctrl-Z and Ctrl-Shift-Z undo and redo.
+  - Layer taps bring a part forward or send it back.
+- **Containers** hold what's dropped into them:
+  - An elbow's body and its spine. The spine stacks menu blocks.
+  - Inside a capsule.
+  - A panel stack, which lays its parts down or across with a gap.
+  - The header + body pair's three regions.
+
+  Moving a container moves its parts, and Take out lifts one out.
+- **Callouts** are lines that turn at right angles from a label to an anchor point (drag either end). They can go across then up or down, up or down then across, or across, up or down, and across again.
+- **Images:** upload one into an image part. Images are kept in `config/layouts/assets/` and named for their content.
+- **Properties** are all taps: colour swatches, choices and − / + steps. Text, and place and size in cells, are typed.
+- **Saving:**
+  - Save writes `config/layouts/<name>.json` (the previous version is kept as `.<name>.json.bak`); Save as copy makes a new one, and Open lists them.
+  - Preview shows the layout full screen.
+  - The supervisor doesn't reload anything for layouts.
+  - Two samples come with it: the Vico's MSD (`vico-msd`) and LCARS Access 813 (`access-813`).
+
+`public/lcars-layout.js` draws a layout anywhere (`LCARSLayout.render(layout, element)`), so a console screen can show a saved one. `GET /api/layouts/<name>` reads one for anyone who may use the consoles; saving is an admin's.
+
 ### Hosting the pages elsewhere (GitHub Pages)
 
 The pages in `public/` are static, so they can be hosted anywhere, for example GitHub Pages, as long as they can reach a running `server.js` (the comm relay):
@@ -328,6 +357,7 @@ npm test
 Starts the server and drives headless Chromium pages with a fake microphone through crew consoles and ops consoles:
 
 - **The admin page** (`test/admin.js`, under the supervisor, on a copy of `config/`): the editor raised Galaxy's bus limit, saved it (a backup kept) and the reload applied it; a design without a name was refused beside its field; Galaxy duplicated as the Akira class, which appeared in Create ship.
+- **Layouts** (`test/layouts.js`, on a copy of `config/`): an elbow, a bar, labels and a panel stack dragged on from the palette; a label dragged into the elbow, another into the stack; the elbow moved (its label with it) and closed; the bar resized, undone and redone; saved, the page reloaded and the layout opened just as it was; the samples open and draw.
 - **Designs** (`test/config.js`): every file in `config/` loads; a bad one is skipped (named, with its field) and the rest load; a ship of each class comes up built from its file (its class, its buses, its places), with the chart's starbases.
 - **Tablets** (`test/touch.js`): on an iPad-sized touch screen, a finger drag scrolls the power grid, the sidebar and the admin panel to its bottom.
 - **The network map** (`test/netmap.js`): John's topology (Utopia Planitia–Vengence–Discovery, Deep Space 4–Cole, Enterprise and Farragut with Starbase 47; Starbase 12 and 74 on no link) seen from the Discovery: linked vessels close, no pills overlapping, the unlinked starbases further out; tapping a link lists its network; Communications requests a link the other ship's ops sees.
