@@ -194,6 +194,11 @@
     .dist-flow { stroke-dasharray: 10 6; animation: dist-flow 1s linear infinite; }
     .dist-flow--rev { animation-direction: reverse; }
     @keyframes dist-flow { to { stroke-dashoffset: -16; } }
+    /* (Held 3 s: a ring fills round the pill, then the power grid opens at it.) */
+    .dist-hold-ring { fill: none; stroke: #fff; stroke-width: 3; stroke-dasharray: 100; stroke-dashoffset: 100; animation: dist-hold 3s linear forwards; pointer-events: none; }
+    @keyframes dist-hold { to { stroke-dashoffset: 0; } }
+    #grid-table .grid-flash, #grid-table .grid-flash > * { animation: grid-flash 0.45s ease-in-out 4 alternate; }
+    @keyframes grid-flash { to { background: rgba(153, 204, 255, 0.35); box-shadow: inset 0 0 0 2px var(--lcars-sky); } }
     @media (prefers-reduced-motion: reduce) { .dist-flow { animation: none; } }
     .dist-node:hover rect { filter: brightness(1.2); }
     /* A capsule: a closed, critical monitor (inward-facing caps on both sides). */

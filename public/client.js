@@ -870,6 +870,7 @@ function renderDistribution(grid) {
     g.append(svgEl('rect', { width: w, height: PH, rx: PH / 2, fill: COLOR[n.st], opacity: n.st === 'dead' ? 0.6 : 1, ...(n.st === 'cut' ? { stroke: 'var(--lcars-red)', 'stroke-width': 2 } : {}) }),
       svgEl('text', { x: 16, y: 17, 'font-size': 14, fill: n.st === 'open' || n.st === 'cut' ? 'var(--lcars-text)' : '#000' }, n.label.toUpperCase()),
       svgEl('text', { x: 16, y: 32, 'font-size': 11, fill: n.st === 'open' || n.st === 'cut' ? '#aaa' : '#000' }, `${n.value} · ${n.word || { live: 'live', idle: 'ready', dead: 'no power', open: 'standby', cut: 'CUT OFF' }[n.st]}`));
+    gridJumpable(g, gridRowFor(n, X));
     if (n.xlDir) g.addEventListener('click', () => send({ type: 'grid', xlDir: n.xlDir }));
     if (n.view) g.addEventListener('click', () => { distBus = n.view; box.dataset.sig = ''; renderDistribution(lastNav?.own?.grid); });
     if (n.tapBus) g.addEventListener('click', () => send({ type: 'grid', tap: { bus: n.tapBus, on: !(grid.taps?.[n.tapBus] > 0) } }));
@@ -953,8 +954,66 @@ function renderDistribution(grid) {
     el('div', { className: 'place-bar dist-buses' }, el('span', { className: 'place-label', textContent: 'Bus' }), ...['A', 'B', 'C', 'EPS', 'Deu', 'AM'].map(tap), el('span', { className: 'place-cap place-cap--r' })),
     ladder,
     el('div', { className: 'dist-wrap' }, svg),
-    el('p', { className: 'ops-hint', textContent: 'Power runs source → bus → place → system → subsystem: a load gets this bus\'s power only while everything above it is tied to it (CUT OFF otherwise). Tap a pill to tie it to this bus or untie it.' }));
+    el('p', { className: 'ops-hint', textContent: 'Power runs source → bus → place → system → subsystem: a load gets this bus\'s power only while everything above it is tied to it (CUT OFF otherwise). Tap a pill to tie it to this bus or untie it; shift-click it, or hold it 3 s, to see it on the Power grid.' }));
   focusDistribution();
+}
+// A debugging jump from Distribution to the Power grid: a shift-click, or a press held 3 s, on a
+// pill opens the grid at that system's row (a bus: its column; the crosslink: its row), flashed.
+function gridRowFor(n, X) {
+  const k = n.key || '';
+  if (n.xlKey === 'bus-here') return [`grid-col-${X}`];
+  if (n.xlKey?.startsWith('xl-bus:')) return [`grid-col-${n.xlKey.slice(7)}`];
+  if (n.xlKey?.startsWith('xl-')) return ['ties-crosslink'];
+  if (n.tapBus) return ['eps-taps'];
+  if (/^emerg[ABC]$/.test(k)) return ['grid-emerg'];
+  if (/^(battery|eps pressure)/i.test(n.label) && !k) return ['grid-stores'];
+  if (['dock', 'dockEps', 'ship', 'shipEps'].includes(k)) return ['^conn-', `ties-${k}`];
+  if (k === 'core') return ['ties-core', 'ties-core-parent'];
+  if (k) return [`ties-${k.replace(':', '-')}`, `ties-${k.split(':')[1] || k}-parent`];
+  return [];
+}
+function gridJump(ids) {
+  showScreen('st-grid');
+  const find = () => { for (const id of ids) { const e = id.startsWith('^') ? document.querySelector(`#grid-table [id^="${id.slice(1)}"]`) : document.getElementById(id); if (e) return e.closest('tr, th') || e; } return null; };
+  let tries = 0;
+  const go = () => {
+    const row = find();
+    if (!row && ++tries < 20) return setTimeout(go, 100);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', inline: 'center' });
+    // (Flashed for 2 s; the grid redraws its rows as power moves, so the row is found again each time.)
+    const until = Date.now() + 2000;
+    const flash = setInterval(() => { const r = find(); if (Date.now() > until) { clearInterval(flash); r?.classList.remove('grid-flash'); } else if (r && !r.classList.contains('grid-flash')) r.classList.add('grid-flash'); }, 100);
+    row.classList.add('grid-flash');
+  };
+  requestAnimationFrame(go);
+}
+// (On a pill: shift-click, or hold 3 s with no drag; a normal tap does what it always did. The
+// hold outlives Distribution redrawing as power moves: it's kept by the pill's key.)
+let distHold = null, distJumped = false;
+const holdRing = (g, elapsed) => {
+  const r = g.querySelector('rect'), ring = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  for (const a of ['width', 'height', 'rx']) ring.setAttribute(a, r.getAttribute(a));
+  ring.setAttribute('class', 'dist-hold-ring'); ring.setAttribute('pathLength', '100');
+  ring.style.animationDelay = `-${elapsed}ms`;
+  g.append(ring);
+};
+const holdStop = () => { if (!distHold) return; clearTimeout(distHold.timer); distHold = null; document.querySelectorAll('.dist-hold-ring').forEach((x) => x.remove()); };
+document.addEventListener('pointermove', (e) => { if (distHold && Math.hypot(e.clientX - distHold.start[0], e.clientY - distHold.start[1]) > 8) holdStop(); });
+for (const ev of ['pointerup', 'pointercancel']) document.addEventListener(ev, holdStop);
+function gridJumpable(g, ids) {
+  const key = g.dataset.key;
+  if (distHold?.key === key) holdRing(g, Date.now() - distHold.t0);
+  g.addEventListener('click', (e) => {
+    if (e.shiftKey || distJumped) { e.stopImmediatePropagation(); e.preventDefault(); if (e.shiftKey && !distJumped) gridJump(ids); distJumped = false; }
+  });
+  g.addEventListener('pointerdown', (e) => {
+    if (e.button > 0 || e.shiftKey) return;
+    holdStop();
+    distJumped = false;
+    distHold = { key, t0: Date.now(), start: [e.clientX, e.clientY], timer: setTimeout(() => { holdStop(); distJumped = true; gridJump(ids); }, 3000) };
+    holdRing(g, 0);
+  });
 }
 // A bus opened (Distribution shown, or another bus picked): its pill scrolled to the middle of
 // the view, once; live updates leave the scroll where it is.
@@ -1931,7 +1990,7 @@ function renderCombat() {
         });
       }
       return el('table', { className: 'grid-table', id: 'grid-table' },
-        el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), el('th', { scope: 'col', textContent: 'Controls' }), ...COLS.map((n) => el('th', { scope: 'col', textContent: NODE_NAMES[n] }))), busAllRow(), storesRow(), emergRow()),
+        el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'System' }), el('th', { scope: 'col', textContent: 'Controls' }), ...COLS.map((n) => el('th', { scope: 'col', id: `grid-col-${n}`, textContent: NODE_NAMES[n] }))), busAllRow(), storesRow(), emergRow()),
         el('tbody', {}, ...rows),
         el('tfoot', {}, el('tr', {}, el('th', { scope: 'row', textContent: 'Used / available / max' }), el('td'),
           ...COLS.map((n) => {

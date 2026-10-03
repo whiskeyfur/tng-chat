@@ -249,6 +249,33 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     await wait(300);
     assert.equal(await page.evaluate(() => { const b = document.querySelector('[data-distribution]'); let sc = b.parentElement; while (sc && !(sc.scrollHeight > sc.clientHeight + 2)) sc = sc.parentElement; return sc.scrollTop; }), keep[0], 'a live update kept the scroll');
     await page.click('[data-distribution] button[data-bus="A"]');
+    // To the Power grid from Distribution: a shift-click on the Helm console opens the grid at its
+    // row, flashed (not untying it); a 3 s hold on the EPS tap opens it at the EPS taps (not closing
+    // it); a hold that drags is a scroll, and stays.
+    const toDist = async () => { await page.evaluate(() => document.querySelector('[data-screen-tab="st-dist"]').click()); await page.waitForSelector('[data-distribution] .dist-node[data-key="tap:A"]', { state: 'visible' }); await wait(600); await page.locator('[data-distribution] .dist-node[data-key="tap:A"]').scrollIntoViewIfNeeded(); };
+    const helmTied = await page.evaluate(() => window.__nav.last.own.grid.ties['console:Helm'].join());
+    await page.click('[data-distribution] .dist-node[data-key="console:Helm"]', { modifiers: ['Shift'] });
+    await page.waitForSelector('#ties-console-Helm.grid-flash', { timeout: 3000 });
+    assert.ok(await page.$eval('#ties-console-Helm', (r) => { const b = r.getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; }), 'the Helm console\'s row in view');
+    await wait(500);
+    assert.equal(await page.evaluate(() => window.__nav.last.own.grid.ties['console:Helm'].join()), helmTied, 'a shift-click doesn\'t untie it');
+    await toDist();
+    const tapsA = await page.evaluate(() => window.__nav.last.own.grid.taps.A);
+    const tapBox = await page.locator('[data-distribution] .dist-node[data-key="tap:A"]').boundingBox();
+    await page.mouse.move(tapBox.x + 20, tapBox.y + 20); await page.mouse.down();
+    await wait(1000);
+    assert.equal(await page.locator('[data-distribution] .dist-node[data-key="tap:A"] .dist-hold-ring').count(), 1, 'a ring fills while it\'s held');
+    await wait(2300);
+    await page.mouse.up();
+    await page.waitForSelector('#eps-taps.grid-flash', { timeout: 3000 });
+    await wait(500);
+    assert.equal(await page.evaluate(() => window.__nav.last.own.grid.taps.A), tapsA, 'a hold doesn\'t close the tap');
+    await toDist();
+    const tapBox2 = await page.locator('[data-distribution] .dist-node[data-key="tap:A"]').boundingBox();
+    await page.mouse.move(tapBox2.x + 20, tapBox2.y + 20); await page.mouse.down(); await page.mouse.move(tapBox2.x + 20, tapBox2.y + 60, { steps: 4 });
+    await wait(3300); await page.mouse.up();
+    assert.equal(await page.evaluate(() => document.querySelector('[data-screen="st-dist"]').hidden), false, 'a hold that drags stays on Distribution');
+    step('Distribution → Power grid: a shift-click on the Helm console opened the grid at its row, flashed (still tied); a 3 s hold on the EPS tap (a ring filling) opened it at the EPS taps (still open); a hold that dragged stayed');
     // A tap on a tie closes (or opens) it.
     const xlWas = await page.evaluate(() => [...window.__nav.last.own.grid.ties.crosslink]);
     await page.click('#dist-tie-AB');
