@@ -139,9 +139,7 @@ async function sock(hello) {
     await comms.click('#signin-ships button[data-ship="Farragut"]');
     await comms.click('#signin-unassigned button[data-station="Communications"]');
     await comms.click('#register-go');
-    // (Signed in, its station shown, before its Links tab: else the station coming up shows its first screen.)
-    await comms.waitForFunction(() => me?.station === 'Communications' && document.querySelector('[data-screen-tab="st-links"]'));
-    await comms.evaluate(() => document.querySelector('[data-screen-tab="st-links"]').click());
+    await comms.evaluate(() => document.querySelector('[data-screen-tab="st-links"]')?.click());
     await comms.waitForFunction(() => document.querySelectorAll('#comm-net-map .net-node').length === 11, null, { timeout: 15000 });
     await comms.locator('#comm-net-map .net-node[data-ship="Cole"]').dispatchEvent('click'); // (a tap; the layout may still be settling at the pane's edge)
     await comms.click('[data-netmap-details] button:has-text("Request link")');

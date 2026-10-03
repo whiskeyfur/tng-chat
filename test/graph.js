@@ -12,7 +12,7 @@ const step = (s) => console.log(`ok - ${s}`);
 let ok = false;
 try {
   const d = GRAPH.dump();
-  const designs = CONFIG.readShips(); // (the design files are graphs: their design fields, worked out)
+  const designs = Object.fromEntries(Object.keys(d.classes).map((id) => [id, JSON.parse(fs.readFileSync(path.join(CONFIG.DIR, 'ships', `${id}.json`), 'utf8'))]));
   const counts = [];
   for (const id of Object.keys(d.classes)) {
     const g = GRAPH.convert(id, designs[id], d);
@@ -31,16 +31,7 @@ try {
 
   // The runabout's file: up to date, and it loads.
   const g = GRAPH.convert('runabout', designs.runabout, d);
-  // (The design files are graphs: each the same built again from the design fields worked out of it.)
-  const files = CONFIG.readShipFiles();
-  for (const id of Object.keys(d.classes)) {
-    assert.ok(GRAPH.isGraphFile(files[id]), `config/ships/${id}.json is a graph`);
-    const again = GRAPH.toFile(id, GRAPH.toDesign(files[id]), d);
-    for (const k of Object.keys(again)) assert.equal(JSON.stringify(files[id][k]), JSON.stringify(again[k]), `${id}: ${k} the same built again`);
-    // (Its station list, as the consoles read it on its own: every seat, its places' too.)
-    const st = GRAPH.toDesign(files[id]).stations, seats = Object.values(GRAPH.nodes(files[id]).all).map((s) => s.effects?.seat?.station).filter(Boolean);
-    assert.deepEqual([...st].sort(), [...new Set(seats)].sort(), `${id}: its stations are its seats, every one`);
-  }
+  assert.equal(fs.readFileSync(path.join(CONFIG.DIR, 'ships-graph', 'runabout.json'), 'utf8'), JSON.stringify(g, null, 2) + '\n', 'config/ships-graph/runabout.json is up to date (node tools/ship-graph.js runabout)');
   const loaded = CONFIG.loadGraphs((line) => { throw new Error(line); });
   assert.ok(loaded.runabout, 'the config loader loads it');
   // (From any system, both ways: the EPS feeds the shields' and the taps; Bus B's sources.)
@@ -70,10 +61,10 @@ try {
   assert.equal(all['console-helm'].upstream['bus-a'].power.min, 2, 'a console works on its 2 MW or not at all');
   assert.equal(all['subsystem-injector'].upstream['bus-a'].power.min, 'all', 'a subsystem needs all it draws');
   // (The starbase's design is creative in power, EPS, deuterium and antimatter: its core and tanks never run dry.)
-  const sb = GRAPH.nodes(GRAPH.convert('starbase', designs.starbase, d)).all;
+  const sb = GRAPH.nodes(GRAPH.convert('starbase', JSON.parse(fs.readFileSync(path.join(CONFIG.DIR, 'ships', 'starbase.json'), 'utf8')), d)).all;
   assert.ok(sb['warp-core']?.creative?.eps && sb['tank-deu-main']?.creative?.deu && sb['tank-am-main']?.creative?.am, 'a starbase: creative core and tanks');
   step(`heat: ${Math.round(made)} made at full draw, ${dumped} the radiators dump; pull priority and minimums on every load's links`);
-  step(`every design file in config/ships is a graph, the same built again from its design fields; the runabout's loads (${Object.keys(all).length} systems, ${Object.keys(g.systems).length} at the top); walking up and down from any system works; its effects say what it can do (${[...can].length} effects)`);
+  step(`config/ships-graph/runabout.json is up to date and loads (${Object.keys(all).length} systems, ${Object.keys(g.systems).length} at the top); walking up and down from any system works; its effects say what it can do (${[...can].length} effects)`);
 
   // Something wrong: refused, saying what.
   const broken = JSON.parse(JSON.stringify(g)), b = GRAPH.nodes(broken).all;

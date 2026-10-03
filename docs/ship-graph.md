@@ -4,15 +4,15 @@ A vessel's design as a **graph of systems**. Every system a class has gets one e
 
 Today the same facts are spread over the design file and tables inside the relay. The graph puts them in one place, so the solver, Distribution, the Power grid and the MSD can all read the same thing. It also lets any system be the root of a chart.
 
-**Status:** step 4 under way. The design files in `config/ships/` are graphs (4a): the relay plays on them (the graph engine, since the cutover) and works the old design fields out of them for the code that still reads those (4b-4d remove that).
+**Status:** step 1 of 4. The graphs are generated from the current design files by `tools/ship-graph.js` and checked by the config loader. The game doesn't read them yet, and nothing in play changes.
 
 ## Files
 
 | File | What |
 |---|---|
 | `config/system-types.json` | The library of system types: what every system of a type is (its role, its resources). A graph only says what's particular to a system. |
-| `config/ships/<class>.json` | A vessel kind's design: its graph, plus what isn't power or systems (`about`, `refit`, `indestructible`, `lands`, `wiring`, `org`, `seats`, and its `places` with their stations and rows). The Admin ship design editor writes them; `node tools/ship-graph.js --convert` makes an older design file a graph (the old file kept in `config/ships/.backup/`), `--check` checks every one is a graph, valid, and stable: the same graph built again from the design fields worked out of it (`toDesign`). |
-| `tools/ship-graph.js` | The converter (`convert`, `toFile`: a graph from a design's fields), `toDesign` (the design fields from a graph), the checker (`check`), the walkers (`nodes`, `index`), and `toTies` (a new vessel's ties, read back). |
+| `config/ships-graph/<class>.json` | One class's graph, generated: `node tools/ship-graph.js <class>`, `--all` for every class, `--check` to see the files are valid and up to date. |
+| `tools/ship-graph.js` | The converter, the checker (`check`), the both-ways index (`index`), and `toTies` (the converter's own check that it lost nothing). |
 
 The relay prints its power tables and what each class has aboard when it's run with `SHIP_GRAPH_DUMP=1`, then exits without listening. The converter uses that output, so a graph is exactly what the game builds for a new ship of that class.
 
@@ -226,8 +226,4 @@ What `min` changes against today, from the starved state: the subspace relay get
    - **No old-save conversion** (John): the switch starts a new game.
    - Before it, `shipcore-data/` and `data/starbases.json` are moved to a timestamped backup folder, never deleted; accounts and settings stay.
    - The cutover itself is asked for first.
-4. **Under way:**
-   - **4a, done:** the design files are graphs, and the Admin editor writes them.
-   - **4b:** the relay's engineering state keyed by system id.
-   - **4c:** the grid, Distribution, MSD and automation read only the graph, and the old tables go.
-   - **4d:** the relay's old solver and the engine switch go.
+4. Today's tables go, and the design files become graphs.

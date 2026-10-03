@@ -249,9 +249,5 @@
       "hot": 0.9,
       "about": "Of a system's heat limit (step 2): above warm it works less well, above hot it's damaged."
     }
-  },
-  "constants": {
-    "coreMax": 1000,
-    "about": "The relay's numbers a design file's graph is read with: a warp core's output at 1\u00d7 (its design's core)."
   }
 }
