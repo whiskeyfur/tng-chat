@@ -1,5 +1,5 @@
 {
-  "about": "A runabout: a small warp core that can't be replaced; its cockpit has Helm, Ops and Tactical.",
+  "about": "A runabout: a small warp core that can't be replaced; its cockpit has Helm, Ops, Tactical and Communications.",
   "name": "Runabout",
   "bus": 100,
   "eps": 250,
@@ -17,6 +17,7 @@
   "stations": [
     "Helm",
     "Tactical",
+    "Communications",
     "Engineering",
     "Transporter"
   ],
@@ -40,7 +41,8 @@
       "stations": [
         "Helm",
         "Operations",
-        "Tactical"
+        "Tactical",
+        "Communications"
       ],
       "rows": [
         "system:phaser1",

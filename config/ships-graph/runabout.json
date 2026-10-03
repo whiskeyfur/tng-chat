@@ -286,6 +286,12 @@
             "push": false
           }
         },
+        "console-communications": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
         "console-operations": {
           "heat": {
             "pull": "auto",
@@ -430,7 +436,7 @@
       "type": "heat-sink",
       "name": "Heat sink",
       "capacity": {
-        "heat": 8712
+        "heat": 8742
       },
       "upstream": {}
     },
@@ -1807,6 +1813,157 @@
         }
       }
     },
+    "console-communications": {
+      "key": "console:Communications",
+      "type": "console",
+      "name": "Communications console",
+      "place": "place-cockpit",
+      "consumes": {
+        "power": 2
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 150,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 150,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 150,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      },
+      "systems": {
+        "subsystem-radio": {
+          "key": "sub:radio",
+          "type": "subsystem",
+          "name": "Radio (hails, ship-to-ship calls)",
+          "place": "place-aft-compartment",
+          "effects": {
+            "comms": {
+              "range": "hails"
+            }
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 150,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 150,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 150,
+                "min": "all"
+              }
+            }
+          }
+        },
+        "subsystem-rf": {
+          "key": "sub:rf",
+          "type": "subsystem",
+          "name": "Local RF (calls aboard)",
+          "place": "place-aft-compartment",
+          "effects": {
+            "comms": {
+              "range": "aboard"
+            }
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 150,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 150,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 150,
+                "min": "all"
+              }
+            }
+          }
+        },
+        "subsystem-subspace": {
+          "key": "sub:subspace",
+          "type": "subsystem",
+          "name": "Subspace relay (data links)",
+          "place": "place-aft-compartment",
+          "effects": {
+            "comms": {
+              "range": "subspace"
+            }
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 150,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 150,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 150,
+                "min": "all"
+              }
+            }
+          }
+        }
+      }
+    },
     "console-engineering": {
       "key": "console:Engineering",
       "type": "console",
@@ -2532,120 +2689,6 @@
       },
       "produces": {
         "heat": 20
-      }
-    },
-    "subsystem-radio": {
-      "key": "sub:radio",
-      "type": "subsystem",
-      "name": "Radio (hails, ship-to-ship calls)",
-      "place": "place-aft-compartment",
-      "parentName": "Communications",
-      "effects": {
-        "comms": {
-          "range": "hails"
-        }
-      },
-      "upstream": {
-        "bus-a": {
-          "power": {
-            "pull": true,
-            "push": false,
-            "pri": 150,
-            "min": "all"
-          }
-        },
-        "bus-b": {
-          "power": {
-            "pull": "auto",
-            "push": false,
-            "pri": 150,
-            "min": "all"
-          }
-        },
-        "bus-c": {
-          "power": {
-            "pull": true,
-            "push": false,
-            "pri": 150,
-            "min": "all"
-          }
-        }
-      }
-    },
-    "subsystem-rf": {
-      "key": "sub:rf",
-      "type": "subsystem",
-      "name": "Local RF (calls aboard)",
-      "place": "place-aft-compartment",
-      "parentName": "Communications",
-      "effects": {
-        "comms": {
-          "range": "aboard"
-        }
-      },
-      "upstream": {
-        "bus-a": {
-          "power": {
-            "pull": true,
-            "push": false,
-            "pri": 150,
-            "min": "all"
-          }
-        },
-        "bus-b": {
-          "power": {
-            "pull": "auto",
-            "push": false,
-            "pri": 150,
-            "min": "all"
-          }
-        },
-        "bus-c": {
-          "power": {
-            "pull": true,
-            "push": false,
-            "pri": 150,
-            "min": "all"
-          }
-        }
-      }
-    },
-    "subsystem-subspace": {
-      "key": "sub:subspace",
-      "type": "subsystem",
-      "name": "Subspace relay (data links)",
-      "place": "place-aft-compartment",
-      "parentName": "Communications",
-      "effects": {
-        "comms": {
-          "range": "subspace"
-        }
-      },
-      "upstream": {
-        "bus-a": {
-          "power": {
-            "pull": true,
-            "push": false,
-            "pri": 150,
-            "min": "all"
-          }
-        },
-        "bus-b": {
-          "power": {
-            "pull": "auto",
-            "push": false,
-            "pri": 150,
-            "min": "all"
-          }
-        },
-        "bus-c": {
-          "power": {
-            "pull": true,
-            "push": false,
-            "pri": 150,
-            "min": "all"
-          }
-        }
       }
     }
   }
