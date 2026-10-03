@@ -244,6 +244,42 @@ document.getElementById('link')?.addEventListener('click', (ev) => {
   window.open('admin', 'stchat-admin');
 });
 
+// This station's automation (the Station screen): its own panels' toggles, kept in step with Ops'
+// (a tap each; Engineering's Off, Startup, Shutdown), and what Ops has asked this station to confirm
+// (its lead on duty answers: Confirm or Deny).
+function renderStationAutomation() {
+  const box = document.getElementById('station-automation');
+  if (!box || !me) return;
+  const own = lastNav?.own, mine = (own?.autoPanels || []).filter((a) => a.station === me.station), asks = (own?.autoRequests || []).filter((r) => r.station === me.station);
+  const offers = (own?.postureOffers || []).filter((o) => o.station === me.station);
+  const sig = JSON.stringify([mine, asks, offers, me.id]);
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const tap = (text, on, msg, id) => { const b = el('button', { type: 'button', className: 'lcars-button tr-tap', id, textContent: text, onclick: () => send(msg) }); b.setAttribute('aria-pressed', String(!!on)); return b; };
+  const word = (p, v) => (v ? (typeof v === 'string' ? v : 'on') : 'off');
+  const offerItems = offers.map((o) => el('li', { id: `posture-${o.station.replace(/\W+/g, '-')}` }, el('p', { className: 'ops-notice', textContent: `${o.level === 'green' ? 'Condition green' : `${o.level[0].toUpperCase()}${o.level.slice(1)} alert`} posture: ${o.items.join(', ') || 'power back as it was'}` }),
+    pillBar('Posture', [tap('Apply', false, { type: 'posture', apply: true }, 'posture-apply'), tap('Set aside', false, { type: 'posture', apply: false }, 'posture-dismiss')])));
+  bc.setAlert('posture', offers.length ? `${offers[0].level} alert posture offered: ${offers[0].items.join(', ') || 'power back as it was'} (Station screen: Apply)` : null, { level: 'yellow' });
+  if (!mine.length && !offers.length) { box.replaceChildren(); return; }
+  box.replaceChildren(el('h3', { className: 'ops-subhead', textContent: 'Automation' }),
+    ...(offerItems.length ? [el('ul', { className: 'equipment-list', id: 'posture-offers' }, ...offerItems)] : []),
+    el('ul', { className: 'equipment-list' }, ...mine.map((a) => {
+      const taps = a.panel === 'engineering'
+        ? [['Off', null], ['Startup', 'startup'], ['Shutdown', 'shutdown']].map(([t, m]) => tap(t, (a.mode || null) === m, { type: 'automation', panel: a.panel, mode: m }, `auto-${a.panel}-${m || 'off'}`))
+        : [tap('On', !!a.mode, { type: 'automation', panel: a.panel, on: true }, `auto-${a.panel}-on`), tap('Off', !a.mode, { type: 'automation', panel: a.panel, on: false }, `auto-${a.panel}-off`)];
+      const ask = asks.find((r) => r.panel === a.panel);
+      const li = el('li', {}, pillBar(a.name, taps),
+        ...(ask ? [el('p', { className: 'ops-notice', id: `auto-${a.panel}-ask`, textContent: `Ops (${ask.by}) requests: ${word(a.panel, ask.mode)}. ${ask.leadId === me.id ? 'You are the lead on duty here:' : `Waiting for ${ask.lead}.`}` }),
+          ...(ask.leadId === me.id ? [pillBar('Ops request', [tap('Confirm', false, { type: 'automation-answer', panel: a.panel, yes: true }, `auto-${a.panel}-confirm`), tap('Deny', false, { type: 'automation-answer', panel: a.panel, yes: false }, `auto-${a.panel}-deny`)])] : [])] : []),
+        el('p', { className: 'ops-hint', textContent: a.mode ? 'Running by itself: a tap on its controls by hand takes it over. Ops sees it too.' : 'Off: this station works it by hand.' }));
+      li.dataset.panel = a.panel;
+      return li;
+    })));
+  // (A request for this station: a bar on its console too.)
+  bc.setAlert('auto-request', asks.length ? `Ops requests: ${asks.map((r) => `${r.name} automation ${word(r.panel, r.mode)}`).join(' · ')} (Station screen: ${asks.some((r) => r.leadId === me.id) ? 'confirm or deny' : `for ${asks[0].lead}`})` : null, { level: 'yellow' });
+}
+
 // Crew personal equipment (the Station screen): a list, each item a pill bar.
 // The personal environmental shield: on, safe where there's no atmosphere, heat or
 // gravity; it runs down its cell, and recharges off, somewhere with power.
@@ -1346,17 +1382,17 @@ function renderCrewPanels() {
       form.onsubmit = (e) => { e.preventDefault(); issueOrder(text); };
       cmd.append(
         el('p', { className: 'st-state', id: 'alert-state' }),
-        pillBar('Alert', [['green', 'Condition green', ''], ['yellow', 'Yellow alert', 'alert-yellow'], ['red', 'Red alert', 'lcars-button--alert'], ['black', 'Black alert', 'alert-black']].map(([lvl, t, c]) => {
+        pillBar('Alert', [['green', 'Condition green', ''], ['blue', 'Condition blue', 'alert-blue'], ['yellow', 'Yellow alert', 'alert-yellow'], ['red', 'Red alert', 'lcars-button--alert'], ['black', 'Black alert', 'alert-black']].map(([lvl, t, c]) => {
           const b = button(t, () => send({ type: 'alert', level: lvl }), c);
           b.dataset.level = lvl;
           if (lvl === 'green') b.style.setProperty('--accent', '#66cc66');
           return b;
         }), { groupId: 'alert-buttons' }),
-        el('p', { className: 'ops-hint', textContent: 'Red alert raises shields if they have power, and turns every console aboard red.' }),
+        el('p', { className: 'ops-hint', textContent: 'Each condition has its posture: yellow raises shields; red raises them and arms the phasers, comfort systems off; blue is minimal power. A station that\'s automated or empty takes it at once; a crewed one is offered it. Condition green puts the power back as it was.' }),
         form);
     }
     const level = lastNav?.own?.alert || 'green';
-    cmd.querySelector('#alert-state').textContent = level === 'green' ? 'Condition green' : `${level} alert`;
+    cmd.querySelector('#alert-state').textContent = level === 'green' ? 'Condition green' : level === 'blue' ? 'Condition blue: minimal power' : `${level} alert`;
     cmd.querySelector('#alert-state').dataset.level = level;
     for (const b of cmd.querySelectorAll('#alert-buttons button')) b.setAttribute('aria-pressed', String(b.dataset.level === level));
     // (Black alert: only aboard a ship with a spore drive.)
@@ -2618,6 +2654,7 @@ async function onMessage(msg) {
       break;
     case 'nav':
       lastNav = msg;
+      renderStationAutomation();
       // An automated panel at this station: a bar says so (a tap here by hand takes it back).
       { const all = Object.entries(msg.own?.automation || {}).filter(([, a]) => a.station === me?.station);
         // (The holographic doctor has its own bar: it works alongside Medical, it doesn't take the console.)

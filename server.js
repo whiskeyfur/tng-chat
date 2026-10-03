@@ -454,7 +454,7 @@ function broadcastOps(key) {
     linkOutgoing: requests.filter((r) => r.from === key).map(({ id, toShip }) => ({ id, toShip })),
     graph: networkGraph(),
     remoteBlock: !!engOf(key).remoteBlock,
-    automation: AUTO_PANELS.map((p) => ({ panel: p, name: AUTO_NAMES[p], station: AUTO_STATION[p], on: engOf(key).auto?.[p] || false, status: engOf(key).autoStatus?.[p] || '', built: AUTO_BUILT.has(p) })),
+    automation: AUTO_PANELS.map((p) => ({ panel: p, name: AUTO_NAMES[p], station: AUTO_STATION[p], on: engOf(key).auto?.[p] || false, status: engOf(key).autoStatus?.[p] || '', built: AUTO_BUILT.has(p), ...(engOf(key).autoReq?.[p] ? { pending: { mode: engOf(key).autoReq[p].v, lead: engOf(key).autoReq[p].lead } } : {}) })),
     // The shipyard's drydock: the ships in it, any release under way, and holds.
     ...(isShipyard(shipName(key)) ? { drydock: drydocked().filter((o) => shipKey(engOf(o).docked || '') === key).map((o) => ({ ship: shipName(o), hold: !!engOf(o).hold, release: engOf(o).release ? Math.max(0, Math.ceil((engOf(o).release - Date.now()) / 1000)) : null, repair: combatOf(o).repair || null })), berths: DRYDOCK.berths } : {}),
     broadcasts: [...broadcasts.values()].filter((b) => b.ships.has(key) || users.get(b.speaker)?.shipKey === key)
@@ -725,8 +725,18 @@ function operatorMessage(op, msg) {
       if (!AUTO_PANELS.includes(msg.panel)) return fail('no such panel to automate (Ops itself never is)');
       if (!AUTO_BUILT.has(msg.panel)) return fail(`${AUTO_NAMES[msg.panel]} automation isn't built yet`);
       const v = msg.panel === 'engineering' ? (['startup', 'shutdown'].includes(msg.mode) ? msg.mode : null) : !!msg.on;
-      setAuto(op.shipKey, msg.panel, v);
-      return ok(`${AUTO_NAMES[msg.panel]} automation ${v ? `on${typeof v === 'string' ? ` (${v})` : ''}` : 'off'}`);
+      // (A crewed station's lead on duty confirms or denies it; with nobody there, it's done.)
+      const lead = leadOf(op.shipKey, AUTO_STATION[msg.panel]), e = engOf(op.shipKey);
+      if (msg.withdraw) { if (e.autoReq?.[msg.panel]) { delete e.autoReq[msg.panel]; opLog(op.shipKey, `${op.name}: withdrew the request to set ${AUTO_NAMES[msg.panel]} automation`); broadcastOps(op.shipKey); scheduleNav(); } return ok('request withdrawn'); }
+      if (lead && (e.auto[msg.panel] || null) !== (v || null)) {
+        (e.autoReq ||= {})[msg.panel] = { v, by: op.name, lead: titled(lead), leadId: lead.id, at: Date.now() };
+        opLog(op.shipKey, `${op.name}: asked ${titled(lead)} (${AUTO_STATION[msg.panel]}) to set ${AUTO_NAMES[msg.panel]} automation ${autoWord(msg.panel, v)}`);
+        send(lead, { type: 'notice', text: `Ops (${op.name}) requests: ${AUTO_NAMES[msg.panel]} automation ${autoWord(msg.panel, v)}. Confirm or deny on your Station screen.` });
+        broadcastOps(op.shipKey); scheduleNav();
+        return ok(`asked ${titled(lead)} at ${AUTO_STATION[msg.panel]} to confirm`);
+      }
+      setAuto(op.shipKey, msg.panel, v, null, op.name);
+      return ok(`${AUTO_NAMES[msg.panel]} automation ${autoWord(msg.panel, v)}`);
     }
     case 'prefix': {
       // Ops sets the vessel's command prefix (5 digits, tapped in on a keypad).
@@ -1211,7 +1221,11 @@ function navMessage(key) {
     type: 'nav',
     own: own ? { name: shipName(key), ...own, class: isBase(key) ? null : classOf(key).name, power: powerOf(key), capacity: Object.fromEntries(Object.entries(capacityOf(key)).map(([x, v]) => [x, Math.floor(v)])), allocated: allocOf(key), reactor: REACTOR, signature: signatureOf(key), combat: combatView(key), grid: gridView(key),
       autopilot: autopilots.get(key)?.target || null, transporter: transporterView(key), readiness: readinessView(key),
-      automation: Object.fromEntries(AUTO_PANELS.filter((p) => engOf(key).auto?.[p]).map((p) => [p, { mode: engOf(key).auto[p], station: AUTO_STATION[p], name: AUTO_NAMES[p], status: engOf(key).autoStatus?.[p] || '' }])), orders: engOf(key).orderLog,
+      automation: Object.fromEntries(AUTO_PANELS.filter((p) => engOf(key).auto?.[p]).map((p) => [p, { mode: engOf(key).auto[p], station: AUTO_STATION[p], name: AUTO_NAMES[p], status: engOf(key).autoStatus?.[p] || '' }])),
+      // (Every panel, for each station's own toggles; and what Ops has asked a crewed station to confirm.)
+      autoPanels: AUTO_PANELS.map((p) => ({ panel: p, name: AUTO_NAMES[p], station: AUTO_STATION[p], mode: engOf(key).auto?.[p] || null })),
+      postureOffers: Object.entries(engOf(key).postureOffers || {}).map(([st, o]) => ({ station: st, level: o.level, items: st === 'Engineering' ? Object.entries(o.power).map(([x, v]) => `${x} ${v}%`) : o.tac })),
+      autoRequests: Object.entries(engOf(key).autoReq || {}).map(([p, r]) => ({ panel: p, name: AUTO_NAMES[p], station: AUTO_STATION[p], mode: r.v, by: r.by, lead: r.lead, leadId: r.leadId })), orders: engOf(key).orderLog,
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
       known: [...(known.get(key) || [])].filter(([o]) => present(o)).map(([o, p]) => ({ name: shipName(o), x: Math.round(p.x), y: Math.round(p.y), age: Math.round((Date.now() - p.at) / 1000), visible: sensorOk(key, o) })) } : null,
     bases: STARBASES.map((b) => ({ ...b, distance: own ? Math.round(Math.hypot(own.x - b.x, own.y - b.y)) : null })),
@@ -1589,7 +1603,7 @@ function scienceTick() {
 // (they can only call Security, Medical or ops). Medical: sickbay, which takes
 // crew off duty. Alert status and lockout are kept by the ship's computer.
 
-const ALERTS = ['green', 'yellow', 'red', 'black'];
+const ALERTS = ['green', 'yellow', 'red', 'black', 'blue']; // (blue: minimal power, John's)
 // Black alert: only aboard a ship with a spore drive (a jump needs it); it powers
 // the nonessential systems down (restored after), as red alert raises shields.
 const BLACK_OFF = ['replicators', 'recreation'];
@@ -1639,6 +1653,56 @@ function orderStatus(o) {
   if (by) send(by, { type: 'order-status', id: o.id, text: o.text, at: o.at, acked: names(o.acked), pending: names(o.pending), ...(o.declined ? { declined: o.declined } : {}) });
 }
 
+// Alert postures (config/system-types.json "postures", a design's over them): each condition's power
+// for Engineering, and shields and phasers for Tactical. A station that's automated or empty takes its
+// posture at once; a crewed one is offered it (Apply or Dismiss, on its Station screen). Back to green,
+// power goes back to what it was before the alert. Every step is in the ops log.
+const posturesOf = (k) => { const lib = CONFIG.systemTypes().postures || {}, own = designOf(k).postures || {}; return Object.fromEntries(ALERTS.map((l) => [l, { ...(lib[l] || {}), ...(own[l] || {}), power: { ...(lib[l]?.power || {}), ...(own[l]?.power || {}) } }])); };
+function setPowerAlloc(k, p) {
+  const core = primaryCore.get(k);
+  if (isBase(k)) { navState.get(k).power = p; gridChanged(k); saveBaseSettings(); } else if (core) send(core, { type: 'core-power', ship: shipName(k), power: p });
+}
+function postureItems(k, level) {
+  const ps = posturesOf(k)[level], e = engOf(k), base = level === 'green' ? e.prePosture : e.prePosture || allocOf(k);
+  const power = level === 'green' ? (base ? Object.fromEntries(Object.entries(base).filter(([x, v]) => allocOf(k)[x] !== v)) : {}) : Object.fromEntries(Object.entries(ps.power).filter(([x]) => SYSTEMS.includes(x)));
+  const tac = [];
+  if (ps.shields === 'up' && !shields.has(k)) tac.push('shields up');
+  if (ps.shields === 'down' && shields.has(k)) tac.push('shields down');
+  if (ps.phasers === 'armed' && !combatOf(k).armed) tac.push('phasers armed');
+  if (ps.phasers === 'safe' && combatOf(k).armed) tac.push('phasers safe');
+  return { power, tac, ps };
+}
+function applyPower(k, level, power) {
+  const e = engOf(k);
+  if (level !== 'green' && !e.prePosture) e.prePosture = allocOf(k);
+  if (level === 'green') e.prePosture = null;
+  if (Object.keys(power).length) setPowerAlloc(k, { ...allocOf(k), ...power });
+  opLog(k, `${level} posture: power ${Object.entries(power).map(([x, v]) => `${x} ${v}%`).join(', ') || 'as it was'}`);
+}
+function applyTactical(k, ps, tac) {
+  const a = automaton(k, 'Tactical');
+  if (ps.shields === 'up' && !shields.has(k)) shieldsCommand(a, { up: true });
+  if (ps.shields === 'down' && shields.has(k)) shieldsCommand(a, { up: false });
+  if (ps.phasers === 'armed' && !combatOf(k).armed) combatCommand(a, { type: 'arm', on: true });
+  if (ps.phasers === 'safe' && combatOf(k).armed) combatCommand(a, { type: 'arm', on: false });
+  if (tac.length) opLog(k, `posture: ${tac.join(', ')}`);
+}
+function applyPostures(k, level, was) {
+  if (level === was) return;
+  const e = engOf(k), { power, tac, ps } = postureItems(k, level);
+  e.postureOffers = {};
+  // (Black alert's own power-down is its spore drive's, kept as it was.)
+  if (level !== 'black' && was !== 'black') {
+    if (!leadOf(k, 'Engineering')) applyPower(k, level, power);
+    else if (Object.keys(power).length || level === 'green') { if (level !== 'green' && !e.prePosture) e.prePosture = allocOf(k); e.postureOffers.Engineering = { level, power }; }
+  }
+  if (tac.length) {
+    if (autoOn(k, 'tactical') || !leadOf(k, 'Tactical')) applyTactical(k, ps, tac);
+    else e.postureOffers.Tactical = { level, tac, ps };
+  }
+  for (const [st, o] of Object.entries(e.postureOffers)) tellStations(k, [st], `${st}: ${level} alert posture offered: ${st === 'Engineering' ? Object.entries(o.power).map(([x, v]) => `${x} ${v}%`).join(', ') || 'power as it was' : o.tac.join(', ')} (Station screen: Apply)`);
+  scheduleNav();
+}
 function crewCommand(ws, msg) {
   const note = (text) => send(ws, { type: 'notice', text });
   const key = ws.shipKey;
@@ -1651,21 +1715,50 @@ function crewCommand(ws, msg) {
   };
 
   switch (msg.type) {
+    case 'automation': {
+      // A station's own panels, from its console: { panel, on } (Engineering: { panel, mode }).
+      if (!AUTO_PANELS.includes(msg.panel) || AUTO_STATION[msg.panel] !== ws.station) return note(`${ws.station} can't automate that panel (Ops can)`);
+      const v = msg.panel === 'engineering' ? (['startup', 'shutdown'].includes(msg.mode) ? msg.mode : null) : !!msg.on;
+      setAuto(key, msg.panel, v, null, `${titled(ws)}, ${ws.station}`);
+      return note(`${AUTO_NAMES[msg.panel]} automation ${autoWord(msg.panel, v)}`);
+    }
+    case 'posture': {
+      // A station takes (or sets aside) the alert posture it was offered.
+      const e = engOf(key), o = e.postureOffers?.[ws.station];
+      if (!o) return note('no posture offered here');
+      delete e.postureOffers[ws.station];
+      if (msg.apply) { if (ws.station === 'Engineering') applyPower(key, o.level, o.power); else applyTactical(key, o.ps, o.tac); opLog(key, `${titled(ws)} (${ws.station}) applied the ${o.level} posture`); }
+      else opLog(key, `${titled(ws)} (${ws.station}) set aside the ${o.level} posture`);
+      scheduleNav();
+      return note(`${o.level} posture ${msg.apply ? 'applied' : 'set aside'}`);
+    }
+    case 'automation-answer': {
+      // The lead on duty confirms or denies what Ops asked.
+      const e = engOf(key), r = e.autoReq?.[msg.panel];
+      if (!r) return note('no request waiting for that panel');
+      const lead = leadOf(key, AUTO_STATION[msg.panel]);
+      if (!lead || lead.id !== ws.id) return note(`Only the lead on duty at ${AUTO_STATION[msg.panel]} (${lead ? titled(lead) : 'nobody'}) answers that`);
+      delete e.autoReq[msg.panel];
+      if (msg.yes) setAuto(key, msg.panel, r.v, null, `Ops' request (${r.by}), confirmed by ${titled(ws)}`);
+      else opLog(key, `${titled(ws)} (${ws.station}) denied Ops' request (${r.by}): ${AUTO_NAMES[msg.panel]} automation ${autoWord(msg.panel, r.v)}`);
+      for (const o of opsOf(key)) send(o, { type: 'notice', text: `${titled(ws)} ${msg.yes ? 'confirmed' : 'denied'}: ${AUTO_NAMES[msg.panel]} automation ${autoWord(msg.panel, r.v)}` });
+      broadcastOps(key); scheduleNav();
+      return note(`${msg.yes ? 'Confirmed' : 'Denied'}: ${AUTO_NAMES[msg.panel]} automation ${autoWord(msg.panel, r.v)}`);
+    }
     case 'alert': {
       if (ws.station !== 'Captain') return note('Only the Captain sets alert status');
       const level = ALERTS.includes(msg.level) ? msg.level : 'green';
       if (level === 'black' && !classOf(key).spore) return note('Black alert is for a ship with a spore drive');
-      const wasBlack = alertOf(key) === 'black';
+      const wasLevel = alertOf(key), wasBlack = wasLevel === 'black';
       if (!setShip({ alert: level })) return;
       // Black alert: nonessential systems down (their limits kept, to put back after).
       const core = primaryCore.get(key), e = engOf(key);
       if (level === 'black' && !wasBlack && core) { const p = allocOf(key); e.blackSaved = Object.fromEntries(BLACK_OFF.map((x) => [x, p[x]])); for (const x of BLACK_OFF) p[x] = 0; send(core, { type: 'core-power', ship: ws.ship, power: p }); }
       if (level !== 'black' && wasBlack && core && e.blackSaved) { const p = { ...allocOf(key), ...e.blackSaved }; e.blackSaved = null; send(core, { type: 'core-power', ship: ws.ship, power: p }); }
       if (level !== 'black' && e.spore?.charging) { e.spore.charging = false; e.spore.t = 0; tellStations(key, ['Helm'], 'Helm: spore jump aborted: the ship left black alert'); }
-      // Red alert: shields up, if there's the power for them.
-      if (level === 'red' && !shields.has(key) && capacityOf(key).shields >= MIN_SHIELD_POWER && combatOf(key).shield >= MIN_SHIELD_STRENGTH) { shields.add(key); flowCache.delete(key); broadcastShips(); }
       opLog(key, `${ws.name}: ${level} alert`);
       for (const u of crewOf(key)) send(u, { type: 'notice', text: `${level === 'green' ? 'Condition green' : `${level[0].toUpperCase()}${level.slice(1)} alert`}: ${ws.name}` });
+      applyPostures(key, level, wasLevel);
       return;
     }
     case 'order': {
@@ -4476,14 +4569,19 @@ function panelOfCommand(station, msg) {
   return null;
 }
 const autoOn = (k, p) => !!engOf(k).auto?.[p];
-function setAuto(k, p, v, why) {
+// The station's lead on duty: the most senior of the crew signed in there (by rank; the first in, of equals).
+const SENIORITY = ['Admiral', 'Captain', 'Commander', 'Lt. Cmdr.', 'Lieutenant', 'Lt. JG', 'Ensign', 'Chief Petty Officer', 'Crewman', 'Civilian'];
+const leadOf = (k, station) => crewOf(k).filter((u) => u.station === station && !u.automaton).sort((a, b) => (SENIORITY.indexOf(a.rank) + 1 || 99) - (SENIORITY.indexOf(b.rank) + 1 || 99))[0] || null;
+const autoWord = (p, v) => (v ? `on${typeof v === 'string' ? ` (${v})` : ''}` : 'off');
+function setAuto(k, p, v, why, who) {
   const e = engOf(k);
+  if (e.autoReq?.[p]) { delete e.autoReq[p]; broadcastOps(k); scheduleNav(); }
   if (!!e.auto[p] === !!v && e.auto[p] === v) return;
   e.auto[p] = p === 'engineering' ? v || null : !!v;
   e.autoStatus[p] = v ? 'starting' : '';
   (e.autoStep ||= {})[p] = 0;
   e.dirty = true;
-  opLog(k, `automation: ${AUTO_NAMES[p]}${p === 'engineering' && v ? ` (${v})` : ''} ${v ? 'on' : `off${why ? `: ${why}` : ''}`}`);
+  opLog(k, `automation: ${AUTO_NAMES[p]}${p === 'engineering' && v ? ` (${v})` : ''} ${v ? 'on' : `off${why ? `: ${why}` : ''}`}${who ? ` (${who})` : ''}`);
   if (p === 'medical') { e.emh = { greeted: false, tick: 0, treating: null, warned: '' }; flowCache.delete(k); broadcastCrew(k); }
   if (!v) tellStations(k, [AUTO_STATION[p]], `Automation: ${AUTO_NAMES[p]} off${why ? ` (${why})` : ''}`);
   broadcastOps(k); scheduleNav();
@@ -4601,13 +4699,16 @@ function panelRoutine(k, p) {
   if (p === 'tactical') {
     // Red alert: shields up, phasers armed, the weapons on a locked target's (scanned) shield frequency. Yellow: shields up, phasers safe.
     const level = alertOf(k), a = automaton(k, 'Tactical');
+    // (Its alert posture: shields and phasers as the condition wants them.)
+    const ps = posturesOf(k)[level] || {};
+    if (ps.shields === 'up' && !shields.has(k)) { shieldsCommand(a, { up: true }); return a.last ? `raising shields (${a.last.replace(/^Tactical: /, '')})` : 'shields up'; }
+    if (ps.shields === 'down' && shields.has(k)) { shieldsCommand(a, { up: false }); return 'shields down'; }
+    if (ps.phasers === 'armed' && !c.armed) { combatCommand(a, { type: 'arm', on: true }); return 'phasers armed'; }
+    if (ps.phasers === 'safe' && c.armed) { combatCommand(a, { type: 'arm', on: false }); return 'phasers stood down'; }
     if (level === 'green') return 'condition green: standing by';
-    if (!shields.has(k)) { shieldsCommand(a, { up: true }); return a.last ? `raising shields (${a.last.replace(/^Tactical: /, '')})` : 'shields up'; }
-    if (level === 'red' && !c.armed) { combatCommand(a, { type: 'arm', on: true }); return 'phasers armed'; }
-    if (level === 'yellow' && c.armed) { combatCommand(a, { type: 'arm', on: false }); return 'phasers stood down'; }
     const t = c.lock;
     if (level === 'red' && t && shields.has(t) && locatable(k, t).resolved && c.weaponFreq !== combatOf(t).shieldFreq) { combatCommand(a, { type: 'frequency', weapons: combatOf(t).shieldFreq }); return `weapons on the ${shipName(t)}'s shield frequency (${combatOf(t).shieldFreq})`; }
-    return `${level} alert: shields up${level === 'red' ? ', phasers armed' : ''}`;
+    return `${level} alert: shields ${shields.has(k) ? 'up' : 'down'}${c.armed ? ', phasers armed' : ''}`;
   }
   if (p === 'science') {
     // A sensor lock on the nearest contact that isn't on our data network.
@@ -4699,6 +4800,8 @@ function doctorRoutine(k, e) {
 function automationTick() {
   for (const [k, e] of eng) {
     if (!e.auto || !present(k) || !navState.has(k)) continue;
+    // (A request whose station has emptied: nobody to ask, so it's done.)
+    for (const [p, r] of Object.entries(e.autoReq || {})) if (!leadOf(k, AUTO_STATION[p])) setAuto(k, p, r.v, null, `Ops' request (${r.by}): nobody left at ${AUTO_STATION[p]} to ask`);
     const was = JSON.stringify(e.autoStatus);
     automateVessel(k, e);
     if (JSON.stringify(e.autoStatus) !== was) { broadcastOps(k); scheduleNav(); } // (ops and the station see what it's doing)
@@ -4751,6 +4854,7 @@ function stationCommand(ws, msg) {
   if (['helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
+  if (t === 'automation' || t === 'automation-answer' || t === 'posture') return crewCommand(ws, msg), true; // (nor setting, or answering about, a station's automation)
   if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'emh', 'forcefield', 'brig-field', 'person-field', 'bay-doors', 'readiness'].includes(t)) return gate(crewCommand);
   if (['lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
   if (t === 'grid') return gridCommand(ws, msg), true; // emergency power: works with the console dark

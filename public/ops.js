@@ -94,7 +94,8 @@
           ? [tap('Off', !a.on, { panel: a.panel, mode: null }), tap('Startup', a.on === 'startup', { panel: a.panel, mode: 'startup' }), tap('Shutdown', a.on === 'shutdown', { panel: a.panel, mode: 'shutdown' })]
           : [tap(a.on ? 'Auto: on' : 'Auto: off', a.on, { panel: a.panel, on: !a.on })];
         if (!a.built) for (const t of taps) { t.disabled = true; t.title = 'coming next'; }
-        const li = el('li', { className: 'ops-hail' }, el('span', { className: 'ops-hail__text', textContent: `${a.name} (${a.station})${!a.built ? ' · coming next' : a.on ? ` · ${a.status || 'running'}` : a.status ? ` · ${a.status}` : ''}` }), ...taps);
+        const li = el('li', { className: 'ops-hail' }, el('span', { className: 'ops-hail__text', textContent: `${a.name} (${a.station})${!a.built ? ' · coming next' : a.on ? ` · ${a.status || 'running'}` : a.status ? ` · ${a.status}` : ''}${a.pending ? ` · awaiting ${a.pending.lead} (${a.pending.mode ? (typeof a.pending.mode === 'string' ? a.pending.mode : 'on') : 'off'})` : ''}` }), ...taps,
+          ...(a.pending ? [tap('Withdraw', false, { panel: a.panel, withdraw: true })] : []));
         li.dataset.panel = a.panel;
         return li;
       }, 'li'));

@@ -208,6 +208,8 @@ dialog > .bcast-bar:not([hidden]) ~ .lcars-modal__frame { flex: 1 1 auto; min-he
 body[data-alert='red'] .lcars-elbow, body[data-alert='red'] .lcars-bar__seg, body[data-alert='red'] .lcars-sidebar__fill { background: var(--lcars-red) !important; animation: lcars-blink 1.4s steps(2) infinite; }
 body[data-alert='yellow'] .lcars-elbow, body[data-alert='yellow'] .lcars-bar__seg, body[data-alert='yellow'] .lcars-sidebar__fill { background: var(--lcars-gold) !important; }
 @media (prefers-reduced-motion: reduce) { body[data-alert='red'] .lcars-elbow { animation: none; } }
+/* Condition blue (minimal power): the frame goes a dim sky blue. */
+body[data-alert='blue'] .lcars-elbow, body[data-alert='blue'] .lcars-bar__seg, body[data-alert='blue'] .lcars-sidebar__fill { background: #335577 !important; }
 /* Black alert (a spore drive's jump): the frame goes dark, a deep violet glow pulsing. */
 body[data-alert='black'] .lcars-elbow, body[data-alert='black'] .lcars-bar__seg, body[data-alert='black'] .lcars-sidebar__fill { background: #1a1024 !important; box-shadow: inset 0 0 0 2px #6a3fa0; animation: lcars-blink 2.4s steps(2) infinite; }
 @media (prefers-reduced-motion: reduce) { body[data-alert='black'] .lcars-elbow { animation: none; } }

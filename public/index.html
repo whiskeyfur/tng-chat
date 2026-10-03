@@ -123,6 +123,7 @@
     @media (max-width: 900px) { .nav-panel { flex-direction: column; } .nav-side { flex: 0 0 auto; } }
     /* Command, security, medical */
     .alert-yellow { --accent: var(--lcars-gold); }
+    .alert-blue { --accent: var(--lcars-sky); }
     #alert-state { margin: 0; font-size: 28px; text-transform: uppercase; color: #66cc66; }
     #alert-state[data-level='yellow'] { color: var(--lcars-gold); }
     #alert-state[data-level='red'] { color: var(--lcars-red); animation: lcars-blink 1.2s steps(2) infinite; }
@@ -492,6 +493,7 @@
             <div class="profile-taps" id="station-profile" data-profile-taps></div>
             <!-- Personal equipment: a list (the environmental shield, for now). -->
             <section class="equipment" id="station-equipment" aria-label="Equipment"></section>
+            <section class="equipment" id="station-automation" aria-label="Automation"></section>
             <div class="ops-form" id="station-account" hidden></div>
             <form class="ops-form" id="reassign-form" hidden>
               <input class="ops-input" id="reassign-key" type="password" placeholder="Authorization code" autocomplete="off" aria-label="operator authorization code">

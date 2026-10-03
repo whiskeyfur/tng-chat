@@ -344,5 +344,57 @@
     "reclaimEfficiency": 0.93,
     "hydroponicsPerPerson": 0.25,
     "perPersonVolume": 40
+  },
+  "postures": {
+    "about": "Each system's ideal running state for each condition (John's alert postures): power, in % of what Engineering can set (a system left out keeps its setting), and shields and phasers. When the Captain changes the alert, a station that's automated or empty takes its posture at once; a crewed one is offered it (Apply on its Station screen). Back to condition green, power goes back to what it was before the alert. A design can override any of it (\"postures\").",
+    "green": {},
+    "yellow": {
+      "shields": "up",
+      "phasers": "safe",
+      "power": {
+        "sensors": 100,
+        "shields": 100
+      }
+    },
+    "red": {
+      "shields": "up",
+      "phasers": "armed",
+      "power": {
+        "shields": 100,
+        "weapons": 100,
+        "sensors": 100,
+        "replicators": 0,
+        "recreation": 0
+      }
+    },
+    "blue": {
+      "shields": "down",
+      "phasers": "safe",
+      "power": {
+        "engines": 10,
+        "injectors": 10,
+        "deflector": 25,
+        "bussard": 0,
+        "shields": 0,
+        "weapons": 0,
+        "phaser1": 0,
+        "phaser2": 0,
+        "phaser3": 0,
+        "phaser4": 0,
+        "transporter": 0,
+        "sensors": 20,
+        "lateral": 20,
+        "replicators": 0,
+        "recreation": 0,
+        "lights": 40,
+        "industrial": 0,
+        "drydock1": 0,
+        "drydock2": 0,
+        "drydock3": 0,
+        "spore": 0,
+        "sporeGrow": 0
+      }
+    },
+    "black": {}
   }
 }
