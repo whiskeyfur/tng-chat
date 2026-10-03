@@ -20,7 +20,7 @@ try {
   const diffs = [], minNotes = [];
   let compared = 0;
   for (const id of Object.keys(d.scenarios)) {
-    const design = JSON.parse(fs.readFileSync(path.join(CONFIG.DIR, 'ships', `${id}.json`), 'utf8'));
+    const design = CONFIG.readShips()[id];
     const g = GRAPH.convert(id, design, d);
     const { all } = GRAPH.nodes(g);
     for (const [name, sc] of Object.entries(d.scenarios[id])) {
@@ -64,7 +64,7 @@ try {
   // stays cool; with its radiators' pumps off, the sink fills, then its systems warm (their effects
   // weaken past 70%) and overheat (damage past 90%).
   {
-    const design = JSON.parse(fs.readFileSync(path.join(CONFIG.DIR, 'ships', 'runabout.json'), 'utf8'));
+    const design = CONFIG.readShips().runabout;
     const g = GRAPH.convert('runabout', design, d), sc = d.scenarios.runabout['all-on'];
     const r = SOLVER.solve(g, SOLVER.fromRelay(g, sc.state, t));
     const cool = {}, hot = {};
@@ -80,7 +80,7 @@ try {
   // Creative (a starbase, a GM object): a feed that never runs short, its link's rate still the limit;
   // a store that never runs dry.
   {
-    const design = JSON.parse(fs.readFileSync(path.join(CONFIG.DIR, 'ships', 'runabout.json'), 'utf8'));
+    const design = CONFIG.readShips().runabout;
     const g = GRAPH.convert('runabout', design, d), all = GRAPH.nodes(g).all;
     assert.ok(all['dock-power'].creative?.power && all['bus-b'].upstream['dock-power'].power.rate === t.GRID.dock, 'dock power: creative, at the dock\'s rate');
     const docked = d.scenarios.runabout['all-on'], st = JSON.parse(JSON.stringify(docked.state));

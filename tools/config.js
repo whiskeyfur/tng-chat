@@ -67,6 +67,8 @@ function checkFields(v, fields) {
   return bad ? { field: bad[0], message: `${v[bad[0]] === undefined ? 'is missing' : 'is wrong'}: it must be ${bad[1][1]}` } : null;
 }
 const checkShip = (v) => checkFields(v, SHIP_FIELDS);
+// (Design files are graphs now, docs/ship-graph.md: the design fields are worked out from the graph.)
+const GRAPH = () => require('./ship-graph');
 // Every <name>.json in a folder of config/, checked: { id: content }.
 function loadFolder(sub, fields, log) {
   const dir = path.join(DIR, sub), out = {};
@@ -76,6 +78,11 @@ function loadFolder(sub, fields, log) {
     const where = path.join('config', sub, f);
     let v;
     try { v = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (err) { log(`config: skipping ${where}: not valid JSON (${err.message})`); continue; }
+    if (sub === 'ships' && GRAPH().isGraphFile(v)) {
+      const wrong = GRAPH().check(v);
+      if (wrong.length) { log(`config: skipping ${where}: ${wrong.slice(0, 3).join('; ')}${wrong.length > 3 ? ` (and ${wrong.length - 3} more)` : ''}`); continue; }
+      v = GRAPH().toDesign(v);
+    }
     const bad = checkFields(v, fields);
     if (bad) { log(`config: skipping ${where}: ${bad.field ? `field "${bad.field}" ${bad.message}` : bad.message}`); continue; }
     out[f.slice(0, -5).toLowerCase()] = v;
@@ -106,37 +113,43 @@ function loadSystems(log = console.warn) {
 const KEY_ORDER = ['about', 'kind', 'name', ...Object.keys(SHIP_FIELDS)];
 function saveShip(id, design) {
   if (!/^[a-z][a-z0-9-]{0,31}$/.test(id)) return { field: 'id', message: 'a class id: lower-case letters, digits and -, starting with a letter' };
-  const bad = checkShip(design);
+  // (A graph: checked as one, and its design fields as the loader works them out.)
+  const graph = GRAPH().isGraphFile(design);
+  if (graph) { const wrong = GRAPH().check(design); if (wrong.length) return { field: '', message: wrong[0] }; }
+  const bad = checkShip(graph ? GRAPH().toDesign(design) : design);
   if (bad) return bad;
   const dir = path.join(DIR, 'ships'), file = path.join(dir, `${id}.json`);
   if (fs.existsSync(file)) {
     fs.mkdirSync(path.join(dir, '.backup'), { recursive: true });
     fs.copyFileSync(file, path.join(dir, '.backup', `${id}.${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
   }
-  const ordered = Object.fromEntries([...KEY_ORDER.filter((k) => k in design), ...Object.keys(design).filter((k) => !KEY_ORDER.includes(k)).sort()].map((k) => [k, design[k]]));
+  const order = graph ? ['schema', 'type', 'class', 'name', ...GRAPH().META, 'places', 'systems'] : KEY_ORDER;
+  const ordered = Object.fromEntries([...order.filter((k) => k in design), ...Object.keys(design).filter((k) => !order.includes(k)).sort()].map((k) => [k, design[k]]));
   fs.writeFileSync(`${file}.tmp`, JSON.stringify(ordered, null, 2) + '\n');
   fs.renameSync(`${file}.tmp`, file);
   return null;
 }
-// The ship graphs (config/ships-graph/<class>.json: tools/ship-graph.js, step 1; the game doesn't
-// read them yet), each checked against the system types: a bad one is skipped, named.
+// The ship graphs: the design files in config/ships that are graphs, each checked against the
+// system types (a bad one is skipped, named).
 function loadGraphs(log = console.warn) {
   const GRAPH = require('./ship-graph');
-  const dir = path.join(DIR, 'ships-graph'), out = {};
+  const dir = path.join(DIR, 'ships'), out = {};
   let files = [];
   try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.startsWith('.')).sort(); } catch { return out; }
   let lib;
   try { lib = JSON.parse(fs.readFileSync(path.join(DIR, 'system-types.json'), 'utf8')).types; } catch (err) { log(`config: can't read config/system-types.json: ${err.message}`); return out; }
   for (const f of files) {
     let g;
-    try { g = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (err) { log(`config: skipping config/ships-graph/${f}: not valid JSON (${err.message})`); continue; }
+    try { g = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (err) { log(`config: skipping config/ships/${f}: not valid JSON (${err.message})`); continue; }
+    if (!GRAPH.isGraphFile(g)) continue;
     const bad = GRAPH.check(g, lib);
-    if (bad.length) { log(`config: skipping config/ships-graph/${f}: ${bad.slice(0, 3).join('; ')}${bad.length > 3 ? ` (and ${bad.length - 3} more)` : ''}`); continue; }
+    if (bad.length) { log(`config: skipping config/ships/${f}: ${bad.slice(0, 3).join('; ')}${bad.length > 3 ? ` (and ${bad.length - 3} more)` : ''}`); continue; }
     out[f.slice(0, -5)] = g;
   }
   return out;
 }
-// The designs as files say (for the editor): { id: content }.
+// The designs as files say (for the editor), their design fields: { id: design }; and the files themselves.
 const readShips = () => loadFolder('ships', {}, () => {});
+const readShipFiles = () => { const dir = path.join(DIR, 'ships'), out = {}; for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json') && !x.startsWith('.'))) { try { out[f.slice(0, -5).toLowerCase()] = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch {} } return out; };
 
-module.exports = { DIR, loadShips, loadSystems, loadGraphs, checkShip, saveShip, readShips };
+module.exports = { DIR, loadShips, loadSystems, loadGraphs, checkShip, saveShip, readShips, readShipFiles };

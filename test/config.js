@@ -28,7 +28,7 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
     const systems = CONFIG.loadSystems((l) => said.push(l));
     assert.deepEqual(said, [], 'every config file loads');
     const files = fs.readdirSync(path.join(CONFIG.DIR, 'ships')).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5));
-    const relayFiles = files.filter((f) => JSON.parse(fs.readFileSync(path.join(CONFIG.DIR, 'ships', `${f}.json`), 'utf8')).kind === 'relay');
+    const relayFiles = files.filter((f) => CONFIG.readShips()[f]?.kind === 'relay');
     assert.deepEqual([...Object.keys(classes), 'starbase', ...relayFiles].sort(), files.sort(), 'a class for each file in config/ships (and the starbases\' and the relays\' designs)');
     assert.ok(starbase && systems.sol, 'the starbases\' design and the Sol chart');
     step(`config: ${files.length} designs (${files.join(', ')}) and ${Object.keys(systems).length} star chart (${Object.keys(systems).join(', ')}) loaded`);
@@ -115,7 +115,9 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
       await kill(sc); await kill(rp);
       assert.equal(JSON.parse(fs.readFileSync(path.join(SHIPS, 'Designship', '.nav.json'), 'utf8')).class, 'shuttle', 'the class saved with the ship');
       // The design changes: bigger buses, and the lateral sensors moved to a place of their own.
-      const file = path.join(ED, 'ships', 'shuttle.json'), d = JSON.parse(fs.readFileSync(file, 'utf8'));
+      // (Edited as its design fields, written back as an older design file: that loads too.)
+      const GRAPH = require('../tools/ship-graph'), raw = JSON.parse(fs.readFileSync(path.join(ED, 'ships', 'shuttle.json'), 'utf8'));
+      const file = path.join(ED, 'ships', 'shuttle.json'), d = GRAPH.isGraphFile(raw) ? GRAPH.toDesign(raw) : raw;
       d.bus = 90;
       d.places.find((pl) => pl.name === 'Cockpit').rows = d.places.find((pl) => pl.name === 'Cockpit').rows.filter((r) => r !== 'system:lateral');
       d.places.push({ name: 'Sensor Pod', deck: 2, stations: [], rows: ['system:lateral'] });
@@ -181,8 +183,8 @@ const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Da
     {
       const RD = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-relaydesign-')), RS = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-relaydata-'));
       fs.cpSync(CONFIG.DIR, RD, { recursive: true });
-      const relayFile = Object.keys(classes).length && fs.readdirSync(path.join(RD, 'ships')).find((f) => JSON.parse(fs.readFileSync(path.join(RD, 'ships', f), 'utf8')).kind === 'relay');
-      const rd = JSON.parse(fs.readFileSync(path.join(RD, 'ships', relayFile), 'utf8'));
+      const relayFile = `${Object.keys(CONFIG.readShips()).find((id) => CONFIG.readShips()[id].kind === 'relay')}.json`;
+      const rd = CONFIG.readShips()[relayFile.slice(0, -5)]; // (its design fields, written back as an older design file: that loads too)
       rd.solar = { output: 70 };
       fs.writeFileSync(path.join(RD, 'ships', relayFile), JSON.stringify(rd, null, 2));
       const P = PORT + 10, env = { PORT: P, CONFIG_DIR: RD, RELAY_DATA: RS, STARBASES_FILE: path.join(RS, 'starbases.json') };

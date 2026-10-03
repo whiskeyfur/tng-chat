@@ -1,321 +1,10 @@
 {
-  "about": "The Dreadnought class.",
+  "schema": "tng-ship-graph/1",
+  "type": "ship",
+  "class": "dreadnought",
   "name": "Dreadnought",
-  "bus": 400,
-  "eps": 1500,
-  "core": 1.4,
-  "maxWarp": 9,
-  "shields": 1.5,
-  "arrays": 2,
-  "warpCore": true,
+  "about": "The Dreadnought class.",
   "refit": true,
-  "transporter": true,
-  "spore": false,
-  "stations": null,
-  "ports": 2,
-  "bay": 4,
-  "torpedoes": 10,
-  "ties": {},
-  "places": [
-    {
-      "name": "Bridge",
-      "deck": 1,
-      "stations": [
-        "Helm",
-        "Operations",
-        "Captain",
-        "First Officer",
-        "Bridge 1",
-        "Bridge 2",
-        "Tactical",
-        "Bridge 3",
-        "Bridge 4",
-        "Bridge 5"
-      ],
-      "rows": []
-    },
-    {
-      "name": "Phaser Arrays",
-      "deck": 2,
-      "stations": [],
-      "rows": [
-        "system:phaser1",
-        "system:phaser2",
-        "system:phaser3",
-        "system:phaser4"
-      ]
-    },
-    {
-      "name": "Sensor Arrays",
-      "deck": 3,
-      "stations": [],
-      "rows": [
-        "system:sensors",
-        "system:lateral"
-      ]
-    },
-    {
-      "name": "Main Shuttle Bay",
-      "deck": 4,
-      "stations": [
-        "Shuttle Bay"
-      ],
-      "rows": [
-        "sub:bayDoors",
-        "sub:bayField"
-      ]
-    },
-    {
-      "name": "Shield Generators",
-      "deck": 5,
-      "stations": [],
-      "rows": [
-        "system:shields"
-      ]
-    },
-    {
-      "name": "Transporter Room",
-      "deck": 6,
-      "stations": [
-        "Transporter"
-      ],
-      "rows": [
-        "system:transporter",
-        "sub:patternBuffers",
-        "sub:targetingScanners",
-        "sub:energizingCoils",
-        "sub:heisenberg",
-        "sub:biofilter"
-      ]
-    },
-    {
-      "name": "Subspace Communications",
-      "deck": 7,
-      "stations": [],
-      "rows": [
-        "sub:rf",
-        "sub:radio",
-        "sub:subspace"
-      ]
-    },
-    {
-      "name": "Security Office",
-      "deck": 8,
-      "stations": [
-        "Security"
-      ],
-      "rows": [
-        "sub:forcefields"
-      ]
-    },
-    {
-      "name": "Brig",
-      "deck": 8,
-      "stations": [
-        "Brig"
-      ],
-      "rows": [
-        "sub:brigField"
-      ]
-    },
-    {
-      "name": "Crew Quarters",
-      "deck": 9,
-      "stations": [
-        "Crew"
-      ],
-      "rows": [
-        "system:replicators",
-        "system:recreation"
-      ]
-    },
-    {
-      "name": "Science Lab",
-      "deck": 10,
-      "stations": [
-        "Science"
-      ],
-      "rows": []
-    },
-    {
-      "name": "Communications Center",
-      "deck": 11,
-      "stations": [
-        "Communications"
-      ],
-      "rows": []
-    },
-    {
-      "name": "Sickbay",
-      "deck": 12,
-      "stations": [
-        "Medical"
-      ],
-      "rows": [
-        "sub:holoEmitters"
-      ]
-    },
-    {
-      "name": "Navigational Deflector",
-      "deck": 13,
-      "stations": [],
-      "rows": [
-        "system:deflector"
-      ]
-    },
-    {
-      "name": "Environmental Control",
-      "deck": 14,
-      "stations": [],
-      "rows": [
-        "system:lifeSupport"
-      ]
-    },
-    {
-      "name": "Structural Integrity",
-      "deck": 15,
-      "stations": [],
-      "rows": [
-        "system:sif",
-        "system:idf"
-      ]
-    },
-    {
-      "name": "Computer Core",
-      "deck": 16,
-      "stations": [],
-      "rows": [
-        "ties-computer-parent",
-        "sub:computer1",
-        "sub:computer2",
-        "sub:computer3"
-      ]
-    },
-    {
-      "name": "Impulse Engine Room",
-      "deck": 20,
-      "stations": [],
-      "rows": [
-        "ties-impulsePort",
-        "sub:portChamber",
-        "ties-impulseStarboard",
-        "sub:starboardChamber"
-      ]
-    },
-    {
-      "name": "Torpedo Bay",
-      "deck": 25,
-      "stations": [],
-      "rows": [
-        "system:weapons"
-      ]
-    },
-    {
-      "name": "Tractor Beam Emitter",
-      "deck": 26,
-      "stations": [],
-      "rows": [
-        "system:tractor"
-      ]
-    },
-    {
-      "name": "Auxiliary Power",
-      "deck": 30,
-      "stations": [],
-      "rows": [
-        "ties-aux1",
-        "sub:aux1Chamber",
-        "ties-aux2",
-        "sub:aux2Chamber"
-      ]
-    },
-    {
-      "name": "Deuterium Tankage",
-      "deck": 33,
-      "stations": [],
-      "rows": [
-        "fuel-deu",
-        "sub:deuTransfer"
-      ]
-    },
-    {
-      "name": "Antimatter Storage",
-      "deck": 34,
-      "stations": [],
-      "rows": [
-        "fuel-am",
-        "sub:amTransfer",
-        "system:amBus"
-      ]
-    },
-    {
-      "name": "Main Engineering",
-      "deck": 36,
-      "stations": [
-        "Engineering"
-      ],
-      "rows": [
-        "ties-core-parent",
-        "sub:constriction",
-        "sub:amConduit",
-        "sub:injector",
-        "eps-taps"
-      ],
-      "default": true
-    },
-    {
-      "name": "Warp Nacelles (port and starboard)",
-      "deck": 38,
-      "stations": [],
-      "rows": [
-        "system:engines",
-        "system:bussard"
-      ],
-      "via": "Main Engineering"
-    }
-  ],
-  "seats": {
-    "Helm": [
-      1.2,
-      -2.2
-    ],
-    "Operations": [
-      -1.2,
-      -2.2
-    ],
-    "Captain": [
-      0,
-      0
-    ],
-    "First Officer": [
-      1,
-      0.2
-    ],
-    "Bridge 1": [
-      -3.5,
-      0.5
-    ],
-    "Bridge 2": [
-      3.5,
-      0.5
-    ],
-    "Tactical": [
-      0,
-      2.4
-    ],
-    "Bridge 3": [
-      -3,
-      2.6
-    ],
-    "Bridge 4": [
-      3,
-      2.6
-    ],
-    "Bridge 5": [
-      0,
-      3.8
-    ]
-  },
   "org": {
     "command": [
       {
@@ -572,20 +261,5195 @@
       }
     ]
   },
-  "solar": {
-    "output": 25
+  "seats": {
+    "Helm": [
+      1.2,
+      -2.2
+    ],
+    "Operations": [
+      -1.2,
+      -2.2
+    ],
+    "Captain": [
+      0,
+      0
+    ],
+    "First Officer": [
+      1,
+      0.2
+    ],
+    "Bridge 1": [
+      -3.5,
+      0.5
+    ],
+    "Bridge 2": [
+      3.5,
+      0.5
+    ],
+    "Tactical": [
+      0,
+      2.4
+    ],
+    "Bridge 3": [
+      -3,
+      2.6
+    ],
+    "Bridge 4": [
+      3,
+      2.6
+    ],
+    "Bridge 5": [
+      0,
+      3.8
+    ]
   },
-  "fuel": {
-    "antimatter": 1000,
-    "deuterium": 2000,
-    "tanks": {
-      "deu:core": 100,
-      "deu:port": 50,
-      "deu:starboard": 50,
-      "deu:aux1": 50,
-      "deu:aux2": 50,
-      "am:core": 50,
-      "am:torpedo": 100
+  "places": [
+    {
+      "id": "place-bridge",
+      "name": "Bridge",
+      "deck": 1,
+      "stations": [
+        "Helm",
+        "Operations",
+        "Captain",
+        "First Officer",
+        "Bridge 1",
+        "Bridge 2",
+        "Tactical",
+        "Bridge 3",
+        "Bridge 4",
+        "Bridge 5"
+      ],
+      "rows": []
+    },
+    {
+      "id": "place-phaser-arrays",
+      "name": "Phaser Arrays",
+      "deck": 2,
+      "stations": [],
+      "rows": [
+        "system:phaser1",
+        "system:phaser2",
+        "system:phaser3",
+        "system:phaser4"
+      ]
+    },
+    {
+      "id": "place-sensor-arrays",
+      "name": "Sensor Arrays",
+      "deck": 3,
+      "stations": [],
+      "rows": [
+        "system:sensors",
+        "system:lateral"
+      ]
+    },
+    {
+      "id": "place-main-shuttle-bay",
+      "name": "Main Shuttle Bay",
+      "deck": 4,
+      "stations": [
+        "Shuttle Bay"
+      ],
+      "rows": [
+        "sub:bayDoors",
+        "sub:bayField"
+      ]
+    },
+    {
+      "id": "place-shield-generators",
+      "name": "Shield Generators",
+      "deck": 5,
+      "stations": [],
+      "rows": [
+        "system:shields"
+      ]
+    },
+    {
+      "id": "place-transporter-room",
+      "name": "Transporter Room",
+      "deck": 6,
+      "stations": [
+        "Transporter"
+      ],
+      "rows": [
+        "system:transporter",
+        "sub:patternBuffers",
+        "sub:targetingScanners",
+        "sub:energizingCoils",
+        "sub:heisenberg",
+        "sub:biofilter"
+      ]
+    },
+    {
+      "id": "place-subspace-communications",
+      "name": "Subspace Communications",
+      "deck": 7,
+      "stations": [],
+      "rows": [
+        "sub:rf",
+        "sub:radio",
+        "sub:subspace"
+      ]
+    },
+    {
+      "id": "place-security-office",
+      "name": "Security Office",
+      "deck": 8,
+      "stations": [
+        "Security"
+      ],
+      "rows": [
+        "sub:forcefields"
+      ]
+    },
+    {
+      "id": "place-brig",
+      "name": "Brig",
+      "deck": 8,
+      "stations": [
+        "Brig"
+      ],
+      "rows": [
+        "sub:brigField"
+      ]
+    },
+    {
+      "id": "place-crew-quarters",
+      "name": "Crew Quarters",
+      "deck": 9,
+      "stations": [
+        "Crew"
+      ],
+      "rows": [
+        "system:replicators",
+        "system:recreation"
+      ]
+    },
+    {
+      "id": "place-science-lab",
+      "name": "Science Lab",
+      "deck": 10,
+      "stations": [
+        "Science"
+      ],
+      "rows": []
+    },
+    {
+      "id": "place-communications-center",
+      "name": "Communications Center",
+      "deck": 11,
+      "stations": [
+        "Communications"
+      ],
+      "rows": []
+    },
+    {
+      "id": "place-sickbay",
+      "name": "Sickbay",
+      "deck": 12,
+      "stations": [
+        "Medical"
+      ],
+      "rows": [
+        "sub:holoEmitters"
+      ]
+    },
+    {
+      "id": "place-navigational-deflector",
+      "name": "Navigational Deflector",
+      "deck": 13,
+      "stations": [],
+      "rows": [
+        "system:deflector"
+      ]
+    },
+    {
+      "id": "place-environmental-control",
+      "name": "Environmental Control",
+      "deck": 14,
+      "stations": [],
+      "rows": [
+        "system:lifeSupport"
+      ]
+    },
+    {
+      "id": "place-structural-integrity",
+      "name": "Structural Integrity",
+      "deck": 15,
+      "stations": [],
+      "rows": [
+        "system:sif",
+        "system:idf"
+      ]
+    },
+    {
+      "id": "place-computer-core",
+      "name": "Computer Core",
+      "deck": 16,
+      "stations": [],
+      "rows": [
+        "ties-computer-parent",
+        "sub:computer1",
+        "sub:computer2",
+        "sub:computer3"
+      ]
+    },
+    {
+      "id": "place-impulse-engine-room",
+      "name": "Impulse Engine Room",
+      "deck": 20,
+      "stations": [],
+      "rows": [
+        "ties-impulsePort",
+        "sub:portChamber",
+        "ties-impulseStarboard",
+        "sub:starboardChamber"
+      ]
+    },
+    {
+      "id": "place-torpedo-bay",
+      "name": "Torpedo Bay",
+      "deck": 25,
+      "stations": [],
+      "rows": [
+        "system:weapons"
+      ]
+    },
+    {
+      "id": "place-tractor-beam-emitter",
+      "name": "Tractor Beam Emitter",
+      "deck": 26,
+      "stations": [],
+      "rows": [
+        "system:tractor"
+      ]
+    },
+    {
+      "id": "place-auxiliary-power",
+      "name": "Auxiliary Power",
+      "deck": 30,
+      "stations": [],
+      "rows": [
+        "ties-aux1",
+        "sub:aux1Chamber",
+        "ties-aux2",
+        "sub:aux2Chamber"
+      ]
+    },
+    {
+      "id": "place-deuterium-tankage",
+      "name": "Deuterium Tankage",
+      "deck": 33,
+      "stations": [],
+      "rows": [
+        "fuel-deu",
+        "sub:deuTransfer"
+      ]
+    },
+    {
+      "id": "place-antimatter-storage",
+      "name": "Antimatter Storage",
+      "deck": 34,
+      "stations": [],
+      "rows": [
+        "fuel-am",
+        "sub:amTransfer",
+        "system:amBus"
+      ]
+    },
+    {
+      "id": "place-main-engineering",
+      "name": "Main Engineering",
+      "deck": 36,
+      "stations": [
+        "Engineering"
+      ],
+      "rows": [
+        "ties-core-parent",
+        "sub:constriction",
+        "sub:amConduit",
+        "sub:injector",
+        "eps-taps"
+      ],
+      "default": true
+    },
+    {
+      "id": "place-warp-nacelles-port-and-starboard",
+      "name": "Warp Nacelles (port and starboard)",
+      "deck": 38,
+      "stations": [],
+      "rows": [
+        "system:engines",
+        "system:bussard"
+      ],
+      "via": "Main Engineering"
+    }
+  ],
+  "systems": {
+    "ship-power": {
+      "key": "ship",
+      "type": "dock-feed",
+      "name": "Docked ship power",
+      "upstream": {
+        "docking-connectors": {
+          "power": {
+            "pull": true,
+            "push": true
+          }
+        }
+      }
+    },
+    "ship-eps": {
+      "key": "shipEps",
+      "type": "dock-feed",
+      "name": "Docked ship EPS",
+      "upstream": {
+        "docking-connectors": {
+          "eps": {
+            "pull": true,
+            "push": true
+          }
+        }
+      }
+    },
+    "solar": {
+      "key": "solar",
+      "type": "solar",
+      "name": "Solar",
+      "produces": {
+        "power": 25
+      },
+      "upstream": {}
+    },
+    "dock-power": {
+      "key": "dock",
+      "type": "dock-feed",
+      "name": "Dock power (starbase)",
+      "produces": {
+        "power": 700
+      },
+      "creative": {
+        "power": true
+      },
+      "upstream": {
+        "docking-connectors": {
+          "power": {
+            "pull": true,
+            "push": true
+          }
+        }
+      }
+    },
+    "dock-eps": {
+      "key": "dockEps",
+      "type": "dock-feed",
+      "name": "Dock EPS (starbase)",
+      "produces": {
+        "eps": 700
+      },
+      "creative": {
+        "eps": true
+      },
+      "upstream": {
+        "docking-connectors": {
+          "eps": {
+            "pull": true,
+            "push": true
+          }
+        }
+      }
+    },
+    "impulse-port": {
+      "key": "impulsePort",
+      "type": "fusion-reactor",
+      "name": "Impulse reactor (port)",
+      "produces": {
+        "eps": 75,
+        "heat": 9
+      },
+      "consumes": {
+        "deu": 0.1
+      },
+      "effects": {
+        "impulse": {}
+      },
+      "upstream": {
+        "tank-deu-port": {
+          "deu": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "impulse-port-thrusters": {
+          "key": "thrustersPort",
+          "type": "thrusters",
+          "name": "Impulse reactor (port) thrusters",
+          "upstream": {
+            "impulse-port": {
+              "eps": {
+                "pull": "auto",
+                "push": false
+              }
+            }
+          },
+          "effects": {
+            "maneuver": {}
+          }
+        },
+        "subsystem-portchamber": {
+          "key": "sub:portChamber",
+          "type": "subsystem",
+          "name": "Fusion reaction chamber",
+          "place": "place-impulse-engine-room",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1006,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1006,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1006,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "impulse-starboard": {
+      "key": "impulseStarboard",
+      "type": "fusion-reactor",
+      "name": "Impulse reactor (starboard)",
+      "produces": {
+        "eps": 75,
+        "heat": 9
+      },
+      "consumes": {
+        "deu": 0.1
+      },
+      "effects": {
+        "impulse": {}
+      },
+      "upstream": {
+        "tank-deu-starboard": {
+          "deu": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "impulse-starboard-thrusters": {
+          "key": "thrustersStarboard",
+          "type": "thrusters",
+          "name": "Impulse reactor (starboard) thrusters",
+          "upstream": {
+            "impulse-starboard": {
+              "eps": {
+                "pull": "auto",
+                "push": false
+              }
+            }
+          },
+          "effects": {
+            "maneuver": {}
+          }
+        },
+        "subsystem-starboardchamber": {
+          "key": "sub:starboardChamber",
+          "type": "subsystem",
+          "name": "Fusion reaction chamber",
+          "place": "place-impulse-engine-room",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1007,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1007,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1007,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "aux-1": {
+      "key": "aux1",
+      "type": "fusion-reactor",
+      "name": "Aux fusion 1",
+      "produces": {
+        "eps": 75,
+        "heat": 9
+      },
+      "consumes": {
+        "deu": 0.1
+      },
+      "upstream": {
+        "tank-deu-aux1": {
+          "deu": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "subsystem-aux1chamber": {
+          "key": "sub:aux1Chamber",
+          "type": "subsystem",
+          "name": "Fusion reaction chamber",
+          "place": "place-auxiliary-power",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1008,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1008,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1008,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "aux-2": {
+      "key": "aux2",
+      "type": "fusion-reactor",
+      "name": "Aux fusion 2",
+      "produces": {
+        "eps": 75,
+        "heat": 9
+      },
+      "consumes": {
+        "deu": 0.1
+      },
+      "upstream": {
+        "tank-deu-aux2": {
+          "deu": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "subsystem-aux2chamber": {
+          "key": "sub:aux2Chamber",
+          "type": "subsystem",
+          "name": "Fusion reaction chamber",
+          "place": "place-auxiliary-power",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1009,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1009,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1009,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "warp-core": {
+      "key": "core",
+      "type": "warp-core",
+      "name": "Warp core",
+      "produces": {
+        "eps": 1400,
+        "heat": 210
+      },
+      "consumes": {
+        "deu": 1.077,
+        "am": 1.077
+      },
+      "upstream": {
+        "tank-deu-core": {
+          "deu": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "tank-am-core": {
+          "am": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "subsystem-amconduit": {
+          "key": "sub:amConduit",
+          "type": "subsystem",
+          "name": "Antimatter transfer conduit",
+          "place": "place-main-engineering",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1005,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1005,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1005,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        },
+        "subsystem-constriction": {
+          "key": "sub:constriction",
+          "type": "subsystem",
+          "name": "Magnetic constriction",
+          "place": "place-main-engineering",
+          "consumes": {
+            "power": 20
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1003,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1003,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1003,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 4
+          }
+        },
+        "subsystem-injector": {
+          "key": "sub:injector",
+          "type": "subsystem",
+          "name": "Antimatter injector",
+          "place": "place-main-engineering",
+          "consumes": {
+            "power": 10
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1004,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1004,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1004,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 2
+          }
+        }
+      }
+    },
+    "emergency-a": {
+      "key": "emergA",
+      "type": "emergency-battery",
+      "name": "Emergency battery A",
+      "produces": {
+        "power": 100
+      },
+      "capacity": {
+        "power": 5000
+      },
+      "upstream": {}
+    },
+    "emergency-b": {
+      "key": "emergB",
+      "type": "emergency-battery",
+      "name": "Emergency battery B",
+      "produces": {
+        "power": 100
+      },
+      "capacity": {
+        "power": 5000
+      },
+      "upstream": {}
+    },
+    "emergency-c": {
+      "key": "emergC",
+      "type": "emergency-battery",
+      "name": "Emergency battery C",
+      "produces": {
+        "power": 100
+      },
+      "capacity": {
+        "power": 5000
+      },
+      "upstream": {}
+    },
+    "battery-a": {
+      "key": "batteryA",
+      "type": "battery",
+      "name": "Battery A",
+      "capacity": {
+        "power": 1000
+      },
+      "produces": {
+        "power": 100,
+        "heat": 5
+      },
+      "upstream": {}
+    },
+    "battery-b": {
+      "key": "batteryB",
+      "type": "battery",
+      "name": "Battery B",
+      "capacity": {
+        "power": 1000
+      },
+      "produces": {
+        "power": 100,
+        "heat": 5
+      },
+      "upstream": {}
+    },
+    "battery-c": {
+      "key": "batteryC",
+      "type": "battery",
+      "name": "Battery C",
+      "capacity": {
+        "power": 1000
+      },
+      "produces": {
+        "power": 100,
+        "heat": 5
+      },
+      "upstream": {}
+    },
+    "eps-pressure": {
+      "key": "pressure",
+      "type": "eps-pressure",
+      "name": "EPS pressure",
+      "capacity": {
+        "eps": 1000
+      },
+      "produces": {
+        "eps": 300
+      },
+      "upstream": {}
+    },
+    "bus-a": {
+      "type": "bus",
+      "name": "Bus A",
+      "capacity": {
+        "power": 400
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "rate": 400
+          }
+        },
+        "emergency-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "battery-a": {
+          "power": {
+            "pull": "auto",
+            "push": "auto",
+            "rate": 100,
+            "pushRate": 50
+          }
+        }
+      }
+    },
+    "bus-b": {
+      "type": "bus",
+      "name": "Bus B",
+      "capacity": {
+        "power": 400
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": true
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "rate": 400
+          }
+        },
+        "solar": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "emergency-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "battery-b": {
+          "power": {
+            "pull": "auto",
+            "push": "auto",
+            "rate": 100,
+            "pushRate": 50
+          }
+        },
+        "dock-power": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "rate": 700
+          }
+        },
+        "ship-power": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "bus-c": {
+      "type": "bus",
+      "name": "Bus C",
+      "capacity": {
+        "power": 400
+      },
+      "upstream": {
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": true
+          }
+        },
+        "bus-a": {
+          "power": {
+            "pull": false,
+            "push": false,
+            "why": "A and C link only through B"
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false,
+            "rate": 400
+          }
+        },
+        "emergency-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "battery-c": {
+          "power": {
+            "pull": "auto",
+            "push": "auto",
+            "rate": 100,
+            "pushRate": 50
+          }
+        }
+      }
+    },
+    "eps": {
+      "type": "eps-manifold",
+      "name": "EPS manifold",
+      "capacity": {
+        "eps": 1500
+      },
+      "upstream": {
+        "impulse-port": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "impulse-starboard": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "aux-1": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "aux-2": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "warp-core": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "impulse-port-thrusters": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "impulse-starboard-thrusters": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "eps-pressure": {
+          "eps": {
+            "pull": "auto",
+            "push": "auto",
+            "rate": 300,
+            "pushRate": 100
+          }
+        },
+        "dock-eps": {
+          "eps": {
+            "pull": true,
+            "push": false,
+            "rate": 700
+          }
+        },
+        "ship-eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "coolant-loop": {
+      "type": "coolant-loop",
+      "name": "Coolant loop",
+      "upstream": {
+        "impulse-port": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "impulse-starboard": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "aux-1": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "aux-2": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "warp-core": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "battery-a": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "battery-b": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "battery-c": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "containment-am-pods": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-captain": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-first-officer": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-helm": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-science": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-engineering": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-communications": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-operations": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-tactical": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-security": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-medical": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-transporter": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-crew": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-shuttle-bay": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-brig": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-bridge-1": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-bridge-2": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-bridge-3": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-bridge-4": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "console-bridge-5": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-phaser1": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-phaser2": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-phaser3": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-phaser4": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-atmosphere": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-thermal": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-gravity": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-lights": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-lighting": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-lateral": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-sensors": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-deflector": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-bussard": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-ambus": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-sif": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-idf": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-replicators": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-recreation": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-engines": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-injectors": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-shields": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-weapons": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-transporter": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "system-tractor": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-constriction": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-amconduit": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-injector": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-portchamber": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-starboardchamber": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-aux1chamber": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-aux2chamber": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-forcefields": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-patternbuffers": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-targetingscanners": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-energizingcoils": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-heisenberg": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-biofilter": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-deutransfer": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-amtransfer": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-brigfield": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-holoemitters": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-baydoors": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-bayfield": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-computer1": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-computer2": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-computer3": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-rf": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-radio": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-subspace": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "containment-amcore": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "containment-amtorpedo": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "heat-sink": {
+          "heat": {
+            "pull": "auto",
+            "push": "auto"
+          }
+        }
+      }
+    },
+    "heat-sink": {
+      "type": "heat-sink",
+      "name": "Heat sink",
+      "capacity": {
+        "heat": 18450
+      },
+      "upstream": {}
+    },
+    "radiator-1": {
+      "type": "radiator",
+      "name": "Radiator 1",
+      "consumes": {
+        "heat": 310,
+        "power": 5
+      },
+      "upstream": {
+        "coolant-loop": {
+          "heat": {
+            "pull": "auto",
+            "push": false,
+            "rate": 310
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 100,
+            "min": 5
+          }
+        }
+      }
+    },
+    "radiator-2": {
+      "type": "radiator",
+      "name": "Radiator 2",
+      "consumes": {
+        "heat": 310,
+        "power": 5
+      },
+      "upstream": {
+        "coolant-loop": {
+          "heat": {
+            "pull": "auto",
+            "push": false,
+            "rate": 310
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 100,
+            "min": 5
+          }
+        }
+      }
+    },
+    "docking-connectors": {
+      "type": "docking-connectors",
+      "name": "Docking connectors",
+      "upstream": {
+        "docking-port-1": {
+          "power": {
+            "pull": true,
+            "push": true
+          },
+          "eps": {
+            "pull": true,
+            "push": true
+          },
+          "odn": {
+            "pull": true,
+            "push": true
+          },
+          "deu": {
+            "pull": true,
+            "push": true
+          },
+          "am": {
+            "pull": true,
+            "push": true
+          },
+          "heat": {
+            "pull": true,
+            "push": true
+          }
+        },
+        "docking-port-2": {
+          "power": {
+            "pull": true,
+            "push": true
+          },
+          "eps": {
+            "pull": true,
+            "push": true
+          },
+          "odn": {
+            "pull": true,
+            "push": true
+          },
+          "deu": {
+            "pull": true,
+            "push": true
+          },
+          "am": {
+            "pull": true,
+            "push": true
+          },
+          "heat": {
+            "pull": true,
+            "push": true
+          }
+        }
+      },
+      "systems": {
+        "export-port-eps": {
+          "key": "feedEps:port",
+          "type": "export",
+          "name": "EPS out at the port port",
+          "upstream": {
+            "eps": {
+              "eps": {
+                "pull": true,
+                "push": false,
+                "pri": 1045.55
+              }
+            }
+          }
+        },
+        "export-port-power": {
+          "key": "feed:port",
+          "type": "export",
+          "name": "Power out at the port port",
+          "upstream": {
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1045.5
+              }
+            }
+          }
+        },
+        "export-starboard-eps": {
+          "key": "feedEps:starboard",
+          "type": "export",
+          "name": "EPS out at the starboard port",
+          "upstream": {
+            "eps": {
+              "eps": {
+                "pull": true,
+                "push": false,
+                "pri": 1045.6499999999999
+              }
+            }
+          }
+        },
+        "export-starboard-power": {
+          "key": "feed:starboard",
+          "type": "export",
+          "name": "Power out at the starboard port",
+          "upstream": {
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1045.6
+              }
+            }
+          }
+        },
+        "export-station-eps": {
+          "key": "feedEps:station",
+          "type": "export",
+          "name": "EPS out to the starbase",
+          "upstream": {
+            "eps": {
+              "eps": {
+                "pull": true,
+                "push": false,
+                "pri": 1079
+              }
+            }
+          }
+        },
+        "export-station-power": {
+          "key": "feed:station",
+          "type": "export",
+          "name": "Power out to the starbase",
+          "upstream": {
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1078
+              }
+            }
+          }
+        }
+      }
+    },
+    "docking-port-1": {
+      "type": "docking-port",
+      "effects": {
+        "docking": {}
+      },
+      "name": "Docking port 1",
+      "upstream": {}
+    },
+    "docking-port-2": {
+      "type": "docking-port",
+      "effects": {
+        "docking": {}
+      },
+      "name": "Docking port 2",
+      "upstream": {}
+    },
+    "fuel-am": {
+      "type": "fuel-bus",
+      "name": "Antimatter bus",
+      "resource": "am",
+      "upstream": {
+        "tank-am-main": {
+          "am": {
+            "pull": true,
+            "push": true
+          }
+        },
+        "tank-am-core": {
+          "am": {
+            "pull": true,
+            "push": true
+          }
+        },
+        "tank-am-torpedo": {
+          "am": {
+            "pull": true,
+            "push": true
+          }
+        }
+      },
+      "systems": {
+        "subsystem-amtransfer": {
+          "key": "sub:amTransfer",
+          "type": "subsystem",
+          "name": "AM bus transfer",
+          "place": "place-antimatter-storage",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1047,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1047,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1047,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "fuel-deu": {
+      "type": "fuel-bus",
+      "name": "Deuterium bus",
+      "resource": "deu",
+      "upstream": {
+        "tank-deu-main": {
+          "deu": {
+            "pull": true,
+            "push": true
+          }
+        },
+        "tank-deu-core": {
+          "deu": {
+            "pull": true,
+            "push": true
+          }
+        },
+        "tank-deu-port": {
+          "deu": {
+            "pull": true,
+            "push": true
+          }
+        },
+        "tank-deu-starboard": {
+          "deu": {
+            "pull": true,
+            "push": true
+          }
+        },
+        "tank-deu-aux1": {
+          "deu": {
+            "pull": true,
+            "push": true
+          }
+        },
+        "tank-deu-aux2": {
+          "deu": {
+            "pull": true,
+            "push": true
+          }
+        }
+      },
+      "systems": {
+        "subsystem-deutransfer": {
+          "key": "sub:deuTransfer",
+          "type": "subsystem",
+          "name": "Deu. bus transfer",
+          "place": "place-deuterium-tankage",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1046,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1046,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1046,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "tank-am-core": {
+      "type": "tank",
+      "name": "Warp core (antimatter)",
+      "capacity": {
+        "am": 50
+      },
+      "upstream": {},
+      "systems": {
+        "containment-amcore": {
+          "key": "contain:amCore",
+          "type": "containment",
+          "name": "AmCore",
+          "consumes": {
+            "power": 1
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.2
+          }
+        }
+      }
+    },
+    "tank-am-main": {
+      "type": "tank",
+      "name": "Antimatter pods",
+      "capacity": {
+        "am": 1000
+      },
+      "upstream": {},
+      "systems": {
+        "containment-am-pods": {
+          "key": "containment",
+          "type": "containment",
+          "name": "Antimatter containment (pods)",
+          "consumes": {
+            "power": 20
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 0,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 0,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 0,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 4
+          }
+        }
+      }
+    },
+    "tank-am-torpedo": {
+      "type": "tank",
+      "name": "Torpedo bay",
+      "capacity": {
+        "am": 100
+      },
+      "upstream": {},
+      "systems": {
+        "containment-amtorpedo": {
+          "key": "contain:amTorpedo",
+          "type": "containment",
+          "name": "AmTorpedo",
+          "consumes": {
+            "power": 2
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 2,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 2,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 2,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.4
+          }
+        }
+      }
+    },
+    "tank-deu-aux1": {
+      "type": "tank",
+      "name": "Aux fusion reactor 1",
+      "capacity": {
+        "deu": 50
+      },
+      "upstream": {}
+    },
+    "tank-deu-aux2": {
+      "type": "tank",
+      "name": "Aux fusion reactor 2",
+      "capacity": {
+        "deu": 50
+      },
+      "upstream": {}
+    },
+    "tank-deu-core": {
+      "type": "tank",
+      "name": "Warp core (matter)",
+      "capacity": {
+        "deu": 100
+      },
+      "upstream": {}
+    },
+    "tank-deu-main": {
+      "type": "tank",
+      "name": "Deuterium tank",
+      "capacity": {
+        "deu": 2000
+      },
+      "upstream": {}
+    },
+    "tank-deu-port": {
+      "type": "tank",
+      "name": "Port impulse drive",
+      "capacity": {
+        "deu": 50
+      },
+      "upstream": {}
+    },
+    "tank-deu-starboard": {
+      "type": "tank",
+      "name": "Starboard impulse drive",
+      "capacity": {
+        "deu": 50
+      },
+      "upstream": {}
+    },
+    "place-antimatter-storage": {
+      "key": "place:Antimatter Storage",
+      "type": "place",
+      "name": "Antimatter Storage",
+      "deck": 34,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "place-auxiliary-power": {
+      "key": "place:Auxiliary Power",
+      "type": "place",
+      "name": "Auxiliary Power",
+      "deck": 30,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-bridge": {
+      "key": "place:Bridge",
+      "type": "place",
+      "name": "Bridge",
+      "deck": 1,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-brig": {
+      "key": "place:Brig",
+      "type": "place",
+      "name": "Brig",
+      "deck": 8,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-communications-center": {
+      "key": "place:Communications Center",
+      "type": "place",
+      "name": "Communications Center",
+      "deck": 11,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-computer-core": {
+      "key": "place:Computer Core",
+      "type": "place",
+      "name": "Computer Core",
+      "deck": 16,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-crew-quarters": {
+      "key": "place:Crew Quarters",
+      "type": "place",
+      "name": "Crew Quarters",
+      "deck": 9,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-deuterium-tankage": {
+      "key": "place:Deuterium Tankage",
+      "type": "place",
+      "name": "Deuterium Tankage",
+      "deck": 33,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-environmental-control": {
+      "key": "place:Environmental Control",
+      "type": "place",
+      "name": "Environmental Control",
+      "deck": 14,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-impulse-engine-room": {
+      "key": "place:Impulse Engine Room",
+      "type": "place",
+      "name": "Impulse Engine Room",
+      "deck": 20,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-main-engineering": {
+      "key": "place:Main Engineering",
+      "type": "place",
+      "name": "Main Engineering",
+      "deck": 36,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "place-main-shuttle-bay": {
+      "key": "place:Main Shuttle Bay",
+      "type": "place",
+      "name": "Main Shuttle Bay",
+      "deck": 4,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-navigational-deflector": {
+      "key": "place:Navigational Deflector",
+      "type": "place",
+      "name": "Navigational Deflector",
+      "deck": 13,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "place-phaser-arrays": {
+      "key": "place:Phaser Arrays",
+      "type": "place",
+      "name": "Phaser Arrays",
+      "deck": 2,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "place-science-lab": {
+      "key": "place:Science Lab",
+      "type": "place",
+      "name": "Science Lab",
+      "deck": 10,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-security-office": {
+      "key": "place:Security Office",
+      "type": "place",
+      "name": "Security Office",
+      "deck": 8,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-sensor-arrays": {
+      "key": "place:Sensor Arrays",
+      "type": "place",
+      "name": "Sensor Arrays",
+      "deck": 3,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "place-shield-generators": {
+      "key": "place:Shield Generators",
+      "type": "place",
+      "name": "Shield Generators",
+      "deck": 5,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "place-sickbay": {
+      "key": "place:Sickbay",
+      "type": "place",
+      "name": "Sickbay",
+      "deck": 12,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-structural-integrity": {
+      "key": "place:Structural Integrity",
+      "type": "place",
+      "name": "Structural Integrity",
+      "deck": 15,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "place-subspace-communications": {
+      "key": "place:Subspace Communications",
+      "type": "place",
+      "name": "Subspace Communications",
+      "deck": 7,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-torpedo-bay": {
+      "key": "place:Torpedo Bay",
+      "type": "place",
+      "name": "Torpedo Bay",
+      "deck": 25,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "place-tractor-beam-emitter": {
+      "key": "place:Tractor Beam Emitter",
+      "type": "place",
+      "name": "Tractor Beam Emitter",
+      "deck": 26,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "place-transporter-room": {
+      "key": "place:Transporter Room",
+      "type": "place",
+      "name": "Transporter Room",
+      "deck": 6,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": true,
+            "push": false
+          }
+        }
+      }
+    },
+    "place-warp-nacelles-port-and-starboard": {
+      "key": "place:Warp Nacelles (port and starboard)",
+      "type": "place",
+      "name": "Warp Nacelles (port and starboard)",
+      "deck": 38,
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "life-support": {
+      "key": "system:lifeSupport",
+      "type": "conduit",
+      "name": "Life support",
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "system-atmosphere": {
+          "key": "system:atmosphere",
+          "type": "system",
+          "name": "Atmospheric processors",
+          "place": "place-environmental-control",
+          "consumes": {
+            "power": 10
+          },
+          "effects": {
+            "life-support": {
+              "part": "atmosphere"
+            }
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1051
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1051
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1051
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          },
+          "via": "life-support"
+        },
+        "system-gravity": {
+          "key": "system:gravity",
+          "type": "system",
+          "name": "Gravity generators",
+          "place": "place-environmental-control",
+          "consumes": {
+            "power": 20
+          },
+          "effects": {
+            "gravity": {}
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1055
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1055
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1055
+              }
+            }
+          },
+          "produces": {
+            "heat": 2
+          },
+          "via": "life-support"
+        },
+        "system-lighting": {
+          "key": "system:lighting",
+          "type": "system",
+          "name": "Emergency lighting",
+          "place": "place-environmental-control",
+          "consumes": {
+            "power": 1
+          },
+          "effects": {
+            "emergency-lighting": {}
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1053
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1053
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1053
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.1
+          },
+          "via": "life-support"
+        },
+        "system-lights": {
+          "key": "system:lights",
+          "type": "system",
+          "name": "Lighting",
+          "place": "place-environmental-control",
+          "consumes": {
+            "power": 6
+          },
+          "effects": {
+            "life-support": {
+              "part": "lights"
+            }
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1054
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1054
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1054
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.6
+          },
+          "via": "life-support"
+        },
+        "system-thermal": {
+          "key": "system:thermal",
+          "type": "system",
+          "name": "Thermal regulation",
+          "place": "place-environmental-control",
+          "consumes": {
+            "power": 8
+          },
+          "effects": {
+            "life-support": {
+              "part": "thermal"
+            }
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1052
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1052
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1052
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.8
+          },
+          "via": "life-support"
+        }
+      }
+    },
+    "computers": {
+      "type": "group",
+      "name": "Computer cores",
+      "upstream": {},
+      "systems": {
+        "subsystem-computer1": {
+          "key": "sub:computer1",
+          "type": "subsystem",
+          "name": "Computer core 1",
+          "place": "place-computer-core",
+          "consumes": {
+            "power": 2
+          },
+          "effects": {
+            "computing": {}
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1043,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1043,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1043,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.4
+          }
+        },
+        "subsystem-computer2": {
+          "key": "sub:computer2",
+          "type": "subsystem",
+          "name": "Computer core 2",
+          "place": "place-computer-core",
+          "consumes": {
+            "power": 2
+          },
+          "effects": {
+            "computing": {}
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1044,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1044,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1044,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.4
+          }
+        },
+        "subsystem-computer3": {
+          "key": "sub:computer3",
+          "type": "subsystem",
+          "name": "Computer core 3",
+          "place": "place-computer-core",
+          "consumes": {
+            "power": 2
+          },
+          "effects": {
+            "computing": {}
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1045,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1045,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1045,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.4
+          }
+        }
+      }
+    },
+    "console-bridge-1": {
+      "key": "console:Bridge 1",
+      "type": "console",
+      "name": "Bridge 1 console",
+      "place": "place-bridge",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Bridge 1"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1025,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1025,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1025,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-bridge-2": {
+      "key": "console:Bridge 2",
+      "type": "console",
+      "name": "Bridge 2 console",
+      "place": "place-bridge",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Bridge 2"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1026,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1026,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1026,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-bridge-3": {
+      "key": "console:Bridge 3",
+      "type": "console",
+      "name": "Bridge 3 console",
+      "place": "place-bridge",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Bridge 3"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1027,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1027,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1027,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-bridge-4": {
+      "key": "console:Bridge 4",
+      "type": "console",
+      "name": "Bridge 4 console",
+      "place": "place-bridge",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Bridge 4"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1028,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1028,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1028,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-bridge-5": {
+      "key": "console:Bridge 5",
+      "type": "console",
+      "name": "Bridge 5 console",
+      "place": "place-bridge",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Bridge 5"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1029,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1029,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1029,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-brig": {
+      "key": "console:Brig",
+      "type": "console",
+      "name": "Brig console",
+      "place": "place-brig",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Brig"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1023,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1023,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1023,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-captain": {
+      "key": "console:Captain",
+      "type": "console",
+      "name": "Captain console",
+      "place": "place-bridge",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Captain"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1010,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1010,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1010,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-communications": {
+      "key": "console:Communications",
+      "type": "console",
+      "name": "Communications console",
+      "place": "place-communications-center",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Communications"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1015,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1015,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1015,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      },
+      "systems": {
+        "subsystem-radio": {
+          "key": "sub:radio",
+          "type": "subsystem",
+          "name": "Radio (hails, ship-to-ship calls)",
+          "place": "place-subspace-communications",
+          "consumes": {
+            "power": 10
+          },
+          "effects": {
+            "comms": {
+              "range": "hails"
+            }
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1031,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1031,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1031,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 2
+          }
+        },
+        "subsystem-rf": {
+          "key": "sub:rf",
+          "type": "subsystem",
+          "name": "Local RF (calls aboard)",
+          "place": "place-subspace-communications",
+          "consumes": {
+            "power": 10
+          },
+          "effects": {
+            "comms": {
+              "range": "aboard"
+            }
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1030,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1030,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1030,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 2
+          }
+        },
+        "subsystem-subspace": {
+          "key": "sub:subspace",
+          "type": "subsystem",
+          "name": "Subspace relay (data links)",
+          "place": "place-subspace-communications",
+          "consumes": {
+            "power": 10
+          },
+          "effects": {
+            "comms": {
+              "range": "subspace"
+            }
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1032,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1032,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1032,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 2
+          }
+        }
+      }
+    },
+    "console-crew": {
+      "key": "console:Crew",
+      "type": "console",
+      "name": "Crew console",
+      "place": "place-crew-quarters",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Crew"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1021,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1021,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1021,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-engineering": {
+      "key": "console:Engineering",
+      "type": "console",
+      "name": "Engineering console",
+      "place": "place-main-engineering",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Engineering"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1014,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1014,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1014,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-first-officer": {
+      "key": "console:First Officer",
+      "type": "console",
+      "name": "First Officer console",
+      "place": "place-bridge",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "First Officer"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1011,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1011,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1011,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-helm": {
+      "key": "console:Helm",
+      "type": "console",
+      "name": "Helm console",
+      "place": "place-bridge",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Helm"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1012,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1012,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1012,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-medical": {
+      "key": "console:Medical",
+      "type": "console",
+      "name": "Medical console",
+      "place": "place-sickbay",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Medical"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1019,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1019,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1019,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      },
+      "systems": {
+        "subsystem-holoemitters": {
+          "key": "sub:holoEmitters",
+          "type": "subsystem",
+          "name": "Holo-emitters",
+          "place": "place-sickbay",
+          "consumes": {
+            "power": 10
+          },
+          "effects": {
+            "holo": {}
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1035,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1035,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1035,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 2
+          }
+        }
+      }
+    },
+    "console-operations": {
+      "key": "console:Operations",
+      "type": "console",
+      "name": "Operations console",
+      "place": "place-bridge",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Operations"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1016,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1016,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1016,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-science": {
+      "key": "console:Science",
+      "type": "console",
+      "name": "Science console",
+      "place": "place-science-lab",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Science"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1013,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1013,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1013,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-security": {
+      "key": "console:Security",
+      "type": "console",
+      "name": "Security console",
+      "place": "place-security-office",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Security"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1018,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1018,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1018,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      },
+      "systems": {
+        "subsystem-brigfield": {
+          "key": "sub:brigField",
+          "type": "subsystem",
+          "name": "Brig force field",
+          "place": "place-brig",
+          "consumes": {
+            "power": 5
+          },
+          "effects": {
+            "brig": {}
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1034,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1034,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1034,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        },
+        "subsystem-forcefields": {
+          "key": "sub:forcefields",
+          "type": "subsystem",
+          "name": "Force field emitters",
+          "place": "place-security-office",
+          "consumes": {
+            "power": 5
+          },
+          "effects": {
+            "force-fields": {}
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1033,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1033,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1033,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "console-shuttle-bay": {
+      "key": "console:Shuttle Bay",
+      "type": "console",
+      "name": "Shuttle Bay console",
+      "place": "place-main-shuttle-bay",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Shuttle Bay"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1022,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1022,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1022,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      },
+      "systems": {
+        "subsystem-baydoors": {
+          "key": "sub:bayDoors",
+          "type": "subsystem",
+          "name": "Shuttle bay doors",
+          "place": "place-main-shuttle-bay",
+          "consumes": {
+            "power": 3
+          },
+          "effects": {
+            "shuttle-bay": {
+              "slots": 4
+            }
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1036,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1036,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1036,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.6
+          }
+        },
+        "subsystem-bayfield": {
+          "key": "sub:bayField",
+          "type": "subsystem",
+          "name": "Shuttle bay containment field",
+          "place": "place-main-shuttle-bay",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1037,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1037,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1037,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "console-tactical": {
+      "key": "console:Tactical",
+      "type": "console",
+      "name": "Tactical console",
+      "place": "place-bridge",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Tactical"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1017,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1017,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1017,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "console-transporter": {
+      "key": "console:Transporter",
+      "type": "console",
+      "name": "Transporter console",
+      "place": "place-transporter-room",
+      "consumes": {
+        "power": 2
+      },
+      "effects": {
+        "seat": {
+          "station": "Transporter"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1020,
+            "min": 2
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1020,
+            "min": 2
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1020,
+            "min": 2
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      },
+      "systems": {
+        "subsystem-biofilter": {
+          "key": "sub:biofilter",
+          "type": "subsystem",
+          "name": "Biofilter",
+          "place": "place-transporter-room",
+          "consumes": {
+            "power": 2
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1041,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1041,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1041,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.4
+          }
+        },
+        "subsystem-energizingcoils": {
+          "key": "sub:energizingCoils",
+          "type": "subsystem",
+          "name": "Energizing coils",
+          "place": "place-transporter-room",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1042,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1042,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1042,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        },
+        "subsystem-heisenberg": {
+          "key": "sub:heisenberg",
+          "type": "subsystem",
+          "name": "Heisenberg compensators",
+          "place": "place-transporter-room",
+          "consumes": {
+            "power": 2
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1040,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1040,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1040,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.4
+          }
+        },
+        "subsystem-patternbuffers": {
+          "key": "sub:patternBuffers",
+          "type": "subsystem",
+          "name": "Pattern buffers",
+          "place": "place-transporter-room",
+          "consumes": {
+            "power": 15
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1038,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1038,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1038,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 3
+          }
+        },
+        "subsystem-targetingscanners": {
+          "key": "sub:targetingScanners",
+          "type": "subsystem",
+          "name": "Targeting scanners",
+          "place": "place-transporter-room",
+          "consumes": {
+            "power": 2
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1039,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1039,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1039,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 0.4
+          }
+        }
+      }
+    },
+    "system-ambus": {
+      "key": "system:amBus",
+      "type": "system",
+      "name": "Antimatter bus magnetic containment",
+      "place": "place-antimatter-storage",
+      "consumes": {
+        "eps": 10
+      },
+      "effects": {
+        "antimatter-transfer": {}
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1048
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "system-bussard": {
+      "key": "system:bussard",
+      "type": "system",
+      "name": "Bussard collectors",
+      "place": "place-warp-nacelles-port-and-starboard",
+      "consumes": {
+        "eps": 20
+      },
+      "effects": {
+        "fuel-collection": {}
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1059
+          }
+        }
+      },
+      "produces": {
+        "heat": 2
+      }
+    },
+    "system-deflector": {
+      "key": "system:deflector",
+      "type": "system",
+      "name": "Navigational deflector",
+      "place": "place-navigational-deflector",
+      "consumes": {
+        "eps": 80
+      },
+      "effects": {
+        "deflector": {}
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1058
+          }
+        }
+      },
+      "produces": {
+        "heat": 8
+      }
+    },
+    "system-engines": {
+      "key": "system:engines",
+      "type": "system",
+      "name": "Warp field coils",
+      "place": "place-warp-nacelles-port-and-starboard",
+      "consumes": {
+        "eps": 300
+      },
+      "effects": {
+        "ftl": {
+          "maxWarp": 9
+        }
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1061
+          }
+        }
+      },
+      "produces": {
+        "heat": 60
+      },
+      "systems": {
+        "system-injectors": {
+          "key": "system:injectors",
+          "type": "system",
+          "name": "Plasma injectors",
+          "place": "place-warp-nacelles-port-and-starboard",
+          "consumes": {
+            "eps": 100
+          },
+          "upstream": {
+            "eps": {
+              "eps": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1062
+              }
+            }
+          },
+          "produces": {
+            "heat": 10
+          },
+          "via": "system-engines"
+        }
+      }
+    },
+    "system-idf": {
+      "key": "system:idf",
+      "type": "system",
+      "name": "Inertial dampers",
+      "place": "place-structural-integrity",
+      "consumes": {
+        "eps": 22
+      },
+      "effects": {
+        "dampers": {}
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1050
+          }
+        }
+      },
+      "produces": {
+        "heat": 2.2
+      }
+    },
+    "system-lateral": {
+      "key": "system:lateral",
+      "type": "system",
+      "name": "Lateral sensor arrays",
+      "place": "place-sensor-arrays",
+      "consumes": {
+        "power": 10
+      },
+      "effects": {
+        "sensors": {
+          "range": "lateral"
+        }
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1057
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1057
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1057
+          }
+        }
+      },
+      "produces": {
+        "heat": 1
+      }
+    },
+    "system-phaser1": {
+      "key": "system:phaser1",
+      "type": "system",
+      "name": "Phaser array 1",
+      "place": "place-phaser-arrays",
+      "consumes": {
+        "eps": 100
+      },
+      "effects": {
+        "phasers": {
+          "array": 1,
+          "fitted": true
+        }
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1063
+          }
+        }
+      },
+      "produces": {
+        "heat": 30
+      }
+    },
+    "system-phaser2": {
+      "key": "system:phaser2",
+      "type": "system",
+      "name": "Phaser array 2",
+      "place": "place-phaser-arrays",
+      "consumes": {
+        "eps": 100
+      },
+      "effects": {
+        "phasers": {
+          "array": 2,
+          "fitted": true
+        }
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1064
+          }
+        }
+      },
+      "produces": {
+        "heat": 30
+      }
+    },
+    "system-phaser3": {
+      "key": "system:phaser3",
+      "type": "system",
+      "name": "Phaser array 3",
+      "place": "place-phaser-arrays",
+      "consumes": {
+        "eps": 100
+      },
+      "effects": {
+        "phasers": {
+          "array": 3,
+          "fitted": false
+        }
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1065
+          }
+        }
+      },
+      "produces": {
+        "heat": 30
+      }
+    },
+    "system-phaser4": {
+      "key": "system:phaser4",
+      "type": "system",
+      "name": "Phaser array 4",
+      "place": "place-phaser-arrays",
+      "consumes": {
+        "eps": 100
+      },
+      "effects": {
+        "phasers": {
+          "array": 4,
+          "fitted": false
+        }
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1066
+          }
+        }
+      },
+      "produces": {
+        "heat": 30
+      }
+    },
+    "system-recreation": {
+      "key": "system:recreation",
+      "type": "system",
+      "name": "Recreation (holodecks)",
+      "place": "place-crew-quarters",
+      "consumes": {
+        "power": 100
+      },
+      "effects": {
+        "recreation": {}
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1076
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1076
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1076
+          }
+        }
+      },
+      "produces": {
+        "heat": 10
+      }
+    },
+    "system-replicators": {
+      "key": "system:replicators",
+      "type": "system",
+      "name": "Replicators",
+      "place": "place-crew-quarters",
+      "consumes": {
+        "power": 100
+      },
+      "effects": {
+        "replication": {}
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1075
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1075
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1075
+          }
+        }
+      },
+      "produces": {
+        "heat": 10
+      }
+    },
+    "system-sensors": {
+      "key": "system:sensors",
+      "type": "system",
+      "name": "Long-range sensors",
+      "place": "place-sensor-arrays",
+      "consumes": {
+        "eps": 22
+      },
+      "effects": {
+        "sensors": {
+          "range": "long"
+        }
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1056
+          }
+        }
+      },
+      "produces": {
+        "heat": 2.2
+      }
+    },
+    "system-shields": {
+      "key": "system:shields",
+      "type": "system",
+      "name": "Shield generators",
+      "place": "place-shield-generators",
+      "consumes": {
+        "eps": 100
+      },
+      "effects": {
+        "shields": {
+          "strength": 1.5
+        }
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1060
+          }
+        }
+      },
+      "produces": {
+        "heat": 15
+      }
+    },
+    "system-sif": {
+      "key": "system:sif",
+      "type": "system",
+      "name": "Structural integrity field",
+      "place": "place-structural-integrity",
+      "consumes": {
+        "eps": 35
+      },
+      "effects": {
+        "sif": {}
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1049
+          }
+        }
+      },
+      "produces": {
+        "heat": 3.5
+      }
+    },
+    "system-tractor": {
+      "key": "system:tractor",
+      "type": "system",
+      "name": "Tractor beam",
+      "place": "place-tractor-beam-emitter",
+      "consumes": {
+        "eps": 100
+      },
+      "effects": {
+        "tractor": {}
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1070
+          }
+        }
+      },
+      "produces": {
+        "heat": 15
+      }
+    },
+    "system-transporter": {
+      "key": "system:transporter",
+      "type": "system",
+      "name": "Transporter",
+      "place": "place-transporter-room",
+      "consumes": {
+        "power": 100
+      },
+      "effects": {
+        "transport": {}
+      },
+      "upstream": {
+        "bus-a": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1074
+          }
+        },
+        "bus-b": {
+          "power": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1074
+          }
+        },
+        "bus-c": {
+          "power": {
+            "pull": true,
+            "push": false,
+            "pri": 1074
+          }
+        }
+      },
+      "produces": {
+        "heat": 15
+      }
+    },
+    "system-weapons": {
+      "key": "system:weapons",
+      "type": "system",
+      "name": "Weapons",
+      "place": "place-torpedo-bay",
+      "consumes": {
+        "eps": 100
+      },
+      "effects": {
+        "torpedoes": {
+          "carried": 10
+        }
+      },
+      "upstream": {
+        "eps": {
+          "eps": {
+            "pull": "auto",
+            "push": false,
+            "pri": 1069
+          }
+        }
+      },
+      "produces": {
+        "heat": 20
+      }
     }
   }
 }

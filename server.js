@@ -3042,6 +3042,15 @@ function nearShip(k) {
 // source DAMAGED while any of it is. The EPS tap into a bus: the EPS; a bus's battery: its bus.
 const SRC_DAMAGE = { core: ['conduits', 'constriction', 'injector', 'amConduit'], impulsePort: ['portChamber'], impulseStarboard: ['starboardChamber'], aux1: ['aux1Chamber'], aux2: ['aux2Chamber'],
   'tap:A': ['busEPS'], 'tap:B': ['busEPS'], 'tap:C': ['busEPS'], 'battery:A': ['busA'], 'battery:B': ['busB'], 'battery:C': ['busC'], 'battery:EPS': ['busEPS'] };
+// The relay's dump for one design (the admin editor's, before it's saved): as a class (or the starbases'
+// or the relays' design, by its kind) while the dump is made.
+function graphDumpFor(id, design) {
+  const full = { kind: 'ship', refit: true, spore: false, torpedoes: 10, stations: null, ties: {}, places: [], seats: {}, ...design };
+  const swap = (obj) => { const was = { ...obj }; for (const k of Object.keys(obj)) delete obj[k]; Object.assign(obj, full); return () => { for (const k of Object.keys(obj)) delete obj[k]; Object.assign(obj, was); }; };
+  const kind = design.kind || 'ship';
+  const back = kind === 'starbase' ? swap(BASE_DESIGN) : kind === 'relay' ? swap(RELAY_DESIGN) : ((was) => { CLASSES[id] = full; return () => { if (was) CLASSES[id] = was; else delete CLASSES[id]; }; })(CLASSES[id]);
+  try { const d = graphDump(false); if (kind === 'starbase') d.classes[id] = d.classes.starbase; if (kind === 'relay') d.classes[id] = d.classes[RELAY_DESIGN.id || 'subspace-relay']; return d; } finally { back(); flowCache.clear(); }
+}
 // Which graph a vessel is (its class's; a starbase's or a relay's).
 const graphIdOf = (k) => (isBase(k) ? 'starbase' : isRelay(k) ? RELAY_DESIGN.id || 'subspace-relay' : shipClasses.get(k) || DEFAULT_CLASS);
 function gridView(k) {
@@ -5659,8 +5668,10 @@ if (process.env.SHIP_GRAPH_DUMP) {
 try {
   const d = graphDump(false);
   const designById = (id) => CLASSES[id] || (id === 'starbase' ? BASE_DESIGN : RELAY_DESIGN);
+  const files = CONFIG.readShipFiles();
   for (const id of Object.keys(d.classes)) {
-    GRAPHS[id] = SHIP_GRAPH.convert(id, designById(id), d);
+    // (A design file that's a graph is the graph; an older one is converted.)
+    GRAPHS[id] = SHIP_GRAPH.isGraphFile(files[id]) ? (({ about, refit, indestructible, lands, wiring, org, seats, ...g }) => g)(files[id]) : SHIP_GRAPH.convert(id, designById(id), d);
     GRAPH_REV[id] = crypto.createHash('sha256').update(JSON.stringify(GRAPHS[id])).digest('hex').slice(0, 12);
   }
 } catch (err) { console.error(`ship graphs: not built (${err.message})`); }
@@ -5840,7 +5851,12 @@ function adminDesigns(ws, msg) {
     const live = [...shipClasses].filter(([k, c]) => c === id && present(k)).map(([k]) => shipName(k));
     if ((lostPlaces.length || lostRows.length) && live.length) return reply({ saved: false, confirm: { ships: live, places: lostPlaces, rows: lostRows } });
   }
-  const err = CONFIG.saveShip(id, design);
+  // (Saved as a graph: worked out from the design as the relay builds a new vessel of it.)
+  const bad = CONFIG.checkShip(design);
+  if (bad) return reply({ saved: false, error: bad });
+  let file;
+  try { file = SHIP_GRAPH.toFile(id, design, graphDumpFor(id, design)); } catch (e) { return reply({ saved: false, error: { field: '', message: `can't build its graph: ${e.message}` } }); }
+  const err = CONFIG.saveShip(id, file);
   if (err) return reply({ saved: false, error: err });
   console.log(`admin: design ${id} saved${msg.asNew ? ' (a new class)' : ''}`);
   reply({ saved: true, id, note: process.send ? 'saved: the supervisor reloads the relay and the ship\'s computers to apply it' : 'saved (no supervisor here: restart the relay to apply it)' });
