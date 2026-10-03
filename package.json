@@ -6,11 +6,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node tools/supervisor.js",
-    "test": "node test/e2e.js && node test/restart.js && node test/touch.js && node test/netmap.js && node test/config.js && node test/admin.js && node test/accounts.js && node test/fallback.js && node test/layouts.js && node test/graph.js && node test/solver.js && node test/cutover.js",
+    "test": "node test/e2e.js && node test/restart.js && node test/touch.js && node test/netmap.js && node test/config.js && node test/admin.js && node test/accounts.js && node test/fallback.js && node test/layouts.js && node test/graph.js && node test/solver.js && node test/cutover.js && node test/db.js",
     "export-pages": "node tools/export-pages.js",
     "shipcore": "node tools/shipcore.js",
     "relay": "node server.js",
-    "make-admin": "node tools/make-admin.js"
+    "make-admin": "node tools/make-admin.js",
+    "db": "node tools/db.js"
   },
   "dependencies": {
     "d3-dispatch": "^3.0.1",
@@ -19,6 +20,7 @@
     "d3-quadtree": "^3.0.1",
     "d3-selection": "^3.0.0",
     "d3-timer": "^3.0.1",
+    "mysql2": "^3.24.5",
     "ws": "^8.18.0"
   },
   "devDependencies": {
