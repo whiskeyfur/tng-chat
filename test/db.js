@@ -18,7 +18,7 @@ const J = (v) => (typeof v === 'string' ? JSON.parse(v) : v);
   try {
     try { db = await DB.connect(); } catch (err) { console.log(`# the test database ${process.env.DB_NAME} can't be reached (${err.message}): skipped`); console.log('PASS'); return; }
     await DB.migrate(db); await DB.migrate(db);
-    const [[{ n: other }]] = await db.query("select count(*) n from information_schema.tables where table_schema = database() and table_type = 'BASE TABLE' and engine <> 'InnoDB'");
+    const [[{ n: other }]] = await db.query("select count(*) n from information_schema.tables where table_schema = database() and table_type = 'BASE TABLE' and engine <> 'InnoDB' and table_name not like 'pt\\_%'"); // (tools/bench.js's scratch tables aside)
     assert.equal(other, 0, 'every table is InnoDB (transactions)');
     await db.query('delete from sessions'); await db.query('delete from users'); await db.query('delete from ships');
     const n = await DB.load(db);

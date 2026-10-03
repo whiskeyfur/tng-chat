@@ -106,5 +106,9 @@ const row = (what, a, aName, b, bName) => { rows.push([what, `${aName} ${ms(a)}`
     console.log(mismatches.length ? `# SQL and JavaScript differ on ${mismatches.length} loads:\n#   ${mismatches.slice(0, 20).join('\n#   ')}` : `# SQL and JavaScript gave every load the same, in all ${sqlTimes.length} states`);
     console.log('\n| Test | A | B | Faster |\n|---|---|---|---|');
     for (const r of rows) console.log(`| ${r.join(' | ')} |`);
-  } finally { await db.end(); }
+  } finally {
+    // (Its scratch tables and procedure gone again.)
+    await db.query('drop procedure if exists pt_solve; drop table if exists pt_node, pt_edge, pt_log').catch(() => {});
+    await db.end();
+  }
 })().catch((err) => { console.error(err.stack || err.message); process.exitCode = 1; });
