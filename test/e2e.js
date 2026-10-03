@@ -1801,10 +1801,15 @@ const audioBytes = (page) => page.evaluate(async () => {
       lops.send(JSON.stringify({ type: 'operator', name: 'lexops', ship: 'Lexington' }));
       await waitFor(() => lopsMsgs.some((m) => m.type === 'roster' && m.automation?.some((x) => x.panel === 'engineering')));
       lops.send(JSON.stringify({ type: 'automation', panel: 'engineering', mode: 'startup' }));
+      // (Engineering is crewed: Ops' flip is a request to its lead on duty, who confirms it.)
+      await waitFor(() => scotty3.nav()?.own.autoRequests?.some((r) => r.panel === 'engineering'));
+      scotty3.send({ type: 'automation-answer', panel: 'engineering', yes: true });
       await waitFor(() => scotty3.nav()?.own.automation?.engineering?.mode === 'startup');
       scotty3.send({ type: 'grid', breaker: { bus: 'C', on: true } }); // (a tap by hand)
       await waitFor(() => scotty3.msgs.some((m) => m.type === 'notice' && /Automation: Engineering off \(scotty3 took over\)/.test(m.text)));
       lops.send(JSON.stringify({ type: 'automation', panel: 'engineering', mode: 'startup' }));
+      await waitFor(() => scotty3.nav()?.own.autoRequests?.some((r) => r.panel === 'engineering'));
+      scotty3.send({ type: 'automation-answer', panel: 'engineering', yes: true });
       await waitFor(() => scotty3.msgs.some((m) => m.type === 'notice' && /Engineering \(automation\): Ready for departure/.test(m.text)), 180000);
       await waitFor(() => !scotty3.nav()?.own.grid.ties.dock.length); // (the last step's effect, in the next update)
       const up = scotty3.nav().own.grid;
@@ -1812,6 +1817,8 @@ const audioBytes = (page) => page.evaluate(async () => {
       assert.deepEqual(up.ties.dock, [], 'Startup left the ship on dock power');
       step('automation: Ops set Engineering to Startup on the cold Lexington; a tap by hand handed it back; set again, it brought the ship to Ready for departure (warp core online, off dock power)');
       lops.send(JSON.stringify({ type: 'automation', panel: 'engineering', mode: 'shutdown' }));
+      await waitFor(() => scotty3.nav()?.own.autoRequests?.some((r) => r.panel === 'engineering'));
+      scotty3.send({ type: 'automation-answer', panel: 'engineering', yes: true });
       await waitFor(() => scotty3.msgs.some((m) => m.type === 'notice' && /Engineering \(automation\): Cold ship/.test(m.text)), 180000);
       await waitFor(() => !scotty3.nav()?.own.grid.ties.dock.length); // (the last step's effect, in the next update)
       const down = scotty3.nav().own.grid;
@@ -1830,8 +1837,14 @@ const audioBytes = (page) => page.evaluate(async () => {
       const ops = (panel) => op.textContent(`#automation-list li[data-panel="${panel}"]`);
       // Life support: on where there are people, off where there aren't (nobody's in the Shuttle Bay).
       await auto('lifeSupport', true);
+      // (Engineering is crewed: its lead on duty confirms Ops' request.)
+      await waitFor(() => laforge.nav()?.own.autoRequests?.some((r) => r.panel === 'lifeSupport'));
+      laforge.send({ type: 'automation-answer', panel: 'lifeSupport', yes: true });
       await waitFor(() => { const ls = laforge.nav()?.own.grid.ls; return ls && !ls['Shuttle Bay'].on.atmosphere && ls.Engineering.on.atmosphere; }, 30000);
       await auto('lifeSupport', false);
+      await waitFor(() => laforge.nav()?.own.autoRequests?.some((r) => r.panel === 'lifeSupport'));
+      laforge.send({ type: 'automation-answer', panel: 'lifeSupport', yes: true });
+      await waitFor(() => !laforge.nav()?.own.automation?.lifeSupport);
       for (const sys of ['atmosphere', 'thermal', 'gravity', 'lights']) laforge.send({ type: 'grid', ls: { sys, loc: 'all', on: true } });
       // Tactical: red alert raises shields and arms phasers.
       await auto('tactical', true);

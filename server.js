@@ -726,7 +726,7 @@ function operatorMessage(op, msg) {
       if (!AUTO_BUILT.has(msg.panel)) return fail(`${AUTO_NAMES[msg.panel]} automation isn't built yet`);
       const v = msg.panel === 'engineering' ? (['startup', 'shutdown'].includes(msg.mode) ? msg.mode : null) : !!msg.on;
       // (A crewed station's lead on duty confirms or denies it; with nobody there, it's done.)
-      const lead = leadOf(op.shipKey, AUTO_STATION[msg.panel]), e = engOf(op.shipKey);
+      const lead = CONFIRM_PANELS.has(msg.panel) ? leadOf(op.shipKey, AUTO_STATION[msg.panel]) : null, e = engOf(op.shipKey);
       if (msg.withdraw) { if (e.autoReq?.[msg.panel]) { delete e.autoReq[msg.panel]; opLog(op.shipKey, `${op.name}: withdrew the request to set ${AUTO_NAMES[msg.panel]} automation`); broadcastOps(op.shipKey); scheduleNav(); } return ok('request withdrawn'); }
       if (lead && (e.auto[msg.panel] || null) !== (v || null)) {
         (e.autoReq ||= {})[msg.panel] = { v, by: op.name, lead: titled(lead), leadId: lead.id, at: Date.now() };
@@ -4577,6 +4577,9 @@ const autoOn = (k, p) => !!engOf(k).auto?.[p];
 // The station's lead on duty: the most senior of the crew signed in there (by rank; the first in, of equals).
 const SENIORITY = ['Admiral', 'Captain', 'Commander', 'Lt. Cmdr.', 'Lieutenant', 'Lt. JG', 'Ensign', 'Chief Petty Officer', 'Crewman', 'Civilian'];
 const leadOf = (k, station) => crewOf(k).filter((u) => u.station === station && !u.automaton).sort((a, b) => (SENIORITY.indexOf(a.rank) + 1 || 99) - (SENIORITY.indexOf(b.rank) + 1 || 99))[0] || null;
+// (The panels whose automation can change the whole ship, its power and its air: Ops asks a crewed
+// Engineering's lead first. The others take effect at once, the station told by its bar.)
+const CONFIRM_PANELS = new Set(['engineering', 'lifeSupport', 'rerouting']);
 const autoWord = (p, v) => (v ? `on${typeof v === 'string' ? ` (${v})` : ''}` : 'off');
 function setAuto(k, p, v, why, who) {
   const e = engOf(k);

@@ -1,6 +1,7 @@
 // Automation toggles: a station turns its own panels' automation on and off from its console, kept in
-// step with Ops'; when Ops flips a panel whose station is crewed, it's a request to that station's
-// lead on duty (the most senior there), who confirms or denies it (nobody else can); Ops can withdraw
+// step with Ops'; when Ops flips one of Engineering's ship-wide panels (power, air, rerouting) while
+// Engineering is crewed, it's a request to its lead on duty (the most senior there), who confirms or
+// denies it (nobody else can); Ops can withdraw
 // it; with nobody at the station, Ops' flip is done at once, and a request waiting when the station
 // empties is done then. Everything is in the ops log. Alert postures: red with Tactical and
 // Engineering empty raises the shields, arms the phasers and sets the power at once; condition blue
