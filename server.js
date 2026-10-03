@@ -2158,6 +2158,9 @@ function classSystems(k) {
 const sysGone = (k, x) => (BASE_ONLY.includes(x) && !isBase(k)) || PHASER_ARRAYS.indexOf(x) >= arraysOf(k) || (x === 'transporter' && !isBase(k) && !classOf(k).transporter)
   || (WARP_DRIVE.includes(x) && (isBase(k) || !classOf(k).maxWarp)) || (x === 'spore' && (isBase(k) || !classOf(k).spore));
 function aboardKey(k, key) {
+  // (The vessel's graph says: it's aboard if the graph has it.)
+  const gi = graphInfo(k);
+  if (gi) return key === 'crosslink' || key in gi.byKey;
   // (Sources, by the design: solar arrays with an output, emergency batteries it lists (all three
   // unless it says), fusion reactors unless "fusion": false, a warp core (and what holds its
   // antimatter) unless "warpCore": false or "antimatter": false, docking power with docking ports.)
@@ -2250,7 +2253,50 @@ const PLACE_NAMES = [...new Set(ALL_DESIGNS.flatMap((c) => (c.places || []).map(
 const CONDUITS = [...PLACE_NAMES.map((n) => `place:${n}`), 'system:lifeSupport'];
 const PARENT_SYSTEM = { injectors: 'system:engines', ...Object.fromEntries(LIFE_SUPPORT.map((x) => [x, 'system:lifeSupport'])) };
 const conduitMemo = new Map();
+// What a vessel's graph says (its design file), by the relay's names for its systems: what's aboard,
+// the buses each may tie to, the ties a new one starts with, each one's power path. Cached per
+// graph. (Not while the graphs themselves are being built: then the relay's own rules.)
+let graphDumping = false;
+const graphInfoCache = new Map();
+function graphInfo(k) {
+  if (graphDumping) return null;
+  const gid = graphIdOf(k), g = GRAPHS[gid];
+  if (!g) return null;
+  const hit = graphInfoCache.get(gid);
+  if (hit?.g === g) return hit;
+  const { all } = SHIP_GRAPH.nodes(g), L = { 'bus-a': 'A', 'bus-b': 'B', 'bus-c': 'C', eps: 'EPS' };
+  const byKey = {}, nodes = {}, auto = {}, path = {};
+  const isAuto = (res) => Object.values(res || {}).some((p) => p.pull === 'auto');
+  for (const [id, s] of Object.entries(all)) {
+    if (!s.key) continue;
+    byKey[s.key] = id;
+    const n = new Set(), a = new Set();
+    for (const [up, res] of Object.entries(s.upstream || {})) if (L[up]) { n.add(L[up]); if (isAuto(res)) a.add(L[up]); }
+    for (const b of Object.keys(L)) { const res = all[b]?.upstream?.[id]; if (res) { n.add(L[b]); if (isAuto(res)) a.add(L[b]); } }
+    nodes[s.key] = NODES.filter((x) => n.has(x)); auto[s.key] = NODES.filter((x) => a.has(x));
+  }
+  // (The crosslink: the buses its closed links join.)
+  auto.crosslink = [...new Set([...(isAuto(all['bus-b']?.upstream?.['bus-a']) ? ['A', 'B'] : []), ...(isAuto(all['bus-c']?.upstream?.['bus-b']) ? ['B', 'C'] : [])])].sort();
+  nodes.crosslink = ['A', 'B', 'C'];
+  // (A power path: its place, the places that one's reached through, then a conduit below its place.)
+  const placeByName = Object.fromEntries((g.places || []).map((p) => [p.name, p])), placeById = Object.fromEntries((g.places || []).map((p) => [p.id, p]));
+  for (const [key, id] of Object.entries(byKey)) {
+    if (!/^(console|system|sub):|^place:/.test(key)) continue;
+    const s = all[id], at = key.startsWith('place:') ? placeByName[key.slice(6)] : placeById[s.place];
+    const chain = [];
+    for (let q = at, i = 0; q && i < 8; q = q.via && placeByName[q.via], i++) chain.push(`place:${q.name}`);
+    const below = s.via && all[s.via]?.key && !all[s.via].key.startsWith('place:') ? [all[s.via].key] : [];
+    path[key] = [...chain.filter((c) => c !== key), ...below];
+  }
+  const info = { g, byKey, nodes, auto, path };
+  graphInfoCache.set(gid, info);
+  return info;
+}
+// The buses a system may tie to on this vessel (its graph's links), and their key-only defaults.
+const tieNodesOf = (k, key) => graphInfo(k)?.nodes[key] ?? tieNodes(key);
 function conduitsOf(k, key) {
+  const gi = graphInfo(k);
+  if (gi) return gi.path[key] || [];
   const design = isBase(k) ? 'starbase' : classId(k), memo = `${design}|${key}`;
   if (conduitMemo.has(memo)) return conduitMemo.get(memo);
   let out = [];
@@ -2292,7 +2338,7 @@ function reconcileConduits(k) {
   for (const key of loads) {
     const chain = conduitsOf(k, key);
     if (!(r.paths && r.paths[key] !== undefined && r.paths[key] !== chain.join('>')) && !chain.some((c) => r.newConduits.includes(c))) continue;
-    for (const c of chain) { e.ties[c] = NODES.filter((n) => (e.ties[c] || []).includes(n) || ((e.ties[key] || []).includes(n) && tieNodes(c).includes(n))); touched.add(c); }
+    for (const c of chain) { e.ties[c] = NODES.filter((n) => (e.ties[c] || []).includes(n) || ((e.ties[key] || []).includes(n) && tieNodesOf(k, c).includes(n))); touched.add(c); }
   }
   // (a place reached through another: that one carries what it carries)
   for (const c of [...touched].filter((x) => x.startsWith('place:'))) for (const up of conduitsOf(k, c)) e.ties[up] = NODES.filter((n) => e.ties[up].includes(n) || e.ties[c].includes(n));
@@ -2419,7 +2465,8 @@ const COLD = { ties: { ...Object.fromEntries([...Object.keys(DEFAULT_TIES), ...O
 // and its buses' limits cap the EPS taps.)
 function freshEng(saved, { cold = false, k = null } = {}) {
   cold = cold || saved === COLD;
-  const designTies = k ? designOf(k).ties || {} : {}, tapMax = k ? busMaxOf(k) : BUS_MAX;
+  // (A new one's ties: its graph's "auto" links; without a graph yet, its design's.)
+  const vk = k, designTies = k ? graphInfo(k)?.auto || designOf(k).ties || {} : {}, tapMax = k ? busMaxOf(k) : BUS_MAX;
   let s = saved && typeof saved === 'object' ? saved : cold ? COLD : {};
   if (s.tiesById && k) s = { ...s, ties: tiesFromIds(k, s.tiesById) }; // (a graph-engine save: ties by system id)
   // Ties: a list of nodes (older saves had one bus, or null for off), only those allowed.
@@ -2427,7 +2474,7 @@ function freshEng(saved, { cold = false, k = null } = {}) {
   const tiesOf = (k, v, d) => {
     const list = Array.isArray(v) ? v : typeof v === 'string' ? [v] : v === null ? [] : null;
     if (!list) return d;
-    const ok = NODES.filter((n) => list.includes(n) && tieNodes(k).includes(n)).slice(0, isMulti(k) ? 4 : 1); // sources and EPS loads: one tie
+    const ok = NODES.filter((n) => list.includes(n) && (vk ? tieNodesOf(vk, k) : tieNodes(k)).includes(n)).slice(0, isMulti(k) ? 4 : 1); // sources and EPS loads: one tie
     return !ok.length && list.length ? d : ok;
   };
   // Older saves: crosslinks per pair, thrusters on/off.
@@ -2436,7 +2483,7 @@ function freshEng(saved, { cold = false, k = null } = {}) {
   const oldThr = (d) => (Array.isArray(s.ties?.[`sub:${d}Thrusters`]) ? (s.ties[`sub:${d}Thrusters`].length ? ['EPS'] : []) : s.thrusters?.[d] === false ? [] : undefined);
   const ties = Object.fromEntries(Object.entries(DEFAULT_TIES).map(([k, d]) => [k, tiesOf(k, s.ties?.[k] ?? (k === 'crosslink' ? oldXl : k === 'thrustersPort' ? oldThr('port') : k === 'thrustersStarboard' ? oldThr('starboard') : s[k]), designTies[k] ?? d)]));
   if (!chainOk(ties.crosslink)) ties.crosslink = []; // (A and C without B: older saves lose the crosslink)
-  for (const c of CONDUITS) ties[c] = Array.isArray(s.ties?.[c]) ? NODES.filter((n) => s.ties[c].includes(n) && tieNodes(c).includes(n)) : []; // (the power paths' conduits)
+  for (const c of CONDUITS) ties[c] = Array.isArray(s.ties?.[c]) ? NODES.filter((n) => s.ties[c].includes(n) && (vk ? tieNodesOf(vk, c) : tieNodes(c)).includes(n)) : []; // (the power paths' conduits)
   // (Conduits a save with power paths doesn't have: places new to the design since.)
   const newConduits = s.conduits ? CONDUITS.filter((c) => !Array.isArray(s.ties?.[c])) : [];
   // Older saves: antimatter was true/false (false: core ejected); tanks full.
@@ -3118,7 +3165,7 @@ function gridView(k) {
     // Ties that carry nothing: a conduit on their way untied from that bus (key -> the buses cut off).
     cutOff: Object.fromEntries(Object.keys(e.ties).map((x) => [x, (e.ties[x] || []).filter((X) => !effTies(k, e, x).includes(X))]).filter(([, v]) => v.length)),
     conduits: CONDUITS.filter((c) => c === 'system:lifeSupport' || placesOf(k).some((pl) => `place:${pl.name}` === c)), systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, brigField: !!e.brigField, brigSealed: brigSealed(k), stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
-    tieNodes: Object.fromEntries(Object.keys(e.ties).filter((key) => aboardKey(k, key)).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter((key) => isMulti(key) && aboardKey(k, key)), busMax: busMaxOf(k), solarOut: designOf(k).solar?.output ?? 0,
+    tieNodes: Object.fromEntries(Object.keys(e.ties).filter((key) => aboardKey(k, key)).map((key) => [key, tieNodesOf(k, key)])), multi: Object.keys(e.ties).filter((key) => isMulti(key) && aboardKey(k, key)), busMax: busMaxOf(k), solarOut: designOf(k).solar?.output ?? 0,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
     graphId: graphIdOf(k), graphRev: GRAPH_REV[graphIdOf(k)] || null,
     // What each source could give now (MW): tied and giving nothing, it's either not needed (ready) or has nothing to give.
@@ -3262,7 +3309,7 @@ function gridCommand(ws, msg) {
         continue;
       }
       for (const k2 of Object.keys(e.ties)) {
-        if (k2 === 'crosslink' || k2 === 'impulsePort' || k2 === 'impulseStarboard' || !aboard(k2) || !tieNodes(k2).includes(X)) continue;
+        if (k2 === 'crosslink' || k2 === 'impulsePort' || k2 === 'impulseStarboard' || !aboard(k2) || !tieNodesOf(key, k2).includes(X)) continue;
         const cur = e.ties[k2];
         if (on) {
           if (CONSUMABLE.has(k2)) continue; // (the emergency batteries: by hand only)
@@ -3285,7 +3332,7 @@ function gridCommand(ws, msg) {
   }
   for (const [k, v] of Object.entries(msg.ties && typeof msg.ties === 'object' ? msg.ties : {})) {
     if (!(k in e.ties) || !Array.isArray(v) || k === 'impulsePort' || k === 'impulseStarboard') continue; // a drive feeds the EPS through its thrusters' tie
-    const allowed = tieNodes(k);
+    const allowed = tieNodesOf(key, k);
     if (v.some((n) => !allowed.includes(n))) return note(`${NAME[k] || k.split(':')[1]} can only be tied to ${feeds(allowed)}`);
     const list = NODES.filter((n) => v.includes(n));
     if (k === 'crosslink' && !chainOk(list)) return note('A and C link only through B: the crosslink runs A–B–C');
@@ -5601,6 +5648,10 @@ function greet(ws) {
 // What the relay builds each vessel kind from (and tools/ship-graph.js's dump): the power tables, and
 // what a new vessel of each class has aboard; with scenarios, a set of grid states and its answers.
 function graphDump(scenarios = false) {
+  graphDumping = true;
+  try { return graphDumpNow(scenarios); } finally { graphDumping = false; for (const x of graphInfoCache.keys()) graphInfoCache.delete(x); }
+}
+function graphDumpNow(scenarios) {
   const out = { tables: { NODES, SOURCES, SOURCE_NODES, STORES, EMERG, TANKS, AM_CONTAIN, GRID, FUSION, CORE, FUEL, FUELBUS, POWER_MAX, RATING, CONN_RES, SYSTEM_PRIORITY, SUBSYSTEMS, SYSTEM_NAMES, SYSTEM_CHILDREN, STATION_SYSTEMS, XL_DIRS, PORTS }, classes: {} };
   // (Every ship class, the starbases' design and the relays'.)
   const vessels = [...Object.keys(CLASSES).map((id) => [id, (k) => shipClasses.set(k, id), (k) => shipClasses.delete(k)]),

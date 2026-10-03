@@ -294,7 +294,6 @@ function toDesign(g) {
   const tank = (bus, n) => all[`tank-${bus}-${n}`]?.capacity?.[bus];
   const ports = all['docking-port-1']?.count === null ? null : list.filter((s) => s.type === 'docking-port').length;
   const seatStations = list.map((s) => s.effects?.seat?.station).filter(Boolean);
-  const placeStations = new Set((g.places || []).flatMap((p) => p.stations || []));
   const creative = [...new Set(list.filter((s) => s.type !== 'dock-feed').flatMap((s) => Object.keys(s.creative || {})))]; // (a ship's dock feeds are always creative: the starbase's)
   const design = {
     ...Object.fromEntries(META.filter((k) => g[k] !== undefined).map((k) => [k, g[k]])),
@@ -312,7 +311,7 @@ function toDesign(g) {
     bay: fx('shuttle-bay')[0]?.slots ?? 0,
     spore: fx('jump').length > 0,
     torpedoes: fx('torpedoes')[0]?.carried ?? 0,
-    stations: seatStations.filter((st) => !placeStations.has(st)),
+    stations: [...new Set(seatStations)], // (every seat: the consoles read the list on its own, the places' included)
     ties,
     places: (g.places || []).map(({ id, ...p }) => p),
     solar: { output: all.solar?.produces?.power ?? 0 },

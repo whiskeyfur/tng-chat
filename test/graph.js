@@ -37,6 +37,9 @@ try {
     assert.ok(GRAPH.isGraphFile(files[id]), `config/ships/${id}.json is a graph`);
     const again = GRAPH.toFile(id, GRAPH.toDesign(files[id]), d);
     for (const k of Object.keys(again)) assert.equal(JSON.stringify(files[id][k]), JSON.stringify(again[k]), `${id}: ${k} the same built again`);
+    // (Its station list, as the consoles read it on its own: every seat, its places' too.)
+    const st = GRAPH.toDesign(files[id]).stations, seats = Object.values(GRAPH.nodes(files[id]).all).map((s) => s.effects?.seat?.station).filter(Boolean);
+    assert.deepEqual([...st].sort(), [...new Set(seats)].sort(), `${id}: its stations are its seats, every one`);
   }
   const loaded = CONFIG.loadGraphs((line) => { throw new Error(line); });
   assert.ok(loaded.runabout, 'the config loader loads it');
