@@ -1308,6 +1308,52 @@ function renderAir(box, life) {
     el('p', { className: 'ops-hint', id: 'air-tanks', textContent: Object.entries(life.tanks).map(([t, x]) => `${T[t] || t} ${Math.round(x.kg)}${x.cap ? ` of ${Math.round(x.cap)}` : ''} kg`).join(' · ') }),
     el('p', { className: 'ops-hint', textContent: 'Each place has its own air. The crew breathe where their station is; the scrubber, the water reclaimer and the ventilation run on the atmosphere system (a place switched off or unpowered is sealed from them), hydroponics on the lighting. Carbon dioxide over 1 kPa is high, over 4 dangerous; oxygen under 16 kPa low, under 12 dangerous.' }));
 }
+// Engineering's Corridors: what's cut off first (and the links that would bring it back, a tap to
+// close them), then every link with its ties per bus (a tap each: closed carries, open doesn't) and
+// its damage. Rebuilt only when something on it changes.
+function renderCorridors() {
+  const root = document.querySelector('[data-corridors]');
+  const c = lastNav?.own?.grid?.corridors;
+  if (!root) return;
+  const sig = JSON.stringify(c ? [c.links.map((l) => [l.closed, l.damage, l.cut]), c.cutOff] : null);
+  if (root.dataset.sig === sig) return;
+  root.dataset.sig = sig;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  if (!c) { root.replaceChildren(el('p', { className: 'ops-hint', textContent: 'No corridors: this vessel\'s buses run straight to every place.' })); return; }
+  const busName = (n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`);
+  const tie = (l, n) => { const b = el('button', { type: 'button', className: 'lcars-button lcars-button--pill lcars-toggle grid-mini', id: `link-${l.id}-${n}`, textContent: n, onclick: () => send({ type: 'grid', link: { id: l.id, bus: n, closed: !l.closed[n] } }) }); b.setAttribute('aria-pressed', String(l.closed[n])); b.title = `${busName(n)} through ${l.name}: ${l.closed[n] ? 'closed (carrying): tap to open' : 'open: tap to close'}`; return b; };
+  const row = (l) => { const tr = el('tr', { id: `corr-${l.id}` }, el('th', { scope: 'row', textContent: l.name }), el('td', { className: 'grid-note', textContent: `${l.a} ↔ ${l.b}` }), el('td', {}, ...['A', 'B', 'C', 'EPS'].map((n) => tie(l, n))), el('td', { className: 'grid-note', textContent: l.cut ? `CUT (${l.damage}% damaged)` : l.damage ? `${l.damage}% damaged` : '' })); if (l.cut) tr.dataset.cut = ''; return tr; };
+  const kinds = [['spine', 'Turbolift shafts'], ['tube', 'Jefferies tubes and crawlways (backup: open until needed)'], ['branch', 'Branches (each place off its deck\'s corridor)']];
+  root.replaceChildren(
+    el('p', { className: 'st-state', id: 'corridors-state', textContent: c.cutOff.length ? `CUT OFF: ${c.cutOff.map((x) => `${x.place} (${busName(x.bus)})`).join(', ')}` : `Every place reached from ${c.home}` }),
+    ...c.cutOff.map((x) => el('div', { className: 'ops-form', id: `cut-${x.placeId}-${x.bus}` }, el('span', { className: 'ops-notice', textContent: x.fix.length ? `${x.place} has no ${busName(x.bus)}: close ${x.fix.join(', ')}` : `${x.place} has no ${busName(x.bus)}, and no way round: repair the cut` }),
+      ...(x.fix.length ? [el('button', { type: 'button', className: 'lcars-button lcars-button--pill', textContent: 'Close it', onclick: () => { for (const name of x.fix) { const l = c.links.find((y) => y.name === name); if (l) send({ type: 'grid', link: { id: l.id, bus: x.bus, closed: true } }); } } })] : []))),
+    ...kinds.map(([k, title]) => el('div', {}, el('h3', { className: 'ops-subhead', textContent: title }), el('table', { className: 'grid-table', id: `corridors-${k}` }, el('tbody', {}, ...c.links.filter((l) => l.kind === k).map(row))))),
+    el('p', { className: 'ops-hint', textContent: `The buses and the EPS start in ${c.home} and run along these links to every place. A link carries a bus while it's closed for it and not cut (damaged 50% or more: hits do it; it repairs by itself). The Jefferies tubes are the backup routes. Automation's "Rerouting" closes them by itself when a place is cut off.` }));
+}
+// Engineering's Air distribution: the air handler in the middle; the tanks and processors on its left;
+// each place on its right (live, sealed: its atmosphere off or unpowered, or stale: past a warning).
+function renderAirDist() {
+  const root = document.querySelector('[data-airdist]');
+  const life = lastNav?.own?.grid?.life;
+  if (!root) return;
+  const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
+  const sig = JSON.stringify(life ? [life.places.map((p) => [p.name, f1(p.kPa.o2), f1(p.kPa.co2), p.warn, p.crew]), Object.values(life.tanks).map((t) => Math.round(t.kg)), life.rates, life.processors, life.sealed] : null);
+  if (root.dataset.sig === sig) return;
+  root.dataset.sig = sig;
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  if (!life) { root.replaceChildren(el('p', { className: 'ops-hint', textContent: 'Life support isn\'t running here yet.' })); return; }
+  const pill = (id, name, value, st) => { const d = el('div', { className: `air-pill air-pill--${st}`, id }, el('span', { className: 'air-pill__name', textContent: name }), el('span', { className: 'air-pill__value', textContent: value }), el('span', { className: 'air-pill__state', textContent: st.toUpperCase() })); return d; };
+  const T = { o2: 'Oxygen tank', n2: 'Nitrogen tank', h2o: 'Water tank', carbon: 'Carbon store' };
+  const left = [...Object.entries(life.tanks).map(([t, x]) => pill(`air-src-${t}`, T[t] || t, `${Math.round(x.kg)} of ${Math.round(x.cap)} kg`, x.kg > 0 || t === 'carbon' ? 'live' : 'dead')),
+    ...life.processors.map((p) => pill(`air-src-${p.id}`, p.name, p.id === 'co2-scrubber' ? `${f1(life.rates.scrubbed)} kg CO₂/h` : p.id === 'water-reclaimer' ? `${f1(life.rates.reclaimed)} kg water/h` : 'CO₂ + water → O₂', p.powered ? 'live' : 'dead'))];
+  const right = life.places.map((p) => pill(`air-place-${p.name.replace(/\W+/g, '-')}`, `${p.name}${p.crew ? ` · ${p.crew} aboard` : ''}`, `O₂ ${f1(p.kPa.o2)} · CO₂ ${f1(p.kPa.co2)} kPa`, life.sealed.includes(p.name) ? 'sealed' : p.warn.length ? 'stale' : 'live'));
+  root.replaceChildren(el('div', { className: 'air-dist' },
+    el('div', { className: 'air-dist__col', id: 'air-sources' }, el('h3', { className: 'ops-subhead', textContent: 'Tanks and processors' }), ...left),
+    el('div', { className: 'air-dist__col air-dist__mid' }, pill('air-handler', 'Air handler', life.sealed.length ? `${life.places.length - life.sealed.length} of ${life.places.length} places` : `all ${life.places.length} places`, life.processors.some((p) => p.id === 'co2-scrubber' && p.powered) ? 'live' : 'dead')),
+    el('div', { className: 'air-dist__col', id: 'air-places' }, el('h3', { className: 'ops-subhead', textContent: 'Places' }), ...right)),
+    el('p', { className: 'ops-hint', textContent: 'The air handler mixes the places\' air and tops their oxygen and nitrogen up from the tanks; the scrubber and the reclaimer clean it (the atmosphere system\'s power), hydroponics too (the lighting\'s). SEALED: its atmosphere is switched off or unpowered, cut off from the rest. STALE: past a warning.' }));
+}
 function renderLifeSupport() {
   const root = document.querySelector('[data-lifesupport]');
   const ls = lastNav?.own?.grid?.ls;
@@ -1685,6 +1731,8 @@ function renderCombat() {
   updateCover();
   renderDarkness();
   renderLifeSupport();
+  renderCorridors();
+  renderAirDist();
   renderBay();
   document.body.toggleAttribute('data-console-dark', dark);
   if (!stationView) return;

@@ -17,6 +17,42 @@
       "deck": 1
     }
   ],
+  "layout": {
+    "home": "place-cockpit",
+    "corridors": [
+      {
+        "id": "corridor-deck-1",
+        "name": "Deck 1 corridor",
+        "deck": 1
+      }
+    ],
+    "links": [
+      {
+        "id": "branch-cockpit",
+        "name": "Cockpit (deck 1 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-1",
+        "b": "place-cockpit",
+        "closed": true
+      },
+      {
+        "id": "branch-aft-compartment",
+        "name": "Aft Compartment (deck 1 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-1",
+        "b": "place-aft-compartment",
+        "closed": true
+      },
+      {
+        "id": "crawlway-aft-compartment",
+        "name": "Crawlway to Aft Compartment",
+        "kind": "tube",
+        "a": "place-cockpit",
+        "b": "place-aft-compartment",
+        "closed": false
+      }
+    ]
+  },
   "systems": {
     "ship-power": {
       "key": "ship",

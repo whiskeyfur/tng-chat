@@ -115,8 +115,8 @@ async function loadClass(db, { id, file, graph }) {
   const [types] = await db.query('select base_system_id, base_system_name, defaults from base_systems');
   const typeId = Object.fromEntries(types.map((r) => [r.base_system_name, r.base_system_id]));
   const defaults = Object.fromEntries(types.map((r) => [r.base_system_name, dec(J(r.defaults))]));
-  await db.query('insert into classes (class_code, class_name, kind, design, graph_places) values (?, ?, ?, ?, ?) on duplicate key update class_name = values(class_name), kind = values(kind), design = values(design), graph_places = values(graph_places)',
-    [id, graph.name, graph.type, JSON.stringify(enc(file)), JSON.stringify(enc(graph.places ?? null))]);
+  await db.query('insert into classes (class_code, class_name, kind, design, graph_places, graph_layout) values (?, ?, ?, ?, ?, ?) on duplicate key update class_name = values(class_name), kind = values(kind), design = values(design), graph_places = values(graph_places), graph_layout = values(graph_layout)',
+    [id, graph.name, graph.type, JSON.stringify(enc(file)), JSON.stringify(enc(graph.places ?? null)), graph.layout ? JSON.stringify(enc(graph.layout)) : null]);
   const [[{ class_id: cid }]] = await db.query('select class_id from classes where class_code = ?', [id]);
   await db.query('delete from class_links where class_id = ?', [cid]);
   await db.query('delete from class_systems where class_id = ?', [cid]);
@@ -338,7 +338,7 @@ async function exportConfig(db) {
 
 // A class read back: its systems merged (type defaults, patched by the class), nested; its links.
 async function readClass(db, code) {
-  const [[c]] = await db.query('select class_id, class_code, class_name, kind, graph_places from classes where class_code = ?', [code]);
+  const [[c]] = await db.query('select class_id, class_code, class_name, kind, graph_places, graph_layout from classes where class_code = ?', [code]);
   if (!c) return null;
   const [sys] = await db.query('select system_key, parent_key, system_type, props from vw_class_systems where class_id = ? order by sort_order', [c.class_id]);
   const [links] = await db.query('select system_key, other_key, resource, link from class_links where class_id = ? order by sort_order', [c.class_id]);
@@ -347,7 +347,7 @@ async function readClass(db, code) {
   for (const l of links) ((nodes[l.system_key].upstream ||= {})[l.other_key] ||= {})[l.resource] = dec(J(l.link));
   for (const k of Object.keys(nodes)) nodes[k].upstream ||= {};
   for (const r of sys) (r.parent_key ? (nodes[r.parent_key].systems ||= {}) : top)[r.system_key] = nodes[r.system_key];
-  return { schema: GRAPH.SCHEMA, type: c.kind, class: c.class_code, name: c.class_name, places: dec(J(c.graph_places)), systems: top };
+  return { schema: GRAPH.SCHEMA, type: c.kind, class: c.class_code, name: c.class_name, places: dec(J(c.graph_places)), ...(c.graph_layout ? { layout: dec(J(c.graph_layout)) } : {}), systems: top };
 }
 async function check(db) {
   const out = [];

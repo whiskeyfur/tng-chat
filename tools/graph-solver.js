@@ -233,6 +233,9 @@ function fromRelay(g, st, tables) {
       return (st.ties[tieKey(keyOf(down))] || []).includes(L[up]); // a load or conduit on a bus
     },
     crossOk: (from, to) => !st.xlBlock.includes(`${L[from]}>${L[to]}`),
+    // The corridors (graph.layout; the path tracer's): a link carries a bus while it's closed for it (its
+    // layout's default, unless Engineering set it) and isn't cut (damaged 50% or more).
+    linkOn: (id, n) => { if ((st.linkDamage?.[id] || 0) >= 50) return false; const set = st.links?.[id]?.[L[n]]; return set ?? !!(g.layout?.links || []).find((l) => l.id === id)?.closed; },
     supply: (id) => st.srcCap[keyOf(id)] || 0,
     want: (id) => st.wants[keyOf(id)] || 0,
     tap: (n) => (st.coresUp ? st.taps[L[n]] || 0 : 0),

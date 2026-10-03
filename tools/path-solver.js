@@ -32,6 +32,7 @@ function solveGroup(members, docks = [], opts = {}) {
   const K = (m, id) => `${m}\u0000${id}`;
   const edge = (from, to, cap, extra = {}) => { (out[from] ||= []).push({ from, to, cap, used: 0, ...extra }); };
   const passing = new Set(docks.flatMap((d) => [K(d.from[0], d.from[1]), K(d.to[0], d.to[1])]));
+  const layouts = []; // per member: its corridors (graph.layout), or null
 
   members.forEach(({ g, rt }, m) => {
     const { all } = GRAPH.nodes(g);
@@ -39,7 +40,20 @@ function solveGroup(members, docks = [], opts = {}) {
     const lows = ids.filter((id) => all[id].type === 'bus'), eps = ids.find((id) => all[id].type === 'eps-manifold');
     // (An EPS that isn't live carries nothing: no source into it, no load or tap out of it.)
     const NODES = [...lows, ...(eps && rt.epsLive ? [eps] : [])];
-    for (const n of NODES) node[K(m, n)] = { m, id: n, kind: n === eps ? 'eps' : 'bus', cap: n === eps ? rt.busMax(n) ?? Infinity : rt.busMax(n), used: 0 };
+    // Corridors (graph.layout): each bus, and the EPS, a segment in every place and corridor, starting
+    // at home (Engineering) and joined along the links that are closed for it and not cut.
+    const lay = g.layout || null;
+    layouts[m] = lay;
+    const locs = lay ? [...(lay.corridors || []).map((c) => c.id), ...(g.places || []).map((p) => p.id)] : [];
+    const linkOn = (l, n) => (rt.linkOn ? rt.linkOn(l.id, n) : !!l.closed);
+    const B = (n) => K(m, lay ? `${n}@${lay.home}` : n); // (a bus where its sources are: home)
+    const S = (n, loc) => (lay && loc && locs.includes(loc) ? K(m, `${n}@${loc}`) : B(n)); // (a bus in a place)
+    for (const n of NODES) {
+      const cap = n === eps ? rt.busMax(n) ?? Infinity : rt.busMax(n);
+      if (!lay) node[K(m, n)] = { m, id: n, kind: n === eps ? 'eps' : 'bus', cap, used: 0 };
+      else for (const loc of locs) node[K(m, `${n}@${loc}`)] = { m, id: n, loc, kind: n === eps ? 'eps' : 'bus', cap, used: 0 };
+    }
+    if (lay) for (const l of lay.links || []) for (const n of NODES) if (linkOn(l, n)) { edge(S(n, l.a), S(n, l.b), Infinity, { seg: l.id }); edge(S(n, l.b), S(n, l.a), Infinity, { seg: l.id }); }
     // Sources into the buses and the EPS (and the batteries' charge back, later).
     for (const id of ids) {
       if (!['source', 'store'].includes(typeOf(id).role)) continue;
@@ -50,16 +64,16 @@ function solveGroup(members, docks = [], opts = {}) {
       const there = avail > 0 || typeOf(id).role === 'store';
       if (passing.has(K(m, id))) node[K(m, id)] = { m, id, kind: 'pass', cap: Infinity, used: 0 };
       else node[K(m, id)] = { m, id, kind: 'source', last: !!typeOf(id).lastResort, store: typeOf(id).role === 'store', creative: creative && there, left: creative && there ? Infinity : avail, given: 0 };
-      for (const n of ties) edge(K(m, id), K(m, n), all[n].upstream[id][resOf(all, n)]?.rate ?? Infinity);
+      for (const n of ties) edge(K(m, id), B(n), all[n].upstream[id][resOf(all, n)]?.rate ?? Infinity);
     }
     // The crosslink: a closed link joins two buses, power crossing each way it allows.
     for (const a of lows) for (const b of lows) {
       if (a === b || !all[a].upstream?.[b] || !rt.on(a, b)) continue;
-      if (rt.crossOk(a, b)) edge(K(m, a), K(m, b), Infinity, { cross: true });
-      if (rt.crossOk(b, a)) edge(K(m, b), K(m, a), Infinity, { cross: true });
+      if (rt.crossOk(a, b)) edge(B(a), B(b), Infinity, { cross: true });
+      if (rt.crossOk(b, a)) edge(B(b), B(a), Infinity, { cross: true });
     }
     // The EPS taps: from the EPS into each bus, up to its tap (while the EPS is live).
-    if (eps && rt.epsLive) for (const n of lows) if (all[n].upstream?.[eps] && rt.on(n, eps)) edge(K(m, eps), K(m, n), rt.tap(n), { tap: true });
+    if (eps && rt.epsLive) for (const n of lows) if (all[n].upstream?.[eps] && rt.on(n, eps)) edge(B(eps), B(n), rt.tap(n), { tap: true });
     // Loads (and exports across a dock): from each bus they're tied to, every conduit on their path tied there too.
     const via = (id) => [all[id].place, all[id].via].filter((x) => x && all[x]);
     for (const id of ids) {
@@ -70,7 +84,7 @@ function solveGroup(members, docks = [], opts = {}) {
       const m0 = links.map((l) => l.min).find((x) => x !== undefined);
       if (passing.has(K(m, id))) node[K(m, id)] = { m, id, kind: 'pass', cap: Infinity, used: 0 };
       else { const want = rt.want(id); node[K(m, id)] = { m, id, kind: 'load', want, pri, min: m0 === 'all' ? want : m0 || 0, got: 0 }; }
-      for (const n of ties) edge(K(m, n), K(m, id), Infinity, { through: via(id).map((c) => K(m, c)) });
+      for (const n of ties) edge(S(n, all[id].place), K(m, id), Infinity, { through: via(id).map((c) => K(m, c)) });
     }
   });
   // Across each dock: the export on one side into the dock feed on the other, at the dock's rate.
@@ -175,11 +189,12 @@ function solveGroup(members, docks = [], opts = {}) {
       const want = Math.min(link.pushRate ?? link.rate ?? Infinity, all[st].creative?.[r] ? Infinity : (all[st].capacity?.[r] ?? Infinity) - rt.level(st));
       if (!(want > EPS)) continue;
       // (Into the store from its bus: a target of its own, fed from the generators only.)
-      const tk = K(m, `${st}\u0000charge`);
+      const tk = K(m, `${st}\u0000charge`), home = K(m, layouts[m] ? `${n}@${layouts[m].home}` : n);
+      if (!node[home]) continue;
       node[tk] = { m, id: st, kind: 'load', want, got: 0 };
-      edge(K(m, n), tk, Infinity);
+      edge(home, tk, Infinity);
       const { got } = draw(tk, want, m, { stores: false });
-      charging[K(m, n)] = got;
+      charging[home] = got;
     }
   });
 
@@ -207,16 +222,20 @@ function solveGroup(members, docks = [], opts = {}) {
       }
       for (const [k, t] of Object.entries(through)) if (mine(k) || k.split('\u0000')[0] === String(m)) { const id = k.split('\u0000')[1]; if (t > EPS) pass[id] = t; }
       const ch = Object.fromEntries(Object.entries(charging).filter(([k]) => node[k].m === m).map(([k, t]) => [node[k].id, t]));
-      const epsId = Object.keys(all).find((id) => all[id].type === 'eps-manifold');
+      const epsId = Object.keys(all).find((id) => all[id].type === 'eps-manifold'), lay = layouts[m];
+      const atHome = (v) => !lay || v.loc === lay.home, homeKey = (n) => K(m, lay ? `${n}@${lay.home}` : n);
       // (Each bus as the relay shows it: what was asked of it, what it carried, what came in by its tap.)
       const buses = {};
-      for (const [k, v] of Object.entries(node)) if (v.m === m && v.kind === 'bus') buses[v.id] = { need: 0, have: through[k] || 0, tapUsed: (out[K(m, epsId)] || []).filter((e) => e.to === k).reduce((a, e) => a + e.used, 0) };
+      for (const [k, v] of Object.entries(node)) if (v.m === m && v.kind === 'bus' && atHome(v)) buses[v.id] = { need: 0, have: through[k] || 0, tapUsed: (out[homeKey(epsId)] || []).filter((e) => e.to === k).reduce((a, e) => a + e.used, 0) };
       for (const [k, v] of Object.entries(node)) {
         if (v.m !== m || v.kind !== 'load' || /\u0000charge$/.test(k)) continue;
         const from = Object.values(out).flat().filter((e) => e.to === k && node[e.from].kind === 'bus');
         for (const e of from) buses[node[e.from].id].need += e.used + Math.max(0, v.want - v.got) / from.length;
       }
-      return { cells, got, want, min, pri, used, crossflow, charging: ch, buses, viaEps: pass[epsId] || 0, through: pass, consumers: Object.keys(got), dropped: dropped.filter(mine).map((k) => node[k].id) };
+      // (Corridors: what each segment carried, and where each bus reaches from home along its links.)
+      const segments = lay ? Object.fromEntries(Object.entries(through).filter(([k, t]) => node[k]?.m === m && node[k].loc && t > EPS).map(([k, t]) => [`${node[k].id}@${node[k].loc}`, t])) : null;
+      const reach = lay ? Object.fromEntries(Object.entries(node).filter(([k, v]) => v.m === m && v.loc === lay.home).map(([k, v]) => { const seen = new Set([k]), todo = [k]; while (todo.length) { const x = todo.pop(); for (const e2 of out[x] || []) if (e2.seg && !seen.has(e2.to)) { seen.add(e2.to); todo.push(e2.to); } } return [v.id, [...seen].map((x) => node[x].loc)]; })) : null;
+      return { cells, got, want, min, pri, used, crossflow, charging: ch, buses, viaEps: (lay ? through[homeKey(epsId)] : pass[epsId]) || 0, ...(lay ? { segments, reach } : {}), through: pass, consumers: Object.keys(got), dropped: dropped.filter(mine).map((k) => node[k].id) };
     }),
   };
 }

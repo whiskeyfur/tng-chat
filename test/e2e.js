@@ -1826,7 +1826,7 @@ const audioBytes = (page) => page.evaluate(async () => {
       assert.deepEqual([down.core, down.ties.containment, down.ties.dock, down.ties['console:Engineering']], ['offline', [], [], []]);
       step('automation: Shutdown brought the Lexington back to cold iron, its antimatter and deuterium offloaded to the starbase');
       // (Ops' own console lists the panels it can automate: never Ops itself.)
-      assert.deepEqual(await op.$$eval('#automation-list li[data-panel]', (ls) => ls.map((l) => l.dataset.panel)), ['tactical', 'hangar', 'transporter', 'science', 'comms', 'medical', 'engineering', 'lifeSupport'], 'by where each is aboard');
+      assert.deepEqual(await op.$$eval('#automation-list li[data-panel]', (ls) => ls.map((l) => l.dataset.panel)), ['tactical', 'hangar', 'transporter', 'science', 'comms', 'medical', 'engineering', 'lifeSupport', 'rerouting'], 'by where each is aboard');
       lops.close(); scotty3.close();
       await stopComputer(lc);
     }

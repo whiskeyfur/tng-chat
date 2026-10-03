@@ -1653,6 +1653,46 @@ function orderStatus(o) {
   if (by) send(by, { type: 'order-status', id: o.id, text: o.text, at: o.at, acked: names(o.acked), pending: names(o.pending), ...(o.declined ? { declined: o.declined } : {}) });
 }
 
+// The corridors (graph.layout; the path tracer routes the buses along them): each link's state for
+// each bus (closed: carrying; open), its damage, and where each bus reaches from Engineering.
+const corridorName = (k, id) => GRAPHS[graphIdOf(k)]?.layout?.links.find((l) => l.id === id)?.name || id;
+const linkClosed = (k, l, n) => { const set = engOf(k).corridorTies?.[l.id]?.[n]; return set ?? !!l.closed; };
+const linkCut = (k, l) => (engOf(k).linkDamage?.[l.id] || 0) >= 50;
+function corridorsView(k, f) {
+  const g = GRAPHS[graphIdOf(k)], lay = g?.layout;
+  if (!lay) return null;
+  const e = engOf(k), names = Object.fromEntries([...(g.places || []).map((p) => [p.id, p.name]), ...lay.corridors.map((c) => [c.id, c.name])]);
+  const reach = f?.corridorFlow?.reach || null;
+  // (Places with something tied to a bus that bus doesn't reach: cut off, and the open links that would bring it back.)
+  const { all } = SHIP_GRAPH.nodes(g), BUS = { A: 'bus-a', B: 'bus-b', C: 'bus-c', EPS: 'eps' };
+  const cutOff = [];
+  if (reach) for (const [n, locs] of Object.entries(reach)) {
+    const need = new Set(Object.values(all).filter((s) => s.place && s.key && (e.ties[s.key] || []).includes(n)).map((s) => s.place));
+    for (const p of need) if (!locs.includes(p)) cutOff.push({ bus: n, place: names[p] || p, placeId: p, fix: rerouteFor(k, n, p).map((l) => l.name) });
+  }
+  return { home: names[lay.home], links: lay.links.map((l) => ({ id: l.id, name: l.name, kind: l.kind, a: names[l.a] || l.a, b: names[l.b] || l.b, closed: Object.fromEntries(['A', 'B', 'C', 'EPS'].map((n) => [n, linkClosed(k, l, n)])), damage: Math.round(e.linkDamage?.[l.id] || 0), cut: linkCut(k, l) })), cutOff, segments: f?.corridorFlow?.segments || {} };
+}
+// The open links that would bring a bus to a place again: the fewest, over links that aren't cut.
+function rerouteFor(k, n, place) {
+  const lay = GRAPHS[graphIdOf(k)]?.layout;
+  if (!lay) return [];
+  const prev = { [lay.home]: null }, todo = [lay.home];
+  // (Closed links cost nothing; an open one costs one: a 0-1 search.)
+  const cost = { [lay.home]: 0 };
+  while (todo.length) {
+    todo.sort((a, b) => cost[a] - cost[b]);
+    const x = todo.shift();
+    for (const l of lay.links) {
+      if (linkCut(k, l) || (l.a !== x && l.b !== x)) continue;
+      const y = l.a === x ? l.b : l.a, c2 = cost[x] + (linkClosed(k, l, n) ? 0 : 1);
+      if (cost[y] === undefined || c2 < cost[y]) { cost[y] = c2; prev[y] = { from: x, l }; todo.push(y); }
+    }
+  }
+  if (cost[place] === undefined) return [];
+  const out = [];
+  for (let y = place; prev[y]; y = prev[y].from) if (!linkClosed(k, prev[y].l, n)) out.push(prev[y].l);
+  return out;
+}
 // Alert postures (config/system-types.json "postures", a design's over them): each condition's power
 // for Engineering, and shields and phasers for Tactical. A station that's automated or empty takes its
 // posture at once; a crewed one is offered it (Apply or Dismiss, on its Station screen). Back to green,
@@ -2608,6 +2648,9 @@ function freshEng(saved, { cold = false, k = null } = {}) {
     orderLog: Array.isArray(s.orderLog) ? s.orderLog.slice(0, ORDER_LOG).filter((o) => o && typeof o.text === 'string') : [],
     // Life support's air and tanks (brought back against the vessel's graph on its first tick).
     life: s.life && typeof s.life === 'object' ? s.life : null, lifeReady: false,
+    // The corridors: each link's ties as Engineering set them ({ A, B, C, EPS }: closed or open), and its damage.
+    corridorTies: s.corridorTies && typeof s.corridorTies === 'object' && !Array.isArray(s.corridorTies) ? Object.fromEntries(Object.entries(s.corridorTies).filter(([, v]) => v && typeof v === 'object').map(([id, v]) => [id, Object.fromEntries(['A', 'B', 'C', 'EPS'].filter((n) => typeof v[n] === 'boolean').map((n) => [n, v[n]]))])) : {},
+    linkDamage: s.corridorDamage && typeof s.corridorDamage === 'object' ? Object.fromEntries(Object.entries(s.corridorDamage).filter(([, v]) => Number.isFinite(v) && v > 0).map(([id, v]) => [id, Math.min(100, v)])) : {},
     forcefields: Array.isArray(s.forcefields) ? s.forcefields.filter((st) => STATIONS.includes(st)) : [], // stations Security has isolated
     // Docked with another ship: kept across restarts (it's checked once both are back).
     // Two docking ports. A starbase takes one (docked, dockedPort); ships dock
@@ -2742,7 +2785,7 @@ const savedEng = (k) => {
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, xlBlock: e.xlBlock || [], computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     // (Each load's power path, as the design had it: a design change is noticed on the next load.)
     paths: Object.fromEntries(Object.keys(e.ties).filter((x) => /^(console|system|sub):/.test(x) && !CONDUITS.includes(x)).map((x) => [x, conduitsOf(k, x).join('>')])),
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores * 100) / 100, sporeLoaded: e.spore?.loaded || 0, brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores * 100) / 100, sporeLoaded: e.spore?.loaded || 0, brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog, corridorTies: e.corridorTies, corridorDamage: Object.fromEntries(Object.entries(e.linkDamage || {}).map(([id, v]) => [id, Math.round(v)])),
     life: e.lifeReady && e.life ? { air: Object.fromEntries(Object.entries(e.life.air).map(([a, x]) => [a, Object.fromEntries(Object.entries(x).map(([gas, v]) => [gas, Math.round(v * 1000) / 1000]))])), tanks: Object.fromEntries(Object.entries(e.life.tanks).map(([t, v]) => [t, Math.round(v * 1000) / 1000])), waste: Math.round(e.life.waste * 1000) / 1000 } : e.life,
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
@@ -3035,8 +3078,9 @@ function flow(k) {
   // The graph engine (the new game): the ship graph's solver shares the power out instead, with the same
   // wants; what's above (the breakers' loads, the wants) stands. Below its minimum, a load gets nothing.
   const graphG = GRAPH_PLAY && GRAPHS[graphIdOf(k)];
+  let corridorFlow = null; // (the path tracer's corridors: where each bus reaches, what each segment carried)
   if (graphG) {
-    const st = { ties: e.ties, taps: e.taps, coresUp, epsLive: !!e.epsLive, breakers: e.breakers, xlBlock: e.xlBlock || [], stores: e.stores, busMax: Object.fromEntries(NODES.map((n) => [n, maxOf(n)])), srcCap: cap, wants: { ...wants, ...Object.fromEntries(loads) } };
+    const st = { ties: e.ties, taps: e.taps, coresUp, epsLive: !!e.epsLive, breakers: e.breakers, xlBlock: e.xlBlock || [], stores: e.stores, busMax: Object.fromEntries(NODES.map((n) => [n, maxOf(n)])), srcCap: cap, wants: { ...wants, ...Object.fromEntries(loads) }, links: e.corridorTies || {}, linkDamage: e.linkDamage || {} };
     const r = (PATH_PLAY ? PATH_SOLVER : GRAPH_SOLVER).solve(graphG, GRAPH_SOLVER.fromRelay(graphG, st, { STORES, EPS_CHARGE_GEN }));
     const { all } = SHIP_GRAPH.nodes(graphG), BUS = { A: 'bus-a', B: 'bus-b', C: 'bus-c', EPS: 'eps' };
     for (const key of Object.keys(cells)) cells[key] = blank();
@@ -3052,6 +3096,7 @@ function flow(k) {
     for (const n of NODES) charging[n] = r.charging[BUS[n]] || 0;
     for (const x of Object.keys(crossflow)) delete crossflow[x];
     for (const [pair, v] of Object.entries(r.crossflow)) { const [a, b] = pair.split('|').map((x) => Object.keys(BUS).find((n) => BUS[n] === x)); crossflow[[a, b].sort().join('')] = a < b ? v : -v; }
+    if (r.reach) corridorFlow = { reach: Object.fromEntries(Object.entries(r.reach).map(([id, locs]) => [Object.keys(BUS).find((n) => BUS[n] === id), locs])), segments: r.segments };
   }
   // The stores as one row: + covering a shortfall, − charging.
   cells.stores = blank();
@@ -3102,6 +3147,7 @@ function flow(k) {
   const epsSpare = e.epsLive && coresUp ? Math.max(0, Math.min(srcs.filter((s) => s.ties.includes('EPS')).reduce((n, s) => n + Math.max(0, s.share ? Math.min(s.left, s.share.EPS) : s.left), 0), maxOf('EPS') - viaEps)) : 0;
   const tapAvail = Object.fromEntries(['A', 'B', 'C'].map((X) => [X, Math.min(taps[X], buses[X].tapUsed + epsSpare)]));
   const f = {
+    corridorFlow,
     epsSpare, tapAvail, wants, got,
     cells, totals, buses, xferOk, emergUsed, consoleOk, demand, capacity, delivered, containmentOk, containFeed, tankFeed, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
     crossflow, storeUsed: used, coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps, epsGen, srcCap: cap,
@@ -3179,6 +3225,7 @@ function gridView(k) {
     drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state, start: dr.start, thrusters: !!(e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length, epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear, top: Math.round(driveTop(dr) * 1000) / 1000 }]; })),
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state, start: e.aux[a].start, epsTap: e.aux[a].epsTap }])), auxOutput: FUSION.aux,
     life: lifeView(k),
+    corridors: corridorsView(k, f),
     // Each place: what's switched on, what it's actually getting, and whether it's lit.
     ls: (() => {
       // Served: the system has power (at less than full, it serves them less well: life support's level shows that).
@@ -3255,6 +3302,20 @@ function gridCommand(ws, msg) {
   const said = [];
   const NAME = { core: 'power transfer conduits', thrustersPort: 'port maneuvering thrusters', thrustersStarboard: 'starboard maneuvering thrusters', crosslink: 'bus crosslink', solar: 'solar', dock: 'starbase power (Bus B)', dockEps: 'starbase EPS power', ship: 'docked-ship power (Bus B)', shipEps: 'docked-ship EPS power', emergA: 'emergency battery A', emergB: 'emergency battery B', emergC: 'emergency battery C', core: 'warp core', battery: 'batteries', containment: 'antimatter containment', impulsePort: 'port impulse drive', impulseStarboard: 'starboard impulse drive' };
   const feeds = (list) => (list.length ? list.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(' + ') : 'off');
+  // A corridor's ties: { link: { id, bus: 'A' | 'B' | 'C' | 'EPS' | 'all', closed } }.
+  if (msg.link) {
+    const lay = GRAPHS[graphIdOf(key)]?.layout, l = lay?.links.find((x) => x.id === msg.link.id);
+    if (!l) return note('no such corridor link');
+    const buses = msg.link.bus === 'all' ? ['A', 'B', 'C', 'EPS'] : ['A', 'B', 'C', 'EPS'].includes(msg.link.bus) ? [msg.link.bus] : [];
+    if (!buses.length) return note('which bus: A, B, C, EPS or all');
+    const cur = (e.corridorTies ||= {})[l.id] ||= {};
+    for (const n of buses) { if (!!msg.link.closed === !!l.closed) delete cur[n]; else cur[n] = !!msg.link.closed; }
+    if (!Object.keys(cur).length) delete e.corridorTies[l.id];
+    flowCache.delete(key); e.dirty = true;
+    opLog(key, `Engineering (${ws.name}): ${l.name}: ${buses.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(', ')} ${msg.link.closed ? 'closed (carrying)' : 'open'}`);
+    gridChanged(key);
+    return note(`${l.name}: ${buses.map((n) => (n === 'EPS' ? 'EPS' : `Bus ${n}`)).join(', ')} ${msg.link.closed ? 'closed' : 'open'}`);
+  }
   if (msg.eject) {
     if (e.core === 'ejected') return note('the warp core is already gone');
     Object.assign(e, { core: 'ejected', antimatter: 0, start: 0, breach: 0, contain: { field: 100, reserve: reserveCap() } });
@@ -4150,6 +4211,8 @@ function hit(t, dmg, from, what = '', aim = null, { torpedo = false, yield: y = 
     c.hull = Math.max(0, c.hull - rest);
     const sys = aim && AIMABLE.includes(aim) ? aim : DAMAGEABLE[Math.floor(Math.random() * DAMAGEABLE.length)]; // (phasers can be aimed)
     c.damage[sys] = Math.min(100, c.damage[sys] + rest * 2);
+    // (A hit can cut a corridor too: the buses through it.)
+    { const lay = GRAPHS[graphIdOf(t)]?.layout, et = engOf(t); if (lay?.links?.length && Math.random() < Math.min(0.6, rest / 20)) { const l = lay.links[Math.floor(Math.random() * lay.links.length)]; (et.linkDamage ||= {})[l.id] = Math.min(100, (et.linkDamage[l.id] || 0) + rest * 3); if (et.linkDamage[l.id] >= 50) { said.push(`${l.name} cut`); tellStations(t, ['Engineering'], `Engineering: ${l.name} damaged (${Math.round(et.linkDamage[l.id])}%): the buses through it are cut`); } flowCache.delete(t); } }
     // A high-yield torpedo on an unshielded target cripples it: more systems, badly damaged.
     if (torpedo && y >= YIELD.cripple && !shields.has(t)) {
       const more = DAMAGEABLE.filter((x) => x !== sys).sort(() => Math.random() - 0.5).slice(0, Math.max(1, Math.floor(y / 3)));
@@ -4307,6 +4370,7 @@ function lifeTick(k, f) {
     if (id) places[id] = locs.some((l) => e.ls[l].atmosphere !== false) ? power['system-atmosphere'] : 0;
   }
   e.lifeLast = LIFE.step(g, e.life, { dt: 1, speed: LIFE_SPEED, crew, power, places });
+  e.lifePower = power; e.lifePlaces = places;
   e.lifeCrew = crew;
 }
 // (A change worth saving: a place's oxygen or carbon dioxide by a tenth of a kPa, a tank by a kg.)
@@ -4321,6 +4385,10 @@ function lifeView(k) {
     speed: LIFE_SPEED,
     places: Object.entries(e.lifeLast.air).map(([a, x]) => ({ name: all[placeOfAir(a)]?.name || a, kPa: Object.fromEntries(Object.entries(x.kPa).map(([gas, v]) => [gas, r2(v)])), total: r2(x.total), warn: x.warn, crew: e.lifeCrew?.[placeOfAir(a)] || 0 })),
     tanks: Object.fromEntries(Object.entries(e.lifeLast.tanks).map(([t, v]) => [t.replace(/^tank-/, ''), { kg: Math.round(v * 10) / 10, cap: Object.values(all[t]?.capacity || {})[0] || 0 }])),
+    // (What the processors did, in kg an hour of game time; which places the ventilation reaches.)
+    rates: { scrubbed: Math.round((e.lifeLast.scrubbed || 0) / LIFE_SPEED * 3600 * 100) / 100, reclaimed: Math.round((e.lifeLast.reclaimed || 0) / LIFE_SPEED * 3600 * 100) / 100 },
+    processors: ['co2-scrubber', 'water-reclaimer', 'hydroponics'].filter((id) => all[id]).map((id) => ({ id, name: all[id].name, powered: (e.lifePower?.[all[id].poweredBy] ?? 1) > 0 })),
+    sealed: Object.entries(e.lifePlaces || {}).filter(([, v]) => !(v > 0)).map(([id]) => all[id]?.name || id),
   };
 }
 setInterval(() => {
@@ -4516,6 +4584,8 @@ setInterval(() => {
     // Release from drydock: once the time's up, with no repair job under way, unless the shipyard holds it.
     if (e.drydock && e.release && now >= e.release && !e.hold && !c.repair) releaseDrydock(k, 'released');
     for (const s of DAMAGEABLE) if (c.damage[s] > 0 && !(f.delivered[s] > 100)) c.damage[s] = Math.max(0, c.damage[s] - (c.repair === s ? REPAIR.directed : REPAIR.auto) * fast);
+    // (A damaged corridor is repaired as a system is: by itself, or faster with repair crews sent to it.)
+    for (const [id, d] of Object.entries(e.linkDamage || {})) { const left = Math.max(0, d - (c.repair === `link:${id}` ? REPAIR.directed : REPAIR.auto) * fast); if (d >= 50 && left < 50) { flowCache.delete(k); tellStations(k, ['Engineering'], `Engineering: ${corridorName(k, id)} repaired enough to carry the buses again`); } if (left > 0) e.linkDamage[id] = left; else delete e.linkDamage[id]; }
     if (c.hull < 100) c.hull = Math.min(100, c.hull + (c.repair === 'hull' ? REPAIR.hullDirected : REPAIR.hull) * fast);
     if (c.repair && (c.repair === 'hull' ? c.hull >= 100 : c.damage[c.repair] <= 0)) {
       tellStations(k, ['Engineering'], `Engineering: ${c.repair === 'hull' ? 'hull' : damageName(c.repair)} repaired`);
@@ -4550,10 +4620,10 @@ setInterval(() => {
 // its console is on the ODN; it never repairs anything, can't be run by remote
 // control, and any tap on it by hand hands it back (Auto off). Each step goes
 // through the same commands a crewman's taps do, so the same rules hold.
-const AUTO_PANELS = ['engineering', 'lifeSupport', 'tactical', 'science', 'transporter', 'comms', 'hangar', 'medical'];
-const AUTO_STATION = { engineering: 'Engineering', lifeSupport: 'Engineering', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Shuttle Bay', medical: 'Medical' };
+const AUTO_PANELS = ['engineering', 'lifeSupport', 'rerouting', 'tactical', 'science', 'transporter', 'comms', 'hangar', 'medical'];
+const AUTO_STATION = { engineering: 'Engineering', lifeSupport: 'Engineering', rerouting: 'Engineering', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Shuttle Bay', medical: 'Medical' };
 const AUTO_BUILT = new Set(AUTO_PANELS);
-const AUTO_NAMES = { engineering: 'Engineering', lifeSupport: 'Life support', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Hangar control', medical: 'Medical: holographic doctor' };
+const AUTO_NAMES = { engineering: 'Engineering', lifeSupport: 'Life support', rerouting: 'Rerouting (corridors)', tactical: 'Tactical', science: 'Science', transporter: 'Transporter', comms: 'Communications', hangar: 'Hangar control', medical: 'Medical: holographic doctor' };
 // The holographic doctor (Medical's automation): it runs while a computer core is
 // online, Medical is on the ODN and the sickbay holo-emitters have power (10 while
 // it's active; without them it goes offline). Every 2 s it greets, answers
@@ -4565,7 +4635,7 @@ const emhActive = (k) => !isBase(k) && autoOn(k, 'medical') && hasStation(k, 'Me
 // The panel a crewman's command works (to hand it back when they tap it).
 function panelOfCommand(station, msg) {
   const t = msg.type;
-  if (station === 'Engineering' && t === 'grid') return msg.ls ? 'lifeSupport' : 'engineering';
+  if (station === 'Engineering' && t === 'grid') return msg.ls ? 'lifeSupport' : msg.link ? 'rerouting' : 'engineering';
   if (station === 'Tactical' && ['shields', 'lock', 'aim', 'yield', 'frequency', 'fire', 'arm', 'tractor'].includes(t)) return 'tactical';
   if (station === 'Science' && ['scan', 'sci-lock', 'plot-course'].includes(t)) return 'science';
   if (station === 'Transporter' && ['transporter-lock', 'beam', 'transporter-diagnostic'].includes(t)) return 'transporter';
@@ -4703,6 +4773,16 @@ function panelRoutine(k, p) {
       if (!!e.ls[l]?.[x] !== want) { gridCommand(a, { ls: { sys: x, loc: l, on: want } }); return `${SYSTEM_NAMES[x]} ${want ? 'on' : 'off'} at ${l}`; }
     }
     return `holding: life support on in ${here.size} occupied place${here.size === 1 ? '' : 's'}, off elsewhere`;
+  }
+  if (p === 'rerouting') {
+    // A place cut off from a bus it's tied to: close the open links that bring the bus back to it (one a tick).
+    const v = corridorsView(k, flow(k));
+    if (!v) return 'no corridors';
+    const c0 = v.cutOff.find((x) => x.fix.length);
+    if (!c0) return v.cutOff.length ? `cut off with no way round: ${v.cutOff.map((x) => `${x.place} (${x.bus === 'EPS' ? 'EPS' : `Bus ${x.bus}`})`).join(', ')}` : 'every place reached';
+    const lay = GRAPHS[graphIdOf(k)].layout, l = lay.links.find((x) => x.name === c0.fix[0]);
+    gridCommand(automaton(k, 'Engineering'), { link: { id: l.id, bus: c0.bus, closed: true } });
+    return `closed ${l.name} for ${c0.bus === 'EPS' ? 'the EPS' : `Bus ${c0.bus}`}: ${c0.place} was cut off`;
   }
   if (p === 'tactical') {
     // Red alert: shields up, phasers armed, the weapons on a locked target's (scanned) shield frequency. Yellow: shields up, phasers safe.

@@ -132,6 +132,667 @@
       "deck": 36
     }
   ],
+  "layout": {
+    "home": "place-main-engineering",
+    "corridors": [
+      {
+        "id": "corridor-deck-1",
+        "name": "Deck 1 corridor",
+        "deck": 1
+      },
+      {
+        "id": "corridor-deck-2",
+        "name": "Deck 2 corridor",
+        "deck": 2
+      },
+      {
+        "id": "corridor-deck-3",
+        "name": "Deck 3 corridor",
+        "deck": 3
+      },
+      {
+        "id": "corridor-deck-4",
+        "name": "Deck 4 corridor",
+        "deck": 4
+      },
+      {
+        "id": "corridor-deck-5",
+        "name": "Deck 5 corridor",
+        "deck": 5
+      },
+      {
+        "id": "corridor-deck-6",
+        "name": "Deck 6 corridor",
+        "deck": 6
+      },
+      {
+        "id": "corridor-deck-7",
+        "name": "Deck 7 corridor",
+        "deck": 7
+      },
+      {
+        "id": "corridor-deck-8",
+        "name": "Deck 8 corridor",
+        "deck": 8
+      },
+      {
+        "id": "corridor-deck-9",
+        "name": "Deck 9 corridor",
+        "deck": 9
+      },
+      {
+        "id": "corridor-deck-10",
+        "name": "Deck 10 corridor",
+        "deck": 10
+      },
+      {
+        "id": "corridor-deck-11",
+        "name": "Deck 11 corridor",
+        "deck": 11
+      },
+      {
+        "id": "corridor-deck-12",
+        "name": "Deck 12 corridor",
+        "deck": 12
+      },
+      {
+        "id": "corridor-deck-13",
+        "name": "Deck 13 corridor",
+        "deck": 13
+      },
+      {
+        "id": "corridor-deck-14",
+        "name": "Deck 14 corridor",
+        "deck": 14
+      },
+      {
+        "id": "corridor-deck-15",
+        "name": "Deck 15 corridor",
+        "deck": 15
+      },
+      {
+        "id": "corridor-deck-16",
+        "name": "Deck 16 corridor",
+        "deck": 16
+      },
+      {
+        "id": "corridor-deck-20",
+        "name": "Deck 20 corridor",
+        "deck": 20
+      },
+      {
+        "id": "corridor-deck-25",
+        "name": "Deck 25 corridor",
+        "deck": 25
+      },
+      {
+        "id": "corridor-deck-30",
+        "name": "Deck 30 corridor",
+        "deck": 30
+      },
+      {
+        "id": "corridor-deck-33",
+        "name": "Deck 33 corridor",
+        "deck": 33
+      },
+      {
+        "id": "corridor-deck-34",
+        "name": "Deck 34 corridor",
+        "deck": 34
+      },
+      {
+        "id": "corridor-deck-36",
+        "name": "Deck 36 corridor",
+        "deck": 36
+      }
+    ],
+    "links": [
+      {
+        "id": "branch-operations-center",
+        "name": "Operations Center (deck 1 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-1",
+        "b": "place-operations-center",
+        "closed": true
+      },
+      {
+        "id": "branch-phaser-arrays",
+        "name": "Phaser Arrays (deck 2 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-2",
+        "b": "place-phaser-arrays",
+        "closed": true
+      },
+      {
+        "id": "branch-sensor-arrays",
+        "name": "Sensor Arrays (deck 3 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-3",
+        "b": "place-sensor-arrays",
+        "closed": true
+      },
+      {
+        "id": "branch-docking-ring",
+        "name": "Docking Ring (deck 4 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-4",
+        "b": "place-docking-ring",
+        "closed": true
+      },
+      {
+        "id": "branch-drydock",
+        "name": "Drydock (deck 5 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-5",
+        "b": "place-drydock",
+        "closed": true
+      },
+      {
+        "id": "branch-industrial-replicators",
+        "name": "Industrial Replicators (deck 5 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-5",
+        "b": "place-industrial-replicators",
+        "closed": true
+      },
+      {
+        "id": "branch-shield-generators",
+        "name": "Shield Generators (deck 5 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-5",
+        "b": "place-shield-generators",
+        "closed": true
+      },
+      {
+        "id": "branch-transporter-room",
+        "name": "Transporter Room (deck 6 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-6",
+        "b": "place-transporter-room",
+        "closed": true
+      },
+      {
+        "id": "branch-subspace-communications",
+        "name": "Subspace Communications (deck 7 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-7",
+        "b": "place-subspace-communications",
+        "closed": true
+      },
+      {
+        "id": "branch-security-office",
+        "name": "Security Office (deck 8 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-8",
+        "b": "place-security-office",
+        "closed": true
+      },
+      {
+        "id": "branch-brig",
+        "name": "Brig (deck 8 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-8",
+        "b": "place-brig",
+        "closed": true
+      },
+      {
+        "id": "branch-habitat-ring",
+        "name": "Habitat Ring (deck 9 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-9",
+        "b": "place-habitat-ring",
+        "closed": true
+      },
+      {
+        "id": "branch-science-lab",
+        "name": "Science Lab (deck 10 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-10",
+        "b": "place-science-lab",
+        "closed": true
+      },
+      {
+        "id": "branch-communications-center",
+        "name": "Communications Center (deck 11 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-11",
+        "b": "place-communications-center",
+        "closed": true
+      },
+      {
+        "id": "branch-infirmary",
+        "name": "Infirmary (deck 12 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-12",
+        "b": "place-infirmary",
+        "closed": true
+      },
+      {
+        "id": "branch-deflector",
+        "name": "Deflector (deck 13 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-13",
+        "b": "place-deflector",
+        "closed": true
+      },
+      {
+        "id": "branch-environmental-control",
+        "name": "Environmental Control (deck 14 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-14",
+        "b": "place-environmental-control",
+        "closed": true
+      },
+      {
+        "id": "branch-structural-integrity",
+        "name": "Structural Integrity (deck 15 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-15",
+        "b": "place-structural-integrity",
+        "closed": true
+      },
+      {
+        "id": "branch-computer-core",
+        "name": "Computer Core (deck 16 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-16",
+        "b": "place-computer-core",
+        "closed": true
+      },
+      {
+        "id": "branch-maneuvering-thrusters",
+        "name": "Maneuvering Thrusters (deck 20 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-20",
+        "b": "place-maneuvering-thrusters",
+        "closed": true
+      },
+      {
+        "id": "branch-torpedo-bay",
+        "name": "Torpedo Bay (deck 25 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-25",
+        "b": "place-torpedo-bay",
+        "closed": true
+      },
+      {
+        "id": "branch-fusion-reactors",
+        "name": "Fusion Reactors (deck 30 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-30",
+        "b": "place-fusion-reactors",
+        "closed": true
+      },
+      {
+        "id": "branch-deuterium-tankage",
+        "name": "Deuterium Tankage (deck 33 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-33",
+        "b": "place-deuterium-tankage",
+        "closed": true
+      },
+      {
+        "id": "branch-antimatter-storage",
+        "name": "Antimatter Storage (deck 34 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-34",
+        "b": "place-antimatter-storage",
+        "closed": true
+      },
+      {
+        "id": "branch-main-engineering",
+        "name": "Main Engineering (deck 36 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-36",
+        "b": "place-main-engineering",
+        "closed": true
+      },
+      {
+        "id": "turbolift-1-2",
+        "name": "Turbolift shaft, decks 1-2",
+        "kind": "spine",
+        "a": "corridor-deck-1",
+        "b": "corridor-deck-2",
+        "closed": true
+      },
+      {
+        "id": "jefferies-1-2",
+        "name": "Jefferies tube, decks 1-2",
+        "kind": "tube",
+        "a": "corridor-deck-1",
+        "b": "corridor-deck-2",
+        "closed": false
+      },
+      {
+        "id": "turbolift-2-3",
+        "name": "Turbolift shaft, decks 2-3",
+        "kind": "spine",
+        "a": "corridor-deck-2",
+        "b": "corridor-deck-3",
+        "closed": true
+      },
+      {
+        "id": "jefferies-2-3",
+        "name": "Jefferies tube, decks 2-3",
+        "kind": "tube",
+        "a": "corridor-deck-2",
+        "b": "corridor-deck-3",
+        "closed": false
+      },
+      {
+        "id": "turbolift-3-4",
+        "name": "Turbolift shaft, decks 3-4",
+        "kind": "spine",
+        "a": "corridor-deck-3",
+        "b": "corridor-deck-4",
+        "closed": true
+      },
+      {
+        "id": "jefferies-3-4",
+        "name": "Jefferies tube, decks 3-4",
+        "kind": "tube",
+        "a": "corridor-deck-3",
+        "b": "corridor-deck-4",
+        "closed": false
+      },
+      {
+        "id": "turbolift-4-5",
+        "name": "Turbolift shaft, decks 4-5",
+        "kind": "spine",
+        "a": "corridor-deck-4",
+        "b": "corridor-deck-5",
+        "closed": true
+      },
+      {
+        "id": "jefferies-4-5",
+        "name": "Jefferies tube, decks 4-5",
+        "kind": "tube",
+        "a": "corridor-deck-4",
+        "b": "corridor-deck-5",
+        "closed": false
+      },
+      {
+        "id": "turbolift-5-6",
+        "name": "Turbolift shaft, decks 5-6",
+        "kind": "spine",
+        "a": "corridor-deck-5",
+        "b": "corridor-deck-6",
+        "closed": true
+      },
+      {
+        "id": "jefferies-5-6",
+        "name": "Jefferies tube, decks 5-6",
+        "kind": "tube",
+        "a": "corridor-deck-5",
+        "b": "corridor-deck-6",
+        "closed": false
+      },
+      {
+        "id": "turbolift-6-7",
+        "name": "Turbolift shaft, decks 6-7",
+        "kind": "spine",
+        "a": "corridor-deck-6",
+        "b": "corridor-deck-7",
+        "closed": true
+      },
+      {
+        "id": "jefferies-6-7",
+        "name": "Jefferies tube, decks 6-7",
+        "kind": "tube",
+        "a": "corridor-deck-6",
+        "b": "corridor-deck-7",
+        "closed": false
+      },
+      {
+        "id": "turbolift-7-8",
+        "name": "Turbolift shaft, decks 7-8",
+        "kind": "spine",
+        "a": "corridor-deck-7",
+        "b": "corridor-deck-8",
+        "closed": true
+      },
+      {
+        "id": "jefferies-7-8",
+        "name": "Jefferies tube, decks 7-8",
+        "kind": "tube",
+        "a": "corridor-deck-7",
+        "b": "corridor-deck-8",
+        "closed": false
+      },
+      {
+        "id": "turbolift-8-9",
+        "name": "Turbolift shaft, decks 8-9",
+        "kind": "spine",
+        "a": "corridor-deck-8",
+        "b": "corridor-deck-9",
+        "closed": true
+      },
+      {
+        "id": "jefferies-8-9",
+        "name": "Jefferies tube, decks 8-9",
+        "kind": "tube",
+        "a": "corridor-deck-8",
+        "b": "corridor-deck-9",
+        "closed": false
+      },
+      {
+        "id": "turbolift-9-10",
+        "name": "Turbolift shaft, decks 9-10",
+        "kind": "spine",
+        "a": "corridor-deck-9",
+        "b": "corridor-deck-10",
+        "closed": true
+      },
+      {
+        "id": "jefferies-9-10",
+        "name": "Jefferies tube, decks 9-10",
+        "kind": "tube",
+        "a": "corridor-deck-9",
+        "b": "corridor-deck-10",
+        "closed": false
+      },
+      {
+        "id": "turbolift-10-11",
+        "name": "Turbolift shaft, decks 10-11",
+        "kind": "spine",
+        "a": "corridor-deck-10",
+        "b": "corridor-deck-11",
+        "closed": true
+      },
+      {
+        "id": "jefferies-10-11",
+        "name": "Jefferies tube, decks 10-11",
+        "kind": "tube",
+        "a": "corridor-deck-10",
+        "b": "corridor-deck-11",
+        "closed": false
+      },
+      {
+        "id": "turbolift-11-12",
+        "name": "Turbolift shaft, decks 11-12",
+        "kind": "spine",
+        "a": "corridor-deck-11",
+        "b": "corridor-deck-12",
+        "closed": true
+      },
+      {
+        "id": "jefferies-11-12",
+        "name": "Jefferies tube, decks 11-12",
+        "kind": "tube",
+        "a": "corridor-deck-11",
+        "b": "corridor-deck-12",
+        "closed": false
+      },
+      {
+        "id": "turbolift-12-13",
+        "name": "Turbolift shaft, decks 12-13",
+        "kind": "spine",
+        "a": "corridor-deck-12",
+        "b": "corridor-deck-13",
+        "closed": true
+      },
+      {
+        "id": "jefferies-12-13",
+        "name": "Jefferies tube, decks 12-13",
+        "kind": "tube",
+        "a": "corridor-deck-12",
+        "b": "corridor-deck-13",
+        "closed": false
+      },
+      {
+        "id": "turbolift-13-14",
+        "name": "Turbolift shaft, decks 13-14",
+        "kind": "spine",
+        "a": "corridor-deck-13",
+        "b": "corridor-deck-14",
+        "closed": true
+      },
+      {
+        "id": "jefferies-13-14",
+        "name": "Jefferies tube, decks 13-14",
+        "kind": "tube",
+        "a": "corridor-deck-13",
+        "b": "corridor-deck-14",
+        "closed": false
+      },
+      {
+        "id": "turbolift-14-15",
+        "name": "Turbolift shaft, decks 14-15",
+        "kind": "spine",
+        "a": "corridor-deck-14",
+        "b": "corridor-deck-15",
+        "closed": true
+      },
+      {
+        "id": "jefferies-14-15",
+        "name": "Jefferies tube, decks 14-15",
+        "kind": "tube",
+        "a": "corridor-deck-14",
+        "b": "corridor-deck-15",
+        "closed": false
+      },
+      {
+        "id": "turbolift-15-16",
+        "name": "Turbolift shaft, decks 15-16",
+        "kind": "spine",
+        "a": "corridor-deck-15",
+        "b": "corridor-deck-16",
+        "closed": true
+      },
+      {
+        "id": "jefferies-15-16",
+        "name": "Jefferies tube, decks 15-16",
+        "kind": "tube",
+        "a": "corridor-deck-15",
+        "b": "corridor-deck-16",
+        "closed": false
+      },
+      {
+        "id": "turbolift-16-20",
+        "name": "Turbolift shaft, decks 16-20",
+        "kind": "spine",
+        "a": "corridor-deck-16",
+        "b": "corridor-deck-20",
+        "closed": true
+      },
+      {
+        "id": "jefferies-16-20",
+        "name": "Jefferies tube, decks 16-20",
+        "kind": "tube",
+        "a": "corridor-deck-16",
+        "b": "corridor-deck-20",
+        "closed": false
+      },
+      {
+        "id": "turbolift-20-25",
+        "name": "Turbolift shaft, decks 20-25",
+        "kind": "spine",
+        "a": "corridor-deck-20",
+        "b": "corridor-deck-25",
+        "closed": true
+      },
+      {
+        "id": "jefferies-20-25",
+        "name": "Jefferies tube, decks 20-25",
+        "kind": "tube",
+        "a": "corridor-deck-20",
+        "b": "corridor-deck-25",
+        "closed": false
+      },
+      {
+        "id": "turbolift-25-30",
+        "name": "Turbolift shaft, decks 25-30",
+        "kind": "spine",
+        "a": "corridor-deck-25",
+        "b": "corridor-deck-30",
+        "closed": true
+      },
+      {
+        "id": "jefferies-25-30",
+        "name": "Jefferies tube, decks 25-30",
+        "kind": "tube",
+        "a": "corridor-deck-25",
+        "b": "corridor-deck-30",
+        "closed": false
+      },
+      {
+        "id": "turbolift-30-33",
+        "name": "Turbolift shaft, decks 30-33",
+        "kind": "spine",
+        "a": "corridor-deck-30",
+        "b": "corridor-deck-33",
+        "closed": true
+      },
+      {
+        "id": "jefferies-30-33",
+        "name": "Jefferies tube, decks 30-33",
+        "kind": "tube",
+        "a": "corridor-deck-30",
+        "b": "corridor-deck-33",
+        "closed": false
+      },
+      {
+        "id": "turbolift-33-34",
+        "name": "Turbolift shaft, decks 33-34",
+        "kind": "spine",
+        "a": "corridor-deck-33",
+        "b": "corridor-deck-34",
+        "closed": true
+      },
+      {
+        "id": "jefferies-33-34",
+        "name": "Jefferies tube, decks 33-34",
+        "kind": "tube",
+        "a": "corridor-deck-33",
+        "b": "corridor-deck-34",
+        "closed": false
+      },
+      {
+        "id": "turbolift-34-36",
+        "name": "Turbolift shaft, decks 34-36",
+        "kind": "spine",
+        "a": "corridor-deck-34",
+        "b": "corridor-deck-36",
+        "closed": true
+      },
+      {
+        "id": "jefferies-34-36",
+        "name": "Jefferies tube, decks 34-36",
+        "kind": "tube",
+        "a": "corridor-deck-34",
+        "b": "corridor-deck-36",
+        "closed": false
+      },
+      {
+        "id": "jefferies-home",
+        "name": "Jefferies tube, Main Engineering to its deck",
+        "kind": "tube",
+        "a": "place-main-engineering",
+        "b": "corridor-deck-36",
+        "closed": false
+      }
+    ]
+  },
   "systems": {
     "ship-power": {
       "key": "ship",

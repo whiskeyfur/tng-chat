@@ -12,6 +12,26 @@
       "deck": 1
     }
   ],
+  "layout": {
+    "home": "place-maintenance-deck",
+    "corridors": [
+      {
+        "id": "corridor-deck-1",
+        "name": "Deck 1 corridor",
+        "deck": 1
+      }
+    ],
+    "links": [
+      {
+        "id": "branch-maintenance-deck",
+        "name": "Maintenance Deck (deck 1 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-1",
+        "b": "place-maintenance-deck",
+        "closed": true
+      }
+    ]
+  },
   "systems": {
     "solar": {
       "key": "solar",

@@ -382,6 +382,10 @@
         panel('st-damage', 'Damage control', 'red', true, h('div', { 'data-damage': '' })),
         // Life support, place by place (client.js fills it in).
         panel('st-lifesupport', 'Life support', 'blue', true, h('div', { 'data-lifesupport': '' })),
+        // The corridors the buses run along: their ties, damage, what's cut off (client.js fills it in).
+        panel('st-corridors', 'Corridors', 'gold', true, h('div', { 'data-corridors': '' })),
+        // The air: tanks and processors, the air handler, each place (client.js fills it in).
+        panel('st-airdist', 'Air distribution', 'sky', true, h('div', { class: 'dist', 'data-airdist': '' })),
       ] };
     },
     Medical: () => ({ code: 'MED 07', color: 'blue', panels: [

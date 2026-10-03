@@ -27,6 +27,74 @@
       "deck": 1
     }
   ],
+  "layout": {
+    "home": "place-aft-compartment",
+    "corridors": [
+      {
+        "id": "corridor-deck-1",
+        "name": "Deck 1 corridor",
+        "deck": 1
+      }
+    ],
+    "links": [
+      {
+        "id": "branch-cockpit",
+        "name": "Cockpit (deck 1 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-1",
+        "b": "place-cockpit",
+        "closed": true
+      },
+      {
+        "id": "branch-aft-compartment",
+        "name": "Aft Compartment (deck 1 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-1",
+        "b": "place-aft-compartment",
+        "closed": true
+      },
+      {
+        "id": "branch-impulse-and-aux-pods",
+        "name": "Impulse and Aux Pods (deck 1 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-1",
+        "b": "place-impulse-and-aux-pods",
+        "closed": true
+      },
+      {
+        "id": "branch-warp-nacelles-port-and-starboard",
+        "name": "Warp Nacelles (port and starboard) (deck 1 corridor)",
+        "kind": "branch",
+        "a": "corridor-deck-1",
+        "b": "place-warp-nacelles-port-and-starboard",
+        "closed": true
+      },
+      {
+        "id": "crawlway-cockpit",
+        "name": "Crawlway to Cockpit",
+        "kind": "tube",
+        "a": "place-aft-compartment",
+        "b": "place-cockpit",
+        "closed": false
+      },
+      {
+        "id": "crawlway-impulse-and-aux-pods",
+        "name": "Crawlway to Impulse and Aux Pods",
+        "kind": "tube",
+        "a": "place-aft-compartment",
+        "b": "place-impulse-and-aux-pods",
+        "closed": false
+      },
+      {
+        "id": "crawlway-warp-nacelles-port-and-starboard",
+        "name": "Crawlway to Warp Nacelles (port and starboard)",
+        "kind": "tube",
+        "a": "place-aft-compartment",
+        "b": "place-warp-nacelles-port-and-starboard",
+        "closed": false
+      }
+    ]
+  },
   "systems": {
     "ship-power": {
       "key": "ship",

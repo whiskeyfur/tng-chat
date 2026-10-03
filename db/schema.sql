@@ -125,6 +125,8 @@ alter table classes add column if not exists class_code varchar(32) null, add co
 alter table classes add unique key if not exists class_code (class_code);
 -- (design: the design as its file has it, every field; graph_places: its places as the graph has them.)
 alter table classes add column if not exists graph_places json null;
+-- (graph_layout: its corridors, as the graph has them: { home, corridors, links }.)
+alter table classes add column if not exists graph_layout json null;
 alter table classes add constraint classes_faction foreign key if not exists classes_faction (faction_id) references factions (faction_id);
 
 -- Its systems: the graph's nodes, by their id in the design (console-helm, warp-core, ...), each
