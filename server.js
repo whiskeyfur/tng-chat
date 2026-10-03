@@ -2007,6 +2007,9 @@ const COMPUTER = { draw: 2, bootSecs: 14, stages: ['POST', 'LCARS kernel', 'ODN 
 const coresOnline = (k) => (isBase(k) || !eng.has(k) ? COMPUTERS.length : engOf(k).computers.filter((c) => c.state === 'online').length);
 // The crosslink is a chain, A–B–C: it joins A+B, B+C or all three (A and C only through B).
 const chainOk = (list) => list.length < 2 || list.includes('B');
+// Each crosslink tie can be one way: e.xlBlock lists the directions blocked ('A>B': no power from
+// A into B). A closed tie with nothing blocked carries both ways; an open one, neither.
+const XL_DIRS = ['A>B', 'B>A', 'B>C', 'C>B'];
 const storeOf = (node) => (node === 'EPS' ? 'pressure' : `battery${node}`);
 // Every tie is one class: Bus A/B, or the EPS only (the warp core's and
 // impulse drives' outputs). The warp core itself spans both: its
@@ -2482,6 +2485,7 @@ function freshEng(saved, { cold = false, k = null } = {}) {
     connTies: s.connTies && typeof s.connTies === 'object' ? { deu: !!s.connTies.deu, am: !!s.connTies.am, odn: !!s.connTies.odn } : !s.conn && cold ? { deu: false, am: false, odn: true } : { deu: true, am: true, odn: true },
     // Each battery's main breaker (closed: in service). Older saves: closed if the old battery was tied in.
     breakers: Object.fromEntries(BUSES.map((X) => [X, typeof s.breakers?.[X] === 'boolean' ? s.breakers[X] : Array.isArray(s.ties?.battery) ? s.ties.battery.length > 0 : true])),
+    xlBlock: Array.isArray(s.xlBlock) ? s.xlBlock.filter((d) => XL_DIRS.includes(d)) : [],
     // Each store's charge (older saves: one battery, shared out across A, B and C; the EPS starts unpressurized;
     // a new ship's bus batteries start empty, to be charged from dock power).
     stores: Object.fromEntries(Object.entries(STORES).map(([name, node]) => {
@@ -2585,7 +2589,7 @@ const savedEng = (k) => {
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state === 'running' ? 'running' : 'off', epsTap: e.aux[a].epsTap }])),
     tanks: e.tanks, tankCfg: e.tankCfg, tankContain: e.tankContain, epsLive: e.epsLive, ls: e.ls, odn: e.odn, trDiag: e.trDiag.state === 'passed' ? 'passed' : 'none', contain: { field: Math.round(e.contain.field), reserve: Math.round(e.contain.reserve) },
     wc: { rate: e.wc.rate, actual: Math.round(e.wc.actual), mix: e.wc.mix, align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, temp: Math.round(e.wc.temp), plasma: e.wc.plasma, autoTrim: e.wc.autoTrim },
-    antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
+    antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, xlBlock: e.xlBlock || [], computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     // (Each load's power path, as the design had it: a design change is noticed on the next load.)
     paths: Object.fromEntries(Object.keys(e.ties).filter((x) => /^(console|system|sub):/.test(x) && !CONDUITS.includes(x)).map((x) => [x, conduitsOf(k, x).join('>')])),
     dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores * 100) / 100, sporeLoaded: e.spore?.loaded || 0, brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
@@ -2684,6 +2688,9 @@ function flow(k) {
   const poolOf = Object.fromEntries(BUSES.map((X) => [X, new Set([X])]));
   if (e.ties.crosslink.length >= 2) { const m = new Set(e.ties.crosslink); for (const y of m) poolOf[y] = m; }
   const pool = (X) => [...poolOf[X]];
+  // (A one-way tie: power only crosses the way it's open. A to C goes through B, both legs.)
+  const xlBlocked = new Set(e.xlBlock || []);
+  const xlOk = (f, t) => f === t || ([f, t].sort().join('') === 'AC' ? !xlBlocked.has(`${f}>B`) && !xlBlocked.has(`B>${t}`) : !xlBlocked.has(`${f}>${t}`));
   // A damaged bus carries less: its max scales with its condition.
   const busMax = busMaxOf(k);
   const maxOf = (X) => busMax[X] * Math.max(0, 1 - (c.damage[`bus${X}`] || 0) / 100);
@@ -2702,6 +2709,7 @@ function flow(k) {
     const bus = buses[node];
     const pull = (s, eps, side = node) => {
       if (eps && !e.epsLive) return; // the EPS manifold isn't pressurized: it carries nothing yet
+      if (bus && !eps && side !== node && !xlOk(side, node)) return; // (the crosslink one way, the other)
       const room = Math.min(bus ? busRoom(node) - got : Infinity, eps ? maxOf('EPS') - viaEps : Infinity, bus && eps ? tapRoom(node) : Infinity);
       const t = Math.min(s.left, amt - got, room, s.share && !eps ? s.share[side] : Infinity);
       if (t <= 0) return;
@@ -2710,7 +2718,7 @@ function flow(k) {
       cells[s.name][eps ? 'EPS' : side] += t;
       if (eps) viaEps += t;
       if (bus && !eps) xflow(side, node, t); // from a crosslinked bus's source
-      if (bus && eps) { let rest = t; for (const X of [node, ...pool(node).filter((y) => y !== node)]) { const u = Math.min(rest, Math.max(0, taps[X] - buses[X].tapUsed)); buses[X].tapUsed += u; rest -= u; xflow(X, node, u); } }
+      if (bus && eps) { let rest = t; for (const X of [node, ...pool(node).filter((y) => y !== node && xlOk(y, node))]) { const u = Math.min(rest, Math.max(0, taps[X] - buses[X].tapUsed)); buses[X].tapUsed += u; rest -= u; xflow(X, node, u); } }
       if (bus) bus.src[s.name] = (bus.src[s.name] || 0) + t;
     };
     const sides = bus ? pool(node) : [node];
@@ -3014,7 +3022,7 @@ function gridView(k) {
     warpCore: { ...e.wc, actual: Math.round(e.wc.actual), align: Math.round(e.wc.align * 10) / 10, crystal: Math.round(e.wc.crystal * 10) / 10, eff: Math.round(coreEff(e.wc) * 100), output: Math.round(coreOutput(e)), cores: coresOnline(k), need: { field: CONTAIN.conduit, light: FUELBUS.light, mix: CORE.ignitionMix, rate: CORE.ignitionRate, hot: CORE.hot, flameout: CORE.flameout, bestMix: CORE.bestMix } },
     odn: e.odn,
     computers: e.computers.map((cc) => ({ state: cc.state, stage: cc.state === 'booting' ? COMPUTER.stages[Math.min(COMPUTER.stages.length - 1, Math.floor((cc.t * COMPUTER.stages.length) / COMPUTER.bootSecs))] : null, t: cc.t })), computerBootSecs: COMPUTER.bootSecs,
-    crossflow: Object.fromEntries(Object.entries(f.crossflow).map(([x, v]) => [x, Math.round(v)]).filter(([, v]) => v)), taps: e.taps, ties: e.ties, tripped: Object.keys(e.tripped || {}), containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
+    crossflow: Object.fromEntries(Object.entries(f.crossflow).map(([x, v]) => [x, Math.round(v)]).filter(([, v]) => v)), xlBlock: e.xlBlock || [], taps: e.taps, ties: e.ties, tripped: Object.keys(e.tripped || {}), containmentOk: f.containmentOk, eps: Math.round(f.viaEps),
     // Failing: seconds left before the field drops below 20% (the breach).
     breach: e.breach && e.antimatter > 0 ? Math.max(0, Math.ceil((e.contain.field - CONTAIN.breach) / CONTAIN.fall)) : null,
     contain: { field: Math.round(e.contain.field), reserve: Math.round((e.contain.reserve / reserveCap()) * 100), onReserve: !!e.onReserve, reserveSecs: Math.round(e.contain.reserve / GRID.containment) },
@@ -3198,6 +3206,8 @@ function gridCommand(ws, msg) {
     if (k === 'crosslink' && !chainOk(list)) return note('A and C link only through B: the crosslink runs A–B–C');
     if (list.length > 1 && !isMulti(k)) return note(`${NAME[k] || k.split(':')[1]} ties to one: Bus A, B or C (the crosslink joins buses)`);
     if (k === 'containment' && !list.length && e.antimatter > 0) return note('antimatter containment can\'t be switched off with antimatter aboard (only self-destruct does that): leave it at least one feed');
+    // (A tie closed or opened by the crosslink carries both ways again.)
+    if (k === 'crosslink') for (const [a, b] of [['A', 'B'], ['B', 'C']]) if (!(list.includes(a) && list.includes(b) && e.ties.crosslink.includes(a) && e.ties.crosslink.includes(b))) e.xlBlock = (e.xlBlock || []).filter((d) => d !== `${a}>${b}` && d !== `${b}>${a}`);
     e.ties[k] = list;
     if (e.tripped) delete e.tripped[k];
     said.push(`${NAME[k] || (k.startsWith('console:') ? `${k.slice(8)} console` : k.startsWith('sub:') ? SUBSYSTEMS[k.slice(4)].name : SYSTEM_NAMES[k.slice(7)] || k.slice(7))} ${k === 'containment' ? 'fed from' : 'tied to'} ${feeds(list)}`);
@@ -3224,6 +3234,32 @@ function gridCommand(ws, msg) {
     const on = e.connTies[res], bus = { deu: 'the Deu. bus', am: 'the AM bus', odn: 'the ODN' }[res];
     said.push(`${e.docked} connection ${on ? 'tied to' : 'untied from'} ${bus}${res === 'odn' && on ? ': hard data link through the docking port' : ''}`);
     linkTick();
+  }
+  // One way of a crosslink tie, on or off (or toggled): { xlDir: { from, to, on? } }. On with the tie
+  // open closes it that way only; off with the other way off too opens it.
+  if (msg.xlDir && XL_DIRS.includes(`${msg.xlDir.from}>${msg.xlDir.to}`)) {
+    const { from, to } = msg.xlDir, d = `${from}>${to}`, r = `${to}>${from}`, xl = e.ties.crosslink;
+    e.xlBlock = (e.xlBlock || []).filter((x) => XL_DIRS.includes(x));
+    const linked = xl.includes(from) && xl.includes(to), on = typeof msg.xlDir.on === 'boolean' ? msg.xlDir.on : !(linked && !e.xlBlock.includes(d));
+    if (on && !linked) {
+      e.ties.crosslink = ['A', 'B', 'C'].filter((n) => xl.includes(n) || n === from || n === to);
+      e.xlBlock = [...e.xlBlock.filter((x) => x !== d && x !== r), r];
+      said.push(`bus crosslink ${from}–${to} closed one way: Bus ${from} → Bus ${to} only`);
+    } else if (on) {
+      e.xlBlock = e.xlBlock.filter((x) => x !== d);
+      said.push(`bus crosslink: Bus ${from} → Bus ${to} open${e.xlBlock.includes(r) ? ' (one way)' : ' (both ways)'}`);
+    } else if (linked) {
+      if (e.xlBlock.includes(r)) {
+        // (Both ways off: the tie opens. Opening A–B drops A; B–C drops C; a lone bus is no crosslink.)
+        const drop = [from, to].includes('A') ? 'A' : 'C', next = xl.filter((n) => n !== drop);
+        e.ties.crosslink = next.length < 2 ? [] : next;
+        e.xlBlock = e.xlBlock.filter((x) => x !== d && x !== r);
+        said.push(`bus crosslink ${from}–${to} open`);
+      } else {
+        e.xlBlock = [...e.xlBlock.filter((x) => x !== d), d];
+        said.push(`bus crosslink one way: Bus ${to} → Bus ${from} only`);
+      }
+    }
   }
   if (msg.breaker && BUSES.includes(msg.breaker.bus)) {
     e.breakers[msg.breaker.bus] = !!msg.breaker.on;

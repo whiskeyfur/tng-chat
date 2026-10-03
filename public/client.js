@@ -779,7 +779,7 @@ let distBus = 'EPS';
 function renderDistribution(grid) {
   const box = document.querySelector('[data-distribution]');
   if (!box || !grid) return;
-  const sig = JSON.stringify([distBus, grid.ties, grid.cells, grid.cutOff, grid.totals, grid.stores, grid.fuel, grid.taps, grid.crossflow, grid.srcCap, grid.epsLive, grid.srcDamage]);
+  const sig = JSON.stringify([distBus, grid.xlBlock, grid.ties, grid.cells, grid.cutOff, grid.totals, grid.stores, grid.fuel, grid.taps, grid.crossflow, grid.srcCap, grid.epsLive, grid.srcDamage]);
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig;
   const NS = 'http://www.w3.org/2000/svg';
@@ -811,8 +811,7 @@ function renderDistribution(grid) {
     if (store) left.push(hurt({ label: X === 'EPS' ? 'EPS pressure' : `Battery ${X}`, value: `${store.level}%${store.supplying ? ` · ${store.supplying} out` : store.charging ? ` · charging ${store.charging}` : ''}`, st: store.supplying > 0 ? 'live' : store.breaker === false ? 'open' : store.level > 0 ? 'idle' : 'dead', ...(store.supplying > 0 || store.breaker === false ? {} : { word: store.level > 0 ? (store.charging > 0 ? 'charging' : 'ready') : 'dead' }),
       // (Out to the bus while it supplies; in from it while it charges.)
       flow: store.supplying > 0 ? 1 : store.charging > 0 ? -1 : 0, amount: store.supplying || store.charging || 0 }, `battery:${X}`));
-    // The low buses' crosslink (power crossing from another bus: a source; to one: a load) and the EPS tap.
-    const across = (Y) => { const k = [X, Y].sort().join(''), v = grid.crossflow?.[k] || 0; return Y < X ? v : -v; }; // + : from Y into X
+    // The EPS tap (the crosslink: the neighbouring buses, above and below this one, in the middle).
     const LOW = ['A', 'B', 'C'];
     if (LOW.includes(X)) {
       const tapIn = Math.max(0, grid.cells?.taps?.[X] || 0), tapMax = grid.taps?.[X] || 0;
@@ -820,7 +819,6 @@ function renderDistribution(grid) {
       // open with the EPS not energized (no output). A tap opens it to the bus's limit, or closes it.
       const tapSt = tapIn > 0.5 ? 'live' : !tapMax ? 'open' : grid.epsLive ? 'idle' : 'dead';
       left.push(hurt({ label: 'EPS tap', value: `${Math.round(tapIn)} of ${tapMax} MW`, st: tapSt, ...(tapSt === 'dead' ? { word: 'EPS not energized' } : tapSt === 'open' ? { word: 'closed · standby' } : {}), amount: tapIn, crosslink: true, tapBus: X }, `tap:${X}`));
-      for (const Y of LOW.filter((y) => y !== X)) { const v = across(Y); if (v > 0.5) left.push({ label: `From Bus ${Y}`, value: `+${Math.round(v)} MW`, st: 'live', amount: v, crosslink: true }); }
     }
     const t = grid.totals?.[X] || {};
     mid = { label: busName, value: `${Math.round(t.used || 0)} of ${Math.round(t.available || 0)} MW`, st: (t.available || 0) > 0 ? 'live' : 'dead',
@@ -831,7 +829,6 @@ function renderDistribution(grid) {
     const placeOf = (key) => key.startsWith('console:') ? places.find((p) => p.stations.includes(key.slice(8)))
       : places.find((p) => (p.rows || []).includes(parentOf[key.slice(7)] || key)) || fallback;
     const loads = Object.keys(grid.ties).filter((k) => /^(console|system|sub):/.test(k) && !k.startsWith('place:') && grid.tieNodes[k]?.includes(X) && (grid.conduits || []).indexOf(k) < 0 || k === 'system:lifeSupport' && grid.tieNodes[k]?.includes(X));
-    if (LOW.includes(X)) for (const Y of LOW.filter((y) => y !== X)) { const v = across(Y); if (v < -0.5) right.push({ label: `To Bus ${Y}`, value: `−${Math.round(-v)} MW`, st: 'live', amount: -v, kind: 'place' }); }
     if (X === 'EPS') for (const Y of LOW) { const v = Math.max(0, grid.cells?.taps?.[Y] || 0); if (v > 0.5) right.push({ label: `EPS tap to Bus ${Y}`, value: `${Math.round(v)} of ${grid.taps?.[Y] || 0} MW`, st: 'live', amount: v, kind: 'place' }); }
     for (const p of places) {
       const pk = `place:${p.name}`, mine = loads.filter((k) => placeOf(k) === p);
@@ -853,14 +850,28 @@ function renderDistribution(grid) {
   // The layout: three columns; pills 200 × 40.
   const W = 1040, PH = 40, GAP = 10, cx = { left: 20, mid: 330, right: 640 };
   const rowsH = (n) => n * (PH + GAP);
-  const H = Math.max(rowsH(left.length), rowsH(right.length), 160) + 40;
+  // The crosslink, in the middle: the neighbouring low buses (A–B–C) above and below this one, Bus B
+  // with A above and C below, A and C with B above. Each link: lit the way power crosses, and two
+  // taps, From (import into this bus) and To (export from it): live, ready (open, nothing crossing),
+  // blocked (the tie closed one way) or standby (the tie open). A tap opens or blocks that way.
+  const xlNow = grid.ties.crosslink || [], xlBlock = grid.xlBlock || [];
+  const across = (Y) => { const k = [X, Y].sort().join(''), v = grid.crossflow?.[k] || 0; return Y < X ? v : -v; }; // + : from Y into X
+  const NEAR = { A: [['B', -1]], B: [['A', -1], ['C', 1]], C: [['B', -1]] }[X] || [];
+  // (Everything centred on the bus: the sources to its left and the loads to its right run evenly
+  // above and below it, the neighbouring buses above and below; room for all of it.)
+  const half = (n) => Math.max(0, rowsH(n) - GAP) / 2;
+  const reachUp = Math.max(half(left.length), half(right.length), NEAR.some(([, s]) => s < 0) ? 160 + PH / 2 : 0, PH / 2);
+  const reachDown = Math.max(half(left.length), half(right.length), NEAR.some(([, s]) => s > 0) ? 160 + PH * 1.5 : 60 + PH / 2);
+  const H = reachUp + reachDown + 40;
   const svg = svgEl('svg', { class: 'dist-map', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `${busName} flow schematic` });
   const COLOR = { live: 'var(--lcars-sky)', idle: 'var(--lcars-gold)', damaged: 'var(--lcars-red)', dead: 'var(--lcars-tan)', open: '#3a3550', cut: '#5a1f22' };
   const pill = (x, y, n, w = 260) => {
-    const g = svgEl('g', { class: `dist-node dist-node--${n.st}`, transform: `translate(${x} ${y})`, role: 'button', tabindex: 0, 'data-key': n.key || n.tank || (n.tapBus ? `tap:${n.tapBus}` : n.label) });
+    const g = svgEl('g', { class: `dist-node dist-node--${n.st}`, transform: `translate(${x} ${y})`, role: 'button', tabindex: 0, 'data-key': n.key || n.tank || n.xlKey || (n.tapBus ? `tap:${n.tapBus}` : n.label) });
     g.append(svgEl('rect', { width: w, height: PH, rx: PH / 2, fill: COLOR[n.st], opacity: n.st === 'dead' ? 0.6 : 1, ...(n.st === 'cut' ? { stroke: 'var(--lcars-red)', 'stroke-width': 2 } : {}) }),
       svgEl('text', { x: 16, y: 17, 'font-size': 14, fill: n.st === 'open' || n.st === 'cut' ? 'var(--lcars-text)' : '#000' }, n.label.toUpperCase()),
       svgEl('text', { x: 16, y: 32, 'font-size': 11, fill: n.st === 'open' || n.st === 'cut' ? '#aaa' : '#000' }, `${n.value} · ${n.word || { live: 'live', idle: 'ready', dead: 'no power', open: 'standby', cut: 'CUT OFF' }[n.st]}`));
+    if (n.xlDir) g.addEventListener('click', () => send({ type: 'grid', xlDir: n.xlDir }));
+    if (n.view) g.addEventListener('click', () => { distBus = n.view; box.dataset.sig = ''; renderDistribution(lastNav?.own?.grid); });
     if (n.tapBus) g.addEventListener('click', () => send({ type: 'grid', tap: { bus: n.tapBus, on: !(grid.taps?.[n.tapBus] > 0) } }));
     if (n.key || n.tank) g.addEventListener('click', () => (n.tank ? send({ type: 'grid', tank: { bus: X === 'Deu' ? 'deu' : 'am', name: n.tank, tied: n.st === 'open' } }) : toggle(n.key)));
     svg.append(g);
@@ -877,12 +888,30 @@ function renderDistribution(grid) {
     d: d || `M${x1},${y1} H${(x1 + x2) / 2} V${y2} H${x2}`, fill: 'none', stroke: dir ? 'var(--lcars-sky)' : '#444', 'stroke-width': dir ? Math.min(6, 2.5 + amount / 120).toFixed(1) : 1.5,
     ...(dir ? { class: `dist-flow${dir < 0 ? ' dist-flow--rev' : ''}`, [dir < 0 ? 'marker-start' : 'marker-end']: 'url(#dist-arrow)', style: `animation-duration: ${Math.max(0.35, 1.6 - amount / 250).toFixed(2)}s`, 'data-flow': dir < 0 ? `${to} → ${from}` : `${from} → ${to}` } : { 'data-flow': '' }) }));
   const dirOf = (n) => n.flow ?? (n.st === 'live' ? 1 : 0);
-  const midY = H / 2 - PH / 2;
-  const L = left.map((n, i) => ({ n, ...pill(cx.left, 20 + rowsH(i), n) }));
+  const midY = 20 + reachUp - PH / 2, busC = midY + PH / 2;
+  const L = left.map((n, i) => ({ n, ...pill(cx.left, busC - half(left.length) - PH / 2 + rowsH(i), n) }));
+  mid.xlKey = 'bus-here';
   const M = pill(cx.mid, midY, mid);
   mid.notes.forEach((t, i) => svg.append(svgEl('text', { x: cx.mid + 8, y: midY + PH + 18 + i * 16, 'font-size': 12, fill: 'var(--lcars-gold)' }, t)));
+  for (const [Y, side] of NEAR) {
+    const ny = midY + side * 160, tied = xlNow.includes(X) && xlNow.includes(Y), v = across(Y), t = grid.totals?.[Y] || {};
+    const nb = pill(cx.mid, ny, { label: `Bus ${Y}`, value: `${Math.round(t.used || 0)} of ${Math.round(t.available || 0)} MW`, st: (t.available || 0) > 0 ? 'live' : 'dead', xlKey: `xl-bus:${Y}`, view: Y });
+    // (The link: from the upper pill's foot to the lower's head; dashes the way power goes.)
+    const top = side < 0 ? ny + PH : midY + PH, bottom = side < 0 ? midY : ny, xm = cx.mid + 130;
+    const down = side < 0 ? v > 0.5 : v < -0.5, up = side < 0 ? v < -0.5 : v > 0.5;
+    line(0, 0, 0, 0, down ? 1 : up ? -1 : 0, Math.abs(v), side < 0 ? `Bus ${Y}` : busName, side < 0 ? busName : `Bus ${Y}`, `M${xm},${top} V${bottom}`);
+    const way = (inward) => {
+      const f = inward ? Y : X, to = inward ? X : Y, amt = inward ? Math.max(0, v) : Math.max(0, -v), open = tied && !xlBlock.includes(`${f}>${to}`), live = open && amt > 0.5;
+      const arrow = (inward ? side < 0 : side > 0) ? '▼' : '▲';
+      return { label: `${arrow} ${inward ? 'From' : 'To'} Bus ${Y}`, value: `${Math.round(amt)} MW`, st: live ? 'live' : open ? 'idle' : 'open', word: live ? 'live' : open ? 'ready' : tied ? 'blocked' : 'standby', amount: amt, xlKey: `xl-${inward ? 'from' : 'to'}:${Y}`, xlDir: { from: f, to } };
+    };
+    const ty = (top + bottom) / 2 - PH / 2;
+    pill(xm - 136, ty, way(true), 128);
+    pill(xm + 8, ty, way(false), 128);
+    nb;
+  }
   let placeAt = null;
-  const R = right.map((n, i) => ({ n, ...pill(cx.right + (n.kind === 'sub' ? 60 : n.kind === 'load' ? 30 : 0), 20 + rowsH(i), n, n.kind === 'place' ? 300 : 260) }));
+  const R = right.map((n, i) => ({ n, ...pill(cx.right + (n.kind === 'sub' ? 60 : n.kind === 'load' ? 30 : 0), busC - half(right.length) - PH / 2 + rowsH(i), n, n.kind === 'place' ? 300 : 260) }));
   for (const s of L) line(s.x + s.w, s.y + PH / 2, M.x, midY + PH / 2, dirOf(s.n), s.n.amount, s.n.label, mid.label);
   for (const r of R) {
     if (r.n.kind === 'place' || fuel) { line(M.x + M.w, midY + PH / 2, r.x, r.y + PH / 2, dirOf(r.n), r.n.amount, mid.label, r.n.label); placeAt = r; }
@@ -898,8 +927,10 @@ function renderDistribution(grid) {
     const mini = (dir, amount) => { const s = svgEl('svg', { class: 'dist-tie__line', viewBox: '0 0 60 14', 'aria-hidden': 'true' }); s.append(svgEl('path', { d: 'M4,7 H56', fill: 'none', stroke: dir ? 'var(--lcars-sky)' : '#555', 'stroke-width': dir ? Math.min(5, 2 + amount / 60).toFixed(1) : 2, ...(dir ? { class: `dist-flow${dir < 0 ? ' dist-flow--rev' : ''}`, [dir < 0 ? 'marker-start' : 'marker-end']: 'url(#dist-arrow)' } : {}) })); return s; };
     const tie = (a, b) => {
       const on = xl.includes(a) && xl.includes(b), v = flowAB(a, b), amt = Math.abs(v), dir = on && amt > 0.5 ? Math.sign(v) : 0;
+      // (One way: which way it's open.)
+      const only = on && (grid.xlBlock || []).includes(`${b}>${a}`) ? `${a} → ${b}` : on && (grid.xlBlock || []).includes(`${a}>${b}`) ? `${b} → ${a}` : '';
       const b2 = el('button', { type: 'button', className: `dist-tie${on ? ' dist-tie--on' : ''}`, id: `dist-tie-${a}${b}` }, mini(dir, amt),
-        el('span', { className: 'dist-tie__text', textContent: !on ? 'tie open' : dir ? `${dir > 0 ? a : b} → ${dir > 0 ? b : a} ${Math.round(amt)}` : 'tie closed' }));
+        el('span', { className: 'dist-tie__text', textContent: !on ? 'tie open' : dir ? `${dir > 0 ? a : b} → ${dir > 0 ? b : a} ${Math.round(amt)}${only ? ' · one way' : ''}` : only ? `${only} only` : 'tie closed' }));
       b2.title = `Bus ${a} – Bus ${b} crosslink: tap to ${on ? 'open' : 'close'} it`;
       b2.onclick = () => {
         // (Opening A–B drops A; opening B–C drops C; a lone bus is no crosslink at all.)
@@ -923,7 +954,20 @@ function renderDistribution(grid) {
     ladder,
     el('div', { className: 'dist-wrap' }, svg),
     el('p', { className: 'ops-hint', textContent: 'Power runs source → bus → place → system → subsystem: a load gets this bus\'s power only while everything above it is tied to it (CUT OFF otherwise). Tap a pill to tie it to this bus or untie it.' }));
+  focusDistribution();
 }
+// A bus opened (Distribution shown, or another bus picked): its pill scrolled to the middle of
+// the view, once; live updates leave the scroll where it is.
+function focusDistribution(force) {
+  const box = document.querySelector('[data-distribution]');
+  if (!box) return;
+  if (force) delete box.dataset.focused;
+  const here = box.querySelector('.dist-node[data-key="bus-here"]');
+  if (!here || !box.offsetParent || box.dataset.focused === distBus) return;
+  box.dataset.focused = distBus;
+  requestAnimationFrame(() => here.scrollIntoView({ block: 'center', inline: 'center' }));
+}
+window.addEventListener('screenchange', (e) => { if (e.detail === 'st-dist') focusDistribution(true); });
 // The Spore Propulsion Laboratory: a capsule (a closed, critical monitor) for the drive and
 // the reserve; the Load / Unload taps in a right-capped cluster. Loading is by hand, here only.
 function renderSporeLab(grid) {
@@ -1636,7 +1680,8 @@ function renderCombat() {
         return spanRow(`tap-row-${X}`, `EPS → Bus ${X}`, 2, bar, `${grid.taps[X] ? `up to ${grid.taps[X]}` : 'closed'}`);
       }),
     ];
-    const crosslinkRow = () => ties('crosslink', 'Bus crosslink', 'crosslink', { level: 1, note: grid.ties.crosslink.length >= 2 ? `Bus ${grid.ties.crosslink.join(' + ')} share one pool` : 'check two or more buses to join them' });
+    const oneWay = () => (grid.xlBlock || []).map((d) => { const [f, t] = d.split('>'); return `Bus ${t} → ${f} only`; });
+    const crosslinkRow = () => ties('crosslink', 'Bus crosslink', 'crosslink', { level: 1, note: grid.ties.crosslink.length >= 2 ? `Bus ${grid.ties.crosslink.join(' + ')} share one pool${oneWay().length ? ` · one way: ${oneWay().join(', ')}` : ''}` : 'check two or more buses to join them' });
     // Engineering's own rows: life support, then every power source and its subsystems.
     const engineeringRows = () => [
       parentRow('ties-core-parent', 'Warp core (M/ARC)', 1, grid.core === 'starting' ? `starting ${grid.start} of ${grid.startSecs} s` : grid.core,

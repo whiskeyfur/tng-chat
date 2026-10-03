@@ -189,13 +189,66 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
       distBus = 'C'; renderDistribution(g);
       out.bc = document.getElementById('dist-tie-BC').textContent; out.ab = document.getElementById('dist-tie-AB').textContent;
       out.bcLit = !!document.querySelector('#dist-tie-BC path.dist-flow');
-      out.onC = [...document.querySelectorAll('[data-distribution] .dist-node')].some((n) => /^from bus b/i.test(n.textContent));
+      out.onC = [...document.querySelectorAll('[data-distribution] .dist-node')].some((n) => /^. from bus b.* live$/i.test(n.textContent));
       distBus = 'B'; renderDistribution(g);
-      out.onB = [...document.querySelectorAll('[data-distribution] .dist-node')].some((n) => /^to bus c/i.test(n.textContent));
+      out.onB = [...document.querySelectorAll('[data-distribution] .dist-node')].some((n) => /^. to bus c.* live$/i.test(n.textContent));
       distBus = 'A'; renderDistribution(window.__nav.last.own.grid);
       return out;
     });
     assert.deepEqual(crossing, { bc: 'B → C 12', ab: 'tie open', bcLit: true, onC: true, onB: true }, JSON.stringify(crossing));
+    // The crosslink in the middle: Bus B with Bus A above and Bus C below, A and C with B above;
+    // each link's From and To: live, ready, blocked (one way) or standby.
+    const stacked = await page.evaluate(() => {
+      const g = structuredClone(window.__nav.last.own.grid), out = {};
+      g.ties.crosslink = ['A', 'B', 'C']; g.crossflow = { AB: 20 }; g.xlBlock = ['C>B'];
+      const nodes = () => Object.fromEntries([...document.querySelectorAll('[data-distribution] .dist-node[data-key^="xl-"]')].map((n) => [n.dataset.key, `${Math.round(n.transform.baseVal[0].matrix.f)}|${n.textContent.toLowerCase().split(' · ').pop()}`]));
+      for (const X of ['A', 'B', 'C']) { distBus = X; renderDistribution(g); out[X] = nodes(); out[`${X}mid`] = Math.round([...document.querySelectorAll('[data-distribution] .dist-node')].find((n) => n.textContent.toLowerCase().startsWith(`bus ${X.toLowerCase()}`) && !n.dataset.key.startsWith('xl-')).transform.baseVal[0].matrix.f); }
+      distBus = 'A'; renderDistribution(window.__nav.last.own.grid);
+      return out;
+    });
+    const where = (X, key) => { const [y, word] = stacked[X][key].split('|'); return [Math.sign(Number(y) - stacked[`${X}mid`]), word]; };
+    assert.deepEqual([where('B', 'xl-bus:A'), where('B', 'xl-bus:C'), where('A', 'xl-bus:B'), where('C', 'xl-bus:B')].map(([s]) => s), [-1, 1, -1, -1], 'B: A above, C below; A and C: B above');
+    assert.deepEqual(['xl-from:A', 'xl-to:A', 'xl-from:C', 'xl-to:C'].map((k) => where('B', k)[1]), ['live', 'ready', 'blocked', 'ready'], `Bus B's links: ${JSON.stringify(stacked.B)}`);
+    assert.deepEqual(['xl-from:B', 'xl-to:B'].map((k) => where('A', k)[1]), ['ready', 'live'], `Bus A's link: ${JSON.stringify(stacked.A)}`);
+    // The taps, on the ship: To Bus B on A's view closes A–B one way (A → B only), the solver
+    // never sends power B → A over it; From Bus B opens that way too; both off opens the tie.
+    const xlWas2 = await page.evaluate(() => [...window.__nav.last.own.grid.ties.crosslink]);
+    const g2 = () => page.evaluate(() => ({ xl: window.__nav.last.own.grid.ties.crosslink.join(''), block: (window.__nav.last.own.grid.xlBlock || []).join(','), ab: window.__nav.last.own.grid.crossflow.AB || 0 }));
+    await page.evaluate(() => send({ type: 'grid', ties: { crosslink: [] } }));
+    await page.waitForFunction(() => !window.__nav.last.own.grid.ties.crosslink.length);
+    await page.click('[data-distribution] .dist-node[data-key="xl-to:B"]');
+    await page.waitForFunction(() => window.__nav.last.own.grid.ties.crosslink.join('') === 'AB');
+    assert.deepEqual(await g2().then((v) => v.block), 'B>A', 'one way: B → A blocked');
+    await page.waitForFunction(() => /A → B/.test(document.getElementById('dist-tie-AB').textContent), null, { timeout: 5000 }).catch(async () => { throw new Error(`the ladder: one way, A → B: ${await page.textContent('#dist-tie-AB')}`); });
+    for (let i = 0; i < 4; i++) { assert.ok((await g2()).ab >= 0, 'no power B → A'); await wait(400); }
+    await page.click('[data-distribution] .dist-node[data-key="xl-from:B"]');
+    await page.waitForFunction(() => !(window.__nav.last.own.grid.xlBlock || []).length && window.__nav.last.own.grid.ties.crosslink.join('') === 'AB');
+    await page.click('[data-distribution] .dist-node[data-key="xl-to:B"]');
+    await page.waitForFunction(() => (window.__nav.last.own.grid.xlBlock || []).join() === 'A>B');
+    await page.click('[data-distribution] .dist-node[data-key="xl-from:B"]');
+    await page.waitForFunction(() => !window.__nav.last.own.grid.ties.crosslink.length && !(window.__nav.last.own.grid.xlBlock || []).length);
+    await page.evaluate((w) => send({ type: 'grid', ties: { crosslink: w } }), xlWas2);
+    await page.waitForFunction((w) => window.__nav.last.own.grid.ties.crosslink.join('') === w.join(''), xlWas2);
+    // A bus opened: its pill scrolled to the middle of the view; the sources (and loads) centred on it.
+    await page.click('[data-distribution] button[data-bus="B"]');
+    await wait(600);
+    const centred = await page.evaluate(() => {
+      const here = document.querySelector('[data-distribution] .dist-node[data-key="bus-here"]');
+      let sc = here.parentElement; while (sc && !(sc.scrollHeight > sc.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement;
+      const r = here.getBoundingClientRect(), v = sc.getBoundingClientRect();
+      const ys = (sel) => [...document.querySelectorAll(sel)].map((n) => n.transform.baseVal[0].matrix.f + 20);
+      const lefts = [...document.querySelectorAll('[data-distribution] .dist-node')].filter((n) => n.transform.baseVal[0].matrix.e < 100).map((n) => n.transform.baseVal[0].matrix.f + 20);
+      const mid = here.transform.baseVal[0].matrix.f + 20;
+      return { off: Math.round((r.top + r.height / 2) - (v.top + v.height / 2)), canScroll: sc.scrollTop > 0, sources: Math.round(lefts.reduce((a, b) => a + b, 0) / lefts.length - mid), n: lefts.length, ys: ys('x').length };
+    });
+    assert.ok(Math.abs(centred.off) < 60, `Bus B's pill in the middle of the view: ${JSON.stringify(centred)}`);
+    assert.ok(Math.abs(centred.sources) < 25, `the sources centred on Bus B: ${JSON.stringify(centred)}`);
+    // (A live update leaves the scroll alone.)
+    const keep = await page.evaluate(() => { const b = document.querySelector('[data-distribution]'); let sc = b.parentElement; while (sc && !(sc.scrollHeight > sc.clientHeight + 2)) sc = sc.parentElement; sc.scrollTop -= 50; return [sc.scrollTop, sc === document.querySelector('[data-distribution]').closest('.lcars-panel__body')]; });
+    await page.evaluate(() => { const g = structuredClone(window.__nav.last.own.grid); g.totals.B = { ...g.totals.B, used: (g.totals.B?.used || 0) + 1 }; renderDistribution(g); });
+    await wait(300);
+    assert.equal(await page.evaluate(() => { const b = document.querySelector('[data-distribution]'); let sc = b.parentElement; while (sc && !(sc.scrollHeight > sc.clientHeight + 2)) sc = sc.parentElement; return sc.scrollTop; }), keep[0], 'a live update kept the scroll');
+    await page.click('[data-distribution] button[data-bus="A"]');
     // A tap on a tie closes (or opens) it.
     const xlWas = await page.evaluate(() => [...window.__nav.last.own.grid.ties.crosslink]);
     await page.click('#dist-tie-AB');
@@ -204,7 +257,7 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     await page.waitForFunction((w) => JSON.stringify(window.__nav.last.own.grid.ties.crosslink) === JSON.stringify(w), xlWas);
     await page.click('[data-distribution] .dist-node[data-key="console:Helm"]');
     await page.waitForFunction((w) => window.__nav.last.own.grid.ties['console:Helm'].includes('A') === w, was);
-    step(`Distribution: the EPS schematic (Main Engineering on it); Bus A, where a tap on the Helm console untied it (standby) and another tied it back; a charged battery not feeding reads ready (${standbySeen}); a battery's line runs battery → bus discharging, bus → battery charging; the bus ladder showed power crossing B → C on its tie and on each bus's schematic, and a tap on a tie toggled it`);
+    step(`Distribution: the EPS schematic (Main Engineering on it); Bus A, where a tap on the Helm console untied it (standby) and another tied it back; a charged battery not feeding reads ready (${standbySeen}); a battery's line runs battery → bus discharging, bus → battery charging; the crosslink in the middle (Bus B with A above and C below, A and C with B above; each link's From and To live, ready, blocked or standby; one way honoured by the grid and shown on the ladder; both ways off opens the tie); Bus B opened with its pill in the middle of the view and the sources centred on it, a live update keeping the scroll; the bus ladder showed power crossing B → C on its tie and on each bus's schematic, and a tap on a tie toggled it`);
     // The sidebar: two columns (ship-wide on the left, this station's screens on the right), each
     // scrolling by itself when it's taller than the screen.
     for (const col of ['.lcars-sidebar__col--right', '.lcars-sidebar__col--left']) {
