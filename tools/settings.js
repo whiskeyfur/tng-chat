@@ -7,7 +7,8 @@ const path = require('path');
 
 const DIR = process.env.RELAY_DATA || path.join(__dirname, '..', 'data');
 const FILE = path.join(DIR, 'settings.json');
-const DEFAULTS = { host: '', port: 8085, registration: 'approval', adminAccess: 'localhost' };
+const DEFAULTS = { host: '', port: 8085, registration: 'approval', adminAccess: 'localhost', engine: 'relay', game: '' };
+const ENGINES = ['relay', 'graph']; // (what plays the power grid: the relay's own solver, or the ship graphs')
 const REGISTRATION = ['open', 'approval', 'closed'];
 const ADMIN_ACCESS = ['localhost', 'lan'];
 const RESERVED = { 8080: 'kept for coturn' };
@@ -25,6 +26,8 @@ function check(v) {
   if (v.port !== undefined && RESERVED[v.port]) return { field: 'port', message: `port ${v.port} is ${RESERVED[v.port]}` };
   if (v.registration !== undefined && !REGISTRATION.includes(v.registration)) return { field: 'registration', message: `one of ${REGISTRATION.join(', ')}` };
   if (v.adminAccess !== undefined && !ADMIN_ACCESS.includes(v.adminAccess)) return { field: 'adminAccess', message: `one of ${ADMIN_ACCESS.join(', ')}` };
+  if (v.game !== undefined && typeof v.game !== 'string') return { field: 'game', message: 'a game id (text)' };
+  if (v.engine !== undefined && !ENGINES.includes(v.engine)) return { field: 'engine', message: `one of ${ENGINES.join(', ')}` };
   return null;
 }
 // Is a port free on this host? (true, or the error's code)

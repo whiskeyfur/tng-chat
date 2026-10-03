@@ -36,6 +36,8 @@ const SHIP_FIELDS = {
   stations: [(v) => v === null || (Array.isArray(v) && v.every(isStr)), 'a list of station names, or null for all of them', false],
   ties: [(v) => isObj(v) && Object.values(v).every((x) => Array.isArray(x) && x.every(isStr)), 'an object of tie lists', false],
   places: [(v) => Array.isArray(v) && v.every((p) => isStr(p?.name) && isNum(p?.deck) && Array.isArray(p?.stations) && p.stations.every(isStr) && (p.via === undefined || isStr(p.via))), 'a list of { name, deck, stations, rows?, via?, default? }', false],
+  // (Never short of these: a starbase, a shipyard, a GM object; the graph engine honours it.)
+  creative: [(v) => Array.isArray(v) && v.every((r) => ['power', 'eps', 'odn', 'deu', 'am', 'heat'].includes(r)), 'a list of resources it never runs short of (power, eps, deu, am...)', false],
   seats: [(v) => isObj(v) && Object.values(v).every((s) => Array.isArray(s) && s.length === 2 && s.every(isNum)), 'an object of [x, y] seats', false],
   solar: [(v) => isObj(v) && isNum(v.output) && v.output >= 0, 'its solar arrays: { output } (power, 0 for none)', false],
   antimatter: [isBool, 'true or false (antimatter carried: false for none, no tanks to fill or contain)', false],

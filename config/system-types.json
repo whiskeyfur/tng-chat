@@ -189,6 +189,14 @@
         "power"
       ],
       "about": "Dumps heat to space at its rate; its coolant pumps run on power."
+    },
+    "export": {
+      "role": "load",
+      "resources": [
+        "power",
+        "eps"
+      ],
+      "about": "Power sent out through the docking connectors: to the starbase, or to a ship docked at a port."
     }
   },
   "heat": {

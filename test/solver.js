@@ -77,6 +77,28 @@ try {
     step(`heat (graph solver only): the runabout at full stretch makes ${a.made.toFixed(1)}/s and its radiators dump it; with their pumps off the heat sink fills, effects weaken after ${weakAt} s and systems overheat after ${damageAt} s`);
   }
   assert.ok(minNotes.length > 0, 'the starved states have loads the relay half-powers');
+  // Creative (a starbase, a GM object): a feed that never runs short, its link's rate still the limit;
+  // a store that never runs dry.
+  {
+    const design = JSON.parse(fs.readFileSync(path.join(CONFIG.DIR, 'ships', 'runabout.json'), 'utf8'));
+    const g = GRAPH.convert('runabout', design, d), all = GRAPH.nodes(g).all;
+    assert.ok(all['dock-power'].creative?.power && all['bus-b'].upstream['dock-power'].power.rate === t.GRID.dock, 'dock power: creative, at the dock\'s rate');
+    const docked = d.scenarios.runabout['all-on'], st = JSON.parse(JSON.stringify(docked.state));
+    st.srcCap.dock = 5; // (there, but saying it has only 5: creative, it gives what the bus needs, to the rate)
+    all['bus-b'].upstream['dock-power'].power.rate = 40;
+    const r = SOLVER.solve(g, SOLVER.fromRelay(g, st, t));
+    const fromDock = r.cells['dock-power']?.['bus-b'] || 0;
+    assert.ok(fromDock > 5 && fromDock <= 40 + 1e-9, `the dock gave ${fromDock}: more than its 5, no more than the link's 40`);
+    const starved = JSON.parse(JSON.stringify(d.scenarios.runabout.starved.state));
+    starved.breakers = { A: true, B: true, C: true }; starved.stores.batteryB = 0; starved.srcCap.batteryB = 0;
+    const g2 = GRAPH.convert('runabout', design, d), all2 = GRAPH.nodes(g2).all;
+    const plain = SOLVER.solve(g2, SOLVER.fromRelay(g2, starved, t));
+    all2['battery-b'].creative = { power: true };
+    const endless = SOLVER.solve(g2, SOLVER.fromRelay(g2, starved, t));
+    assert.equal(plain.used['battery-b'] || 0, 0, 'an empty battery gives nothing');
+    assert.ok(endless.used['battery-b'] > 0, `a creative one, empty, still gives (${endless.used['battery-b']})`);
+    step(`creative: dock power gave ${fromDock} (more than the 5 it said it had, no more than its link's rate); an empty creative battery still gave ${Math.round(endless.used['battery-b'])}`);
+  }
   step(`with minimums: ${minNotes.length} loads the relay half-powers (consoles dark anyway, subsystems that can't work) get nothing instead and pass their power on; containment never loses out`);
   ok = true;
 } catch (err) {

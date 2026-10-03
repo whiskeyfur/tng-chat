@@ -48,6 +48,9 @@ try {
   for (const fx of ['ftl', 'impulse', 'maneuver', 'shields', 'phasers', 'torpedoes', 'transport', 'docking']) assert.ok(can.has(fx), `the runabout can: ${fx}`);
   assert.equal(all['system-engines'].effects.ftl.maxWarp, designs.runabout.maxWarp, 'its FTL: the design\'s top warp');
   assert.ok(!can.has('jump'), 'no spore drive: no jump');
+  // (Its seats: one a console, the stations it has.)
+  const seats = Object.values(all).filter((s) => s.effects?.seat).map((s) => s.effects.seat.station).sort();
+  assert.deepEqual(seats, [...designs.runabout.stations, ...designs.runabout.places.flatMap((p) => p.stations)].filter((v, i, a) => a.indexOf(v) === i).sort(), `the runabout's seats are its stations: ${seats}`);
   // (Heat: what everything makes, at full draw, the radiators can dump; pull priority and minimums.)
   const made = Object.entries(all).filter(([id]) => !id.startsWith('radiator')).reduce((n, [, s]) => n + (s.produces?.heat || 0), 0);
   const dumped = Object.entries(all).filter(([id]) => id.startsWith('radiator')).reduce((n, [, s]) => n + s.consumes.heat, 0);
@@ -57,6 +60,9 @@ try {
   assert.ok(all['console-helm'].upstream['bus-a'].power.pri < all['system-shields'].upstream.eps.eps.pri + 100, 'pri set');
   assert.equal(all['console-helm'].upstream['bus-a'].power.min, 2, 'a console works on its 2 MW or not at all');
   assert.equal(all['subsystem-injector'].upstream['bus-a'].power.min, 'all', 'a subsystem needs all it draws');
+  // (The starbase's design is creative in power, EPS, deuterium and antimatter: its core and tanks never run dry.)
+  const sb = GRAPH.nodes(GRAPH.convert('starbase', JSON.parse(fs.readFileSync(path.join(CONFIG.DIR, 'ships', 'starbase.json'), 'utf8')), d)).all;
+  assert.ok(sb['warp-core']?.creative?.eps && sb['tank-deu-main']?.creative?.deu && sb['tank-am-main']?.creative?.am, 'a starbase: creative core and tanks');
   step(`heat: ${Math.round(made)} made at full draw, ${dumped} the radiators dump; pull priority and minimums on every load's links`);
   step(`config/ships-graph/runabout.json is up to date and loads (${Object.keys(all).length} systems, ${Object.keys(g.systems).length} at the top); walking up and down from any system works; its effects say what it can do (${[...can].length} effects)`);
 

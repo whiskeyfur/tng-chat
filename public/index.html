@@ -181,6 +181,10 @@
     .dist-map { display: block; width: 100%; min-width: 900px; height: auto; }
     .dist-map text { font-family: var(--font); letter-spacing: 0.05em; }
     .dist-node { cursor: pointer; }
+    .dist-centre { cursor: zoom-in; }
+    .seat-standby { opacity: 0.7; }
+    .dist-centre:hover circle:first-child { opacity: 0.6; }
+    .dist-graph-root { display: flex; align-items: center; padding: 0 12px; color: var(--lcars-orange); text-transform: uppercase; font-size: 15px; }
     /* The bus ladder: the low buses side by side, their crosslink ties between, the EPS taps under. */
     .dist-ladder { display: flex; flex-wrap: wrap; align-items: stretch; gap: 4px; margin: 0 0 8px; }
     .dist-lbus { display: flex; flex-direction: column; justify-content: center; min-width: 96px; padding: 4px 12px; border: 0; border-radius: 16px; background: var(--lcars-tan); color: #000; font: inherit; text-transform: uppercase; cursor: pointer; text-align: left; }

@@ -62,6 +62,15 @@ const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, 
 // The designs (config/ships/<class>.json; see tools/config.js).
 const CONFIG = require('./tools/config');
 const LAYOUTS = require('./tools/layouts');
+const SHIP_GRAPH = require('./tools/ship-graph');
+const GRAPH_SOLVER = require('./tools/graph-solver');
+// The vessel kinds' graphs (filled at start: see graphDump below), and which version each is.
+const GRAPHS = {}, GRAPH_REV = {};
+// What plays: the relay's own power solver, or the graph solver ("engine" in data/settings.json; the
+// new game after the cutover, tools/cutover.js). ENGINE in the environment wins.
+const GRAPH_PLAY = (process.env.ENGINE || SETTINGS.read().engine) === 'graph';
+// Which game this is (set by the cutover): a ship or a starbase saved in another game starts new.
+const GAME_ID = SETTINGS.read().game || '';
 const { classes: CLASSES, starbase: BASE_DESIGN, relay: RELAY_FILE } = CONFIG.loadShips((line) => console.warn(line));
 // The subspace relays' design (config/ships/<id>.json, kind "relay"): a pure-solar platform.
 const RELAY_DESIGN = RELAY_FILE || { id: 'subspace-relay', kind: 'relay', name: 'Subspace Relay', bus: 100, eps: 0, core: 0, maxWarp: 0, shields: 0, arrays: 0, warpCore: false, transporter: false, ports: 0, bay: 0, refit: false, spore: false, torpedoes: 0, stations: [], ties: {}, places: [], seats: {}, solar: { output: 80 }, fusion: false };
@@ -102,6 +111,12 @@ const server = http.createServer((req, res) => {
   if (urlPath.startsWith('/api/poll/')) return pollRequest(req, res, urlPath.slice(10));
   const account = needLogin() ? ACCOUNTS.session(sessionToken(req)) : null;
   if (urlPath === '/api/layouts' || urlPath.startsWith('/api/layouts/') || urlPath.startsWith('/layouts/assets/')) return layoutRequest(req, res, urlPath, account);
+  if (urlPath.startsWith('/api/ships-graph/')) {
+    const id = decodeURIComponent(urlPath.slice(17)), g = GRAPHS[id];
+    if (needLogin() && !account) { res.writeHead(401).end(); return; }
+    res.writeHead(g ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }).end(JSON.stringify(g ? { graph: g, rev: GRAPH_REV[id], types: SHIP_GRAPH.types() } : { error: 'no such graph' }));
+    return;
+  }
   // The admin pages: the admin page and the layout designer.
   const adminPage = urlPath.match(/^\/(admin|designer)(\.html|\.js|\/)?$/);
   if (adminPage) {
@@ -458,13 +473,16 @@ function networkGraph() {
 function shipList() {
   const live = new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].map((u) => u.shipKey), ...cores.keys(), ...BASE_KEYS, ...[...RELAY_KEYS].filter((k) => relayOf(k)?.system === SYSTEM_ID)]);
   return [...live].map((k) => ({
-    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, system: SYSTEM_ID, ...(isBase(k) ? { starbase: true, classId: 'starbase' } : { ...(isRelay(k) ? { relay: true } : {}), ...(classGuessed.has(k) ? { classUnknown: true } : {}), class: classOf(k).name, classId: classId(k), stations: stationsOf(k) }), org: orgOf(k), filled: filledOf(k),
+    name: shipName(k), ops: opsOf(k).length > 0, shields: shields.has(k), computer: present(k), active: true, system: SYSTEM_ID, ...(isBase(k) ? { starbase: true, classId: 'starbase' } : { ...(isRelay(k) ? { relay: true } : {}), ...(classGuessed.has(k) ? { classUnknown: true } : {}), class: classOf(k).name, classId: classId(k), stations: seatsOf(k), standby: seatsStandby(k) }), org: orgOf(k), filled: filledOf(k),
   })).sort((a, b) => a.name.localeCompare(b.name));
 }
 // Starbases run themselves (no ship's computer needed), so they're always there.
 const hasComputer = (name) => present(shipKey(name));
 // Everyone gets the ship list: the sign-in pull-down, transporter targets,
 // and shield status.
+// (A seat going standby or coming back: everyone's ship list says so, within two seconds.)
+let standbySig = '';
+setInterval(() => { const sig = JSON.stringify([...eng.keys()].filter((k) => !k.startsWith('__graph__')).map((k) => [k, seatsStandby(k)])); if (sig !== standbySig) { standbySig = sig; broadcastShips(); } }, 2000).unref();
 function broadcastShips() {
   const list = shipList();
   for (const ws of sockets) if (ws.greeted) send(ws, { type: 'ships', ships: list });
@@ -1268,6 +1286,8 @@ function scheduleNav() {
 // A computer reports a ship's position (or its saved one, when it signs on).
 function coreNav(c, key, nav) {
   if (!nav || typeof nav.x !== 'number' || typeof nav.y !== 'number') return;
+  // (Saved in another game, before the cutover: a new ship of its class, cold, docked at a starbase.)
+  if (GAME_ID && nav.eng && nav.game !== GAME_ID) nav = { x: nav.x, y: nav.y, heading: 0, warp: 0, dest: null, class: nav.class, spawn: true };
   if (isBase(key)) return; // a computer for a starbase only holds its library: the station runs itself
   const clean = { x: nav.x, y: nav.y, heading: Number(nav.heading) || 0, warp: Number(nav.warp) || 0, dest: nav.dest || null };
   const was = shipClasses.get(key);
@@ -1880,6 +1900,10 @@ const roomOfStation = (k, st) => placesOf(k).find((p) => p.stations.includes(st)
 const designStations = (k) => { const d = designOf(k); return d.stations == null ? null : [...d.stations, ...(d.places || []).flatMap((p) => p.stations)]; };
 const hasStation = (k, st) => st === 'Operations' || (st === 'Spore Lab' ? !isBase(k) && !!classOf(k).spore : isBase(k) || !designStations(k) || designStations(k).includes(st));
 const stationsOf = (k) => STATIONS.filter((st) => hasStation(k, st));
+// A vessel's seats: the consoles in its graph (each one seat, at its station), else its design's stations.
+const seatsOf = (k) => { const g = typeof GRAPHS === 'object' && GRAPHS[graphIdOf(k)]; if (!g) return stationsOf(k); const seats = new Set(Object.values(SHIP_GRAPH.nodes(g).all).map((s) => s.effects?.seat?.station).filter(Boolean)); return STATIONS.filter((st) => seats.has(st)); };
+// Its seats whose console has no power now (untied, or its buses dead): they read standby.
+const seatsStandby = (k) => { if (!eng.has(k)) return []; const e = engOf(k), f = flow(k); return seatsOf(k).filter((st) => { const t = effTies(k, e, `console:${st}`); return !t.length || t.every((n) => !((f.totals[n]?.available || 0) > 0)); }); };
 // A starbase's EPS carries three times a ship's; a ship's follow its class.
 const busMaxOf = (k) => { const c = designOf(k); return { A: c.bus, B: c.bus, C: c.bus, EPS: c.eps }; };
 // Supplies: the warp core burns antimatter and deuterium (per second, at full
@@ -2396,7 +2420,8 @@ const COLD = { ties: { ...Object.fromEntries([...Object.keys(DEFAULT_TIES), ...O
 function freshEng(saved, { cold = false, k = null } = {}) {
   cold = cold || saved === COLD;
   const designTies = k ? designOf(k).ties || {} : {}, tapMax = k ? busMaxOf(k) : BUS_MAX;
-  const s = saved && typeof saved === 'object' ? saved : cold ? COLD : {};
+  let s = saved && typeof saved === 'object' ? saved : cold ? COLD : {};
+  if (s.tiesById && k) s = { ...s, ties: tiesFromIds(k, s.tiesById) }; // (a graph-engine save: ties by system id)
   // Ties: a list of nodes (older saves had one bus, or null for off), only those allowed.
   // A saved tie that's no longer allowed (an EPS tie on an A/B load, say) moves to the default bus.
   const tiesOf = (k, v, d) => {
@@ -2539,6 +2564,8 @@ const engOf = (k) => {
 const BASE_SETTINGS_FILE = process.env.STARBASES_FILE || path.join(__dirname, 'data', 'starbases.json');
 let baseSettings = {};
 try { baseSettings = JSON.parse(fs.readFileSync(BASE_SETTINGS_FILE, 'utf8')); } catch {}
+if (GAME_ID && baseSettings.__game !== GAME_ID) baseSettings = {}; // (the starbases as they were in another game: they start new)
+if (GAME_ID) baseSettings.__game = GAME_ID;
 // (A relay the admin page disabled stays disabled.)
 for (const r of RELAYS) if (baseSettings[r.name]?.relayOff) relayOff.add(shipKey(r.name));
 // Starbases created from the admin panel come back.
@@ -2596,8 +2623,24 @@ const savedEng = (k) => {
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
+    // (The graph engine: ties saved by system id, its buses by theirs.)
+    ...(GRAPH_PLAY && GRAPHS[graphIdOf(k)] ? { ties: undefined, tiesById: tiesToIds(k, e.ties) } : {}),
   };
 };
+// A vessel's ties by system id ({ 'console-helm': ['bus-a'], ... }; the crosslink as "crosslink"),
+// and back. (Saves in the graph engine.)
+const GRAPH_BUS_IDS = { A: 'bus-a', B: 'bus-b', C: 'bus-c', EPS: 'eps' };
+function tiesToIds(k, ties) {
+  const g = GRAPHS[graphIdOf(k)], all = SHIP_GRAPH.nodes(g).all, out = {};
+  const idOf = Object.fromEntries(Object.entries(all).filter(([, s]) => s.key).map(([id, s]) => [s.key, id]));
+  for (const [key, list] of Object.entries(ties)) { const id = key === 'crosslink' ? 'crosslink' : idOf[key]; if (id) out[id] = list.map((n) => GRAPH_BUS_IDS[n]); }
+  return out;
+}
+function tiesFromIds(k, byId) {
+  const g = GRAPHS[graphIdOf(k)], all = g ? SHIP_GRAPH.nodes(g).all : {}, out = {}, L = Object.fromEntries(Object.entries(GRAPH_BUS_IDS).map(([n, id]) => [id, n]));
+  for (const [id, list] of Object.entries(byId || {})) { const key = id === 'crosslink' ? 'crosslink' : all[id]?.key; if (key && Array.isArray(list)) out[key] = list.map((b) => L[b]).filter(Boolean); }
+  return out;
+}
 const towedBy = (k) => [...eng].find(([, e]) => e.towing === k)?.[0] || null;
 // A subsystem works when it has its power and isn't badly damaged.
 const SUB_FAIL_DAMAGE = 50;
@@ -2768,8 +2811,8 @@ function flow(k) {
     for (const n of e.ties.containment) if (contained < want) { const t = take(n, want - contained, true); row[n] += t; contained += t; }
     storesOk = false;
   }
-  const containmentOk = e.antimatter <= 0 || contained >= GRID.containment;
-  const containFeed = contained; // (the tick shares it between the field and the reserve)
+  let containmentOk = e.antimatter <= 0 || contained >= GRID.containment;
+  let containFeed = contained; // (the tick shares it between the field and the reserve)
   // The other antimatter tanks' containment, next: from their own ties (the stores if short).
   const tankFeed = {};
   for (const [name, key] of Object.entries(AM_CONTAIN)) {
@@ -2864,6 +2907,27 @@ function flow(k) {
       x.left -= t; charging.EPS += t; viaEps += t;
       cells.pressure.EPS -= t; cells[x.name].EPS += t;
     }
+  }
+  // The graph engine (the new game): the ship graph's solver shares the power out instead, with the same
+  // wants; what's above (the breakers' loads, the wants) stands. Below its minimum, a load gets nothing.
+  const graphG = GRAPH_PLAY && GRAPHS[graphIdOf(k)];
+  if (graphG) {
+    const st = { ties: e.ties, taps: e.taps, coresUp, epsLive: !!e.epsLive, breakers: e.breakers, xlBlock: e.xlBlock || [], stores: e.stores, busMax: Object.fromEntries(NODES.map((n) => [n, maxOf(n)])), srcCap: cap, wants: { ...wants, ...Object.fromEntries(loads) } };
+    const r = GRAPH_SOLVER.solve(graphG, GRAPH_SOLVER.fromRelay(graphG, st, { STORES, EPS_CHARGE_GEN }));
+    const { all } = SHIP_GRAPH.nodes(graphG), BUS = { A: 'bus-a', B: 'bus-b', C: 'bus-c', EPS: 'eps' };
+    for (const key of Object.keys(cells)) cells[key] = blank();
+    for (const [id, row] of Object.entries(r.cells)) if (all[id]?.key) cells[all[id].key] = Object.fromEntries(NODES.map((n) => [n, row[BUS[n]] || 0]));
+    for (const key of Object.keys(got)) got[key] = 0;
+    for (const id of r.consumers) if (all[id].key) got[all[id].key] = r.got[id];
+    const byKey = Object.fromEntries(Object.entries(all).filter(([, s]) => s.key).map(([id, s]) => [s.key, id]));
+    contained = r.got[byKey.containment] || 0; containFeed = contained; containmentOk = e.antimatter <= 0 || contained >= GRID.containment;
+    for (const [name, key] of Object.entries(AM_CONTAIN)) tankFeed[name] = r.got[byKey[key]] || 0;
+    for (const s of srcs) s.left = (s.ties.length ? cap[s.name] : 0) - (r.used[byKey[s.name]] || 0);
+    for (const X of BUSES) Object.assign(buses[X], r.buses[BUS[X]] || {});
+    viaEps = r.viaEps;
+    for (const n of NODES) charging[n] = r.charging[BUS[n]] || 0;
+    for (const x of Object.keys(crossflow)) delete crossflow[x];
+    for (const [pair, v] of Object.entries(r.crossflow)) { const [a, b] = pair.split('|').map((x) => Object.keys(BUS).find((n) => BUS[n] === x)); crossflow[[a, b].sort().join('')] = a < b ? v : -v; }
   }
   // The stores as one row: + covering a shortfall, − charging.
   cells.stores = blank();
@@ -2978,6 +3042,8 @@ function nearShip(k) {
 // source DAMAGED while any of it is. The EPS tap into a bus: the EPS; a bus's battery: its bus.
 const SRC_DAMAGE = { core: ['conduits', 'constriction', 'injector', 'amConduit'], impulsePort: ['portChamber'], impulseStarboard: ['starboardChamber'], aux1: ['aux1Chamber'], aux2: ['aux2Chamber'],
   'tap:A': ['busEPS'], 'tap:B': ['busEPS'], 'tap:C': ['busEPS'], 'battery:A': ['busA'], 'battery:B': ['busB'], 'battery:C': ['busC'], 'battery:EPS': ['busEPS'] };
+// Which graph a vessel is (its class's; a starbase's or a relay's).
+const graphIdOf = (k) => (isBase(k) ? 'starbase' : isRelay(k) ? RELAY_DESIGN.id || 'subspace-relay' : shipClasses.get(k) || DEFAULT_CLASS);
 function gridView(k) {
   const e = engOf(k), f = flow(k);
   const near = isBase(k) ? null : STARBASES.find((b) => navState.has(k) && Math.hypot(navState.get(k).x - b.x, navState.get(k).y - b.y) <= DOCK_RANGE);
@@ -3045,6 +3111,7 @@ function gridView(k) {
     conduits: CONDUITS.filter((c) => c === 'system:lifeSupport' || placesOf(k).some((pl) => `place:${pl.name}` === c)), systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, brigField: !!e.brigField, brigSealed: brigSealed(k), stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
     tieNodes: Object.fromEntries(Object.keys(e.ties).filter((key) => aboardKey(k, key)).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter((key) => isMulti(key) && aboardKey(k, key)), busMax: busMaxOf(k), solarOut: designOf(k).solar?.output ?? 0,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
+    graphId: graphIdOf(k), graphRev: GRAPH_REV[graphIdOf(k)] || null,
     // What each source could give now (MW): tied and giving nothing, it's either not needed (ready) or has nothing to give.
     srcCap: Object.fromEntries(Object.entries(f.srcCap || {}).map(([x, v]) => [x, Math.round(v)])),
     // What each EPS tap could give now (MW: its limit, or what the EPS can spare), and the EPS's spare.
@@ -3883,7 +3950,7 @@ const savedCombat = (k) => {
 };
 // What a ship's computer keeps: its position and settings, plus combat and grid state.
 const classGuessed = new Set(); // ships whose class their save never had (shown as the default)
-const coreCopy = (k) => (navState.has(k) ? { ...navState.get(k), ...(isBase(k) || classGuessed.has(k) ? {} : { class: classId(k) }), combat: savedCombat(k), eng: savedEng(k) } : undefined);
+const coreCopy = (k) => (navState.has(k) ? { ...navState.get(k), ...(isBase(k) || classGuessed.has(k) ? {} : { class: classId(k) }), ...(GAME_ID ? { game: GAME_ID } : {}), combat: savedCombat(k), eng: savedEng(k) } : undefined);
 
 // The ship's own combat state, for its consoles.
 const lockInfo = (k, t) => ({ name: shipName(t), distance: Math.round(distance(k, t)), shields: shields.has(t), shield: Math.round(combatOf(t).shield), hull: Math.round(combatOf(t).hull), aim: combatOf(k).aim[t] || null, aimName: combatOf(k).aim[t] ? damageName(combatOf(k).aim[t]) : null });
@@ -5522,26 +5589,31 @@ function greet(ws) {
 
 // (tools/ship-graph.js: with SHIP_GRAPH_DUMP set, the relay prints its power tables and what each
 // ship class has aboard, as it builds a new ship of that class, and exits: nothing starts.)
-if (process.env.SHIP_GRAPH_DUMP) {
-  const out = { tables: { NODES, SOURCES, SOURCE_NODES, STORES, EMERG, TANKS, AM_CONTAIN, GRID, FUSION, CORE, FUEL, FUELBUS, POWER_MAX, RATING, CONN_RES, SYSTEM_PRIORITY, SUBSYSTEMS, SYSTEM_NAMES, SYSTEM_CHILDREN, STATION_SYSTEMS, XL_DIRS }, classes: {} };
-  for (const id of Object.keys(CLASSES)) {
+// What the relay builds each vessel kind from (and tools/ship-graph.js's dump): the power tables, and
+// what a new vessel of each class has aboard; with scenarios, a set of grid states and its answers.
+function graphDump(scenarios = false) {
+  const out = { tables: { NODES, SOURCES, SOURCE_NODES, STORES, EMERG, TANKS, AM_CONTAIN, GRID, FUSION, CORE, FUEL, FUELBUS, POWER_MAX, RATING, CONN_RES, SYSTEM_PRIORITY, SUBSYSTEMS, SYSTEM_NAMES, SYSTEM_CHILDREN, STATION_SYSTEMS, XL_DIRS, PORTS }, classes: {} };
+  // (Every ship class, the starbases' design and the relays'.)
+  const vessels = [...Object.keys(CLASSES).map((id) => [id, (k) => shipClasses.set(k, id), (k) => shipClasses.delete(k)]),
+    ['starbase', (k) => BASE_KEYS.add(k), (k) => BASE_KEYS.delete(k)], [RELAY_DESIGN.id || 'subspace-relay', (k) => RELAY_KEYS.add(k), (k) => RELAY_KEYS.delete(k)]];
+  for (const [id, enter, leave] of vessels) {
     const k = `__graph__${id}`;
-    shipClasses.set(k, id);
+    enter(k);
     const e = freshEng(undefined, { k });
-    Object.assign(e.ties, classOf(k).ties || {});
+    Object.assign(e.ties, designOf(k).ties || {});
     eng.set(k, e); deriveConduits(k); designReactors(k, true); pruneLoads(k);
     // (The order the relay serves its loads in: the graph's pri writes it as numbers.)
     if (!out.tables.LOAD_ORDER) { flowCache.delete(k); out.tables.LOAD_ORDER = Object.keys(flow(k).wants); out.tables.EPS_CHARGE_GEN = EPS_CHARGE_GEN;
       // (What each subsystem draws while it works: the relay's numbers.)
       out.tables.SUB_DRAW = { constriction: GRID.constriction.run, injector: GRID.injector, amConduit: 5, portChamber: FUSION.chamberRun, starboardChamber: FUSION.chamberRun, aux1Chamber: FUSION.chamberRun, aux2Chamber: FUSION.chamberRun, rf: GRID.comms, radio: GRID.comms, subspace: GRID.comms, forcefields: GRID.forcefield, brigField: GRID.forcefield, holoEmitters: EMH.draw, bayDoors: BAY.doors, bayField: BAY.field, patternBuffers: TR.buffers, targetingScanners: TR.small, heisenberg: TR.small, biofilter: TR.small, energizingCoils: TR.coils, computer1: COMPUTER.draw, computer2: COMPUTER.draw, computer3: COMPUTER.draw, deuTransfer: FUELBUS.transfer, amTransfer: FUELBUS.transfer }; flowCache.delete(k); }
     const keys = Object.keys(e.ties).filter((x) => x === 'crosslink' || aboardKey(k, x));
-    out.classes[id] = { busMax: busMaxOf(k), fuelCaps: fuelCapsOf(k), tankCaps: tankCapsOf(k), coreOutput: CORE.max * (classOf(k).core ?? 1), taps: e.taps, breakers: e.breakers, xlBlock: e.xlBlock || [], connTies: e.connTies,
+    out.classes[id] = { busMax: busMaxOf(k), fuelCaps: fuelCapsOf(k), tankCaps: tankCapsOf(k), coreOutput: CORE.max * (designOf(k).core ?? 1), taps: e.taps, breakers: e.breakers, xlBlock: e.xlBlock || [], connTies: e.connTies,
       keys: Object.fromEntries(keys.map((x) => [x, { nodes: x === 'crosslink' ? ['A', 'B', 'C'] : tieNodes(x), tied: e.ties[x] || [], path: /^(console|system|sub|contain):|^place:/.test(x) ? conduitsOf(k, x) : [] }])) };
-    eng.delete(k); flowCache.delete(k); shipClasses.delete(k);
+    eng.delete(k); flowCache.delete(k); combat.delete(k); leave(k);
   }
   // (SHIP_GRAPH_SCENARIOS: each class in a set of grid states, today's solver's inputs and answers,
   // for tools/graph-solver.js's comparison.)
-  if (process.env.SHIP_GRAPH_SCENARIOS) {
+  if (scenarios) {
     out.scenarios = {};
     const SCEN = {
       cold: { cold: true },
@@ -5575,9 +5647,23 @@ if (process.env.SHIP_GRAPH_DUMP) {
       }
     }
   }
-  fs.writeSync(1, JSON.stringify(out)); // (all of it before exiting: a pipe takes a big write in parts)
+  return out;
+}
+if (process.env.SHIP_GRAPH_DUMP) {
+  fs.writeSync(1, JSON.stringify(graphDump(!!process.env.SHIP_GRAPH_SCENARIOS))); // (all of it before exiting: a pipe takes a big write in parts)
   process.exit(0);
 }
+// Each vessel kind's graph (docs/ship-graph.md), built at start from the designs as they are now, so a
+// design saved from the admin page (the supervisor restarts the relay) is in it. Consoles fetch theirs
+// from /api/ships-graph/<id>; the grid says which (graphId) and which version (graphRev).
+try {
+  const d = graphDump(false);
+  const designById = (id) => CLASSES[id] || (id === 'starbase' ? BASE_DESIGN : RELAY_DESIGN);
+  for (const id of Object.keys(d.classes)) {
+    GRAPHS[id] = SHIP_GRAPH.convert(id, designById(id), d);
+    GRAPH_REV[id] = crypto.createHash('sha256').update(JSON.stringify(GRAPHS[id])).digest('hex').slice(0, 12);
+  }
+} catch (err) { console.error(`ship graphs: not built (${err.message})`); }
 server.listen(PORT, HOST || undefined, () => console.log(`${RELAY_NAME} on http://${HOST && HOST !== '0.0.0.0' && HOST !== '::' ? (HOST.includes(':') ? `[${HOST}]` : HOST) : 'localhost'}:${PORT}${HOST ? ` (listening on ${HOST})` : ''}`));
 
 // Run by tools/supervisor.js: before a restart (or after the pages change)

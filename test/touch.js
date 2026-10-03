@@ -302,6 +302,52 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     await page.mouse.move(tapBox2.x + 20, tapBox2.y + 20); await page.mouse.down(); await page.mouse.move(tapBox2.x + 20, tapBox2.y + 60, { steps: 4 });
     await wait(3300); await page.mouse.up();
     assert.equal(await page.evaluate(() => document.querySelector('[data-screen="st-dist"]').hidden), false, 'a hold that drags stays on Distribution');
+    // Seats: an untied console's seat reads standby on the Station screen (from the ship list), and
+    // not once it's tied again.
+    await page.evaluate(() => send({ type: 'grid', ties: { 'console:Science': [] } }));
+    await page.waitForFunction(() => ships.find((x) => x.name === me.ship)?.standby?.includes('Science'));
+    await page.evaluate(() => { fillReassign(); });
+    assert.match(await page.textContent('#station-taps button[data-station="Science"]'), /standby/, 'the Science seat: standby');
+    await page.evaluate(() => send({ type: 'grid', ties: { 'console:Science': ['A'] } }));
+    await page.waitForFunction(() => !ships.find((x) => x.name === me.ship)?.standby?.includes('Science'));
+    step('a console with no power: its seat reads standby on the Station screen, and not once it has power again');
+    // The Power grid's Systems order: the ship's graph as a tree, its sources first, every row still there.
+    await page.evaluate(() => document.querySelector('[data-screen-tab="st-grid"]').click());
+    const opsRows = await page.$$eval('#grid-table tbody tr[id]', (rs) => rs.map((r) => r.id).sort());
+    await page.click('#grid-order-systems');
+    await page.waitForFunction(() => document.querySelector('#grid-table .grid-section')?.textContent.startsWith('Sources'));
+    const sysRows = await page.$$eval('#grid-table tbody tr[id]', (rs) => rs.map((r) => r.id));
+    assert.deepEqual([...new Set(opsRows)].filter((x) => !sysRows.includes(x)), [], 'every row of Operations order is there');
+    assert.ok(sysRows.indexOf('ties-core-parent') < sysRows.indexOf('ties-sub-injector'), 'the warp core, then its injector');
+    await page.click('#grid-order-operations');
+    step('the Power grid in Systems order: the ship\'s graph as a tree (sources first, a system then its parts), every row of Operations order still there');
+    // Centred on any system (the ship's graph): ◎ on the Helm console centres on it, Bus A (its tie)
+    // on its left; a tap on Bus B ties it there, another unties it; ◎ on Bus A is Bus A's own view.
+    await toDist();
+    await page.click('[data-distribution] button[data-bus="A"]');
+    await page.waitForFunction(() => shipGraph && document.querySelector('[data-distribution] .dist-node[data-key="console:Helm"] .dist-centre'));
+    await page.click('[data-distribution] .dist-node[data-key="console:Helm"] .dist-centre');
+    await page.waitForFunction(() => window.__distGraph?.root === 'console-helm');
+    let gv = await page.evaluate(() => window.__distGraph.cols);
+    assert.ok(gv[1].includes('bus-a') && gv[1].includes('bus-b'), `the Helm console draws from the buses: ${JSON.stringify(gv)}`);
+    const helmTies = await page.evaluate(() => window.__nav.last.own.grid.ties['console:Helm'].join());
+    await page.click('[data-distribution] .dist-node[data-graph="bus-b"]');
+    await page.waitForFunction((w) => window.__nav.last.own.grid.ties['console:Helm'].join() !== w, helmTies);
+    await page.click('[data-distribution] .dist-node[data-graph="bus-b"]');
+    await page.waitForFunction((w) => window.__nav.last.own.grid.ties['console:Helm'].join() === w, helmTies);
+    await page.click('[data-distribution] .dist-node[data-graph="bus-a"] .dist-centre');
+    await page.waitForFunction(() => !distRoot && distBus === 'A' && document.querySelector('[data-distribution] .dist-node[data-key="bus-here"]'));
+    // The warp core: its tanks feed it, it feeds the EPS, its subsystems are its parts.
+    await page.click('[data-distribution] button[data-bus="EPS"]');
+    await page.waitForSelector('[data-distribution] .dist-node[data-key="core"] .dist-centre');
+    await page.click('[data-distribution] .dist-node[data-key="core"] .dist-centre');
+    await page.waitForFunction(() => window.__distGraph?.root === 'warp-core');
+    gv = await page.evaluate(() => window.__distGraph.cols);
+    assert.ok(gv[1].includes('tank-deu-core') && gv[3].includes('eps') && gv[3].includes('subsystem-injector'), `the warp core: ${JSON.stringify(gv)}`);
+    await page.click('#dist-graph-back');
+    await page.waitForFunction(() => !distRoot);
+    await page.click('[data-distribution] button[data-bus="A"]');
+    step('Distribution centred on any system: ◎ on the Helm console (the buses on its left; a tap tied it to Bus B and back), ◎ on Bus A back to its own view; the warp core between its tanks and the EPS, its subsystems its parts');
     step('Distribution → Power grid: a shift-click on the Helm console opened the grid at its row, flashed (still tied); a 3 s hold on the EPS tap (a ring filling) opened it at the EPS taps (still open); a hold that dragged stayed');
     // A tap on a tie closes (or opens) it.
     const xlWas = await page.evaluate(() => [...window.__nav.last.own.grid.ties.crosslink]);

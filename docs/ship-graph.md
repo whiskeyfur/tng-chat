@@ -69,7 +69,8 @@ The relay prints its power tables and what each class has aboard when it's run w
 | `systems` | Its parts, nested: each the same shape as any system. A subsystem is in its system, station or source; a thruster in its drive; a containment in its tank; a life-support system in life support's conduit. Ids are unique across the whole tree, so a link can point anywhere. `parentName` names a parent this class doesn't have (a station it lacks). |
 | `via` | A conduit below its place that its power also runs through (life support's, the engines'). |
 | `upstream` | `{ upstream system id: { resource: link } }`: what it draws from. |
-| `effects` | What it lets the vessel do beyond converting resources, with its parameters: `{ "ftl": { "maxWarp": 5 } }`, `{ "shields": { "strength": 0.4 } }`, `{ "phasers": { "array": 1 } }`, `{ "comms": { "range": "subspace" } }`. The names: `ftl`, `jump`, `impulse`, `maneuver`, `shields`, `phasers`, `torpedoes`, `tractor`, `transport`, `sensors`, `comms`, `life-support`, `gravity`, `dampers`, `sif`, `deflector`, `holo`, `force-fields`, `brig`, `shuttle-bay`, `docking`, `computing`, `replication`… (and `cloak` when a design has one). In play, an effect's strength is how well its system is fed (supplied over required) times its health. Play will ask for an effect ("the best FTL aboard") rather than a system's id, so a new kind of drive or weapon is a design change, not code (John, 2026-10-03). |
+| `effects` | What it lets the vessel do beyond converting resources, with its parameters: `{ "ftl": { "maxWarp": 5 } }`, `{ "shields": { "strength": 0.4 } }`, `{ "phasers": { "array": 1 } }`, `{ "comms": { "range": "subspace" } }`. The names: `ftl`, `jump`, `impulse`, `maneuver`, `shields`, `phasers`, `torpedoes`, `tractor`, `transport`, `sensors`, `comms`, `life-support`, `gravity`, `dampers`, `sif`, `deflector`, `holo`, `force-fields`, `brig`, `shuttle-bay`, `docking`, `computing`, `replication`, `seat`… A console's `seat` (`{ "seat": { "station": "Helm" } }`) is the one place someone sits at it; more seats are more consoles. A vessel's stations are its seats (John, 2026-10-03). (and `cloak` when a design has one). In play, an effect's strength is how well its system is fed (supplied over required) times its health. Play will ask for an effect ("the best FTL aboard") rather than a system's id, so a new kind of drive or weapon is a design change, not code (John, 2026-10-03). |
+| `creative` | `{ resource: true }`: it never runs short of that resource (John, 2026-10-03). As a source it gives whatever's asked of it while it's there, with its links' `rate` still the limit. As a store or tank it never runs dry or fills. A starbase, a shipyard or a GM object: a design lists `"creative": ["power", "eps", "deu", "am"]` and its sources, stores and tanks get it. A ship's dock feeds are creative (the starbase on the other side), at the dock's rate. |
 | `count` | On a docking port: `null` for as many as needed (a starbase). |
 
 `type`, `name`, `consumes`, `produces`, `capacity`, `effects`, `upstream` and `systems` sit together on each system: a system is a resource converter (what it consumes, what it produces) with effects (John). The vessel itself (the root) carries only who it is (`type`, `class`, `name`, its `places`) and its `systems`: what it consumes and produces as a whole is worked out from them, never stored, so it can't disagree with them.
@@ -83,7 +84,8 @@ A link is stored on the system downstream, under the upstream system's id, for e
 | `pull` | May the downstream system draw from the upstream one? |
 | `push` | May it send back the other way? (a battery charging; a crosslink carrying the other way; a docked ship's export) |
 | `connect` | For a resource that's connected rather than moved (the ODN). |
-| `rate` | Its limit (an EPS tap's, a battery's charge rate, a radiator's). |
+| `rate` | Its limit on a pull: what the upstream system gives down this link at most (an EPS tap's, a battery's output, the dock's, a radiator's). |
+| `pushRate` | Its limit the other way (a battery's charge rate). |
 | `pri` | On a pull: who's served first when the supply is short (lower first). The converter writes today's rule as numbers: containment 0; loads tied to one bus 100+, to two 200+, to three 300+, each tier in the systems' priority order. |
 | `min` | On a pull: the least the system must get to work at all. Below it, it gets nothing, reads NO OUTPUT, and the supply goes on to the next link. A number, or `"all"` (all it draws: a subsystem, a containment). A console's is 2; a system works on what it gets, so it has none. |
 | `why` | Optional: why it's `false` or `"warn"`, shown to the crew. |
@@ -195,11 +197,32 @@ What `min` changes against today, from the starved state: the subspace relay get
 - The runabout at full stretch (warp 5, armed, shields up) makes 77/s. Its radiators dump that with room to spare: they're sized for every system's full draw at once, which is 300.
 - With the pumps off, the sink fills and then the systems warm and overheat (the test times it).
 
+## Step 3: the graph in play
+
+- **The relay builds every vessel kind's graph at start** (the ship classes, the starbase, the subspace relay), from its designs as they are. A design saved from the admin page (the supervisor restarts the relay) is in it. Consoles fetch their vessel's graph from `/api/ships-graph/<id>`; the grid says which one (`graphId`) and which version (`graphRev`).
+- **Distribution, centred on any system:** a ◎ on every pill centres it there.
+  - What feeds it is on the left and what it feeds (and its parts) on the right, a hop further out each column.
+  - A tap on a neighbour ties or unties its link to the centre.
+  - The buses keep their own views.
+- **The Power grid's Systems order** lists the graph as a tree: sources, then buses and stores, then fuel, then each place's consoles and systems with their parts under them.
+- **Seats:** a vessel's stations are its consoles' `seat` effects, and a seat whose console has no power reads standby on the sign-in and Station screens.
+- **The graph engine** (`"engine": "graph"` in `data/settings.json`; `ENGINE` in the environment wins):
+  - The relay shares out power with the graph solver, so minimums and `creative` take effect.
+  - Ships save their ties by system id (`tiesById`: `{ "console-helm": ["bus-a"] }`).
+  - The relay's own solver still works out what each load wants and the breakers' loads.
+  - Off by default: the game plays as before until the cutover.
+- **The cutover** (`node tools/cutover.js`; asked for first):
+  - Stop `npm start`.
+  - `node tools/cutover.js` says what it would do, changing nothing.
+  - `--go` moves `shipcore-data/` and `data/starbases.json` to `backups/game-<date>/`, never deleted. It sets the engine to "graph" and keeps accounts and settings.
+  - Start `npm start`: a new game, on the graph engine.
+  - To go back: stop it, move them back, and set the engine to "relay".
+
 ## The steps
 
 1. **Done:** the schema, the type library, the converter and the checks. Nothing in play changes.
 2. **Done:** a graph-based solver alongside today's. Tests run both on every ship and require the same flows. The graphs now carry draws and fuel use, and heat is simulated in the graph solver only.
-3. Distribution (root-agnostic) and the Power grid read the graph; ships save by system id.
+3. **Built, cutover not yet run:** Distribution (root-agnostic) and the Power grid read the graph, the graph engine plays, and ships save by system id.
    - **No old-save conversion** (John): the switch starts a new game.
    - Before it, `shipcore-data/` and `data/starbases.json` are moved to a timestamped backup folder, never deleted; accounts and settings stay.
    - The cutover itself is asked for first.

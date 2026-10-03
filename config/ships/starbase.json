@@ -545,5 +545,11 @@
       "am:core": 50,
       "am:torpedo": 100
     }
-  }
+  },
+  "creative": [
+    "power",
+    "eps",
+    "deu",
+    "am"
+  ]
 }

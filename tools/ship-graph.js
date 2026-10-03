@@ -40,6 +40,8 @@ function effectsOf(key, z) {
   const m = /^system:(phaser|drydock)(\d)$/.exec(key);
   if (m) return m[1] === 'phaser' ? { phasers: { array: Number(m[2]) } } : { drydock: { berth: Number(m[2]) } };
   if (/^sub:computer\d$/.test(key)) return { computing: {} };
+  // (A console: one seat, at its station; more seats are more consoles.)
+  if (key?.startsWith('console:')) return { seat: { station: key.slice(8) } };
   return E[key] || null;
 }
 const types = () => JSON.parse(fs.readFileSync(TYPES_FILE, 'utf8')).types;
@@ -97,20 +99,25 @@ function convert(id, design, d) {
   const coreBurn = Math.round((c.coreOutput / t.GRID.core) * t.FUEL.coreBurn * 1000) / 1000;
   src('core', 'warp-core', { type: 'warp-core', name: 'Warp core', produces: { eps: c.coreOutput }, consumes: { deu: coreBurn, am: coreBurn } });
   // (A drive's thrusters: tied to the EPS, what the drive isn't spending on thrust feeds it.)
+  // (A vessel without the drive keeps the tie, as the relay does: the thrusters on their own.)
+  for (const [key, drive] of [['thrustersPort', 'impulse-port'], ['thrustersStarboard', 'impulse-starboard']]) if (keys[key] && !systems[drive]) { idOf[key] = `${drive}-thrusters`; add(`${drive}-thrusters`, { key, type: 'thrusters', name: `${drive === 'impulse-port' ? 'Port' : 'Starboard'} thrusters`, parentName: drive }); for (const n of keys[key].nodes) link(BUS_ID[n], `${drive}-thrusters`, resOf(n), { pull: allow(keys[key].tied.includes(n)), push: false }); }
   for (const [key, drive] of [['thrustersPort', 'impulse-port'], ['thrustersStarboard', 'impulse-starboard']]) if (keys[key] && systems[drive]) { idOf[key] = `${drive}-thrusters`; add(`${drive}-thrusters`, { key, type: 'thrusters', name: `${systems[drive].name} thrusters`, parent: drive, upstream: { [drive]: { eps: { pull: 'auto', push: false } } } }); for (const n of keys[key].nodes) link(BUS_ID[n], `${drive}-thrusters`, resOf(n), { pull: allow(keys[key].tied.includes(n)), push: false }); }
   // The bus batteries and the EPS's pressure: each charges from its bus and supplies it.
   for (const [store, node] of Object.entries(t.STORES)) {
     const sid = node === 'EPS' ? 'eps-pressure' : `battery-${node.toLowerCase()}`, on = node === 'EPS' ? true : c.breakers[node];
     add(sid, { key: store, type: node === 'EPS' ? 'eps-pressure' : 'battery', name: node === 'EPS' ? 'EPS pressure' : `Battery ${node}`, capacity: { [resOf(node)]: node === 'EPS' ? t.GRID.epsCap : t.GRID.batteryCap }, produces: { [resOf(node)]: node === 'EPS' ? t.GRID.epsOut : t.GRID.batteryOut } });
-    link(BUS_ID[node], sid, resOf(node), { pull: allow(on), push: allow(on), rate: node === 'EPS' ? t.GRID.epsCharge : t.GRID.batteryCharge });
+    // (rate: what it gives the bus at most; pushRate: what it charges at.)
+    link(BUS_ID[node], sid, resOf(node), { pull: allow(on), push: allow(on), rate: node === 'EPS' ? t.GRID.epsOut : t.GRID.batteryOut, pushRate: node === 'EPS' ? t.GRID.epsCharge : t.GRID.batteryCharge });
   }
   // Docking: the ports, their connectors, and power through them (a starbase's; a docked ship's).
   if (keys.dock || keys.ship) {
     const ports = design.ports === null ? null : design.ports;
     for (let i = 1; i <= (ports ?? 1); i++) add(`docking-port-${i}`, { type: 'docking-port', effects: { docking: {} }, name: ports === null ? 'Docking ports (as many as needed)' : `Docking port ${i}`, ...(ports === null ? { count: null } : {}) });
     add('docking-connectors', { type: 'docking-connectors', name: 'Docking connectors', upstream: Object.fromEntries(Object.keys(systems).filter((s) => s.startsWith('docking-port-')).map((p) => [p, Object.fromEntries(RESOURCES.map((r) => [r, { pull: true, push: true }]))])) });
-    src('dock', 'dock-power', { type: 'dock-feed', name: 'Dock power (starbase)', produces: { power: t.GRID.dock }, upstream: { 'docking-connectors': { power: { pull: true, push: true } } } });
-    src('dockEps', 'dock-eps', { type: 'dock-feed', name: 'Dock EPS (starbase)', produces: { eps: t.GRID.dock }, upstream: { 'docking-connectors': { eps: { pull: true, push: true } } } });
+    // (A starbase's power: creative, it never runs short; the dock's rate limits it.)
+    src('dock', 'dock-power', { type: 'dock-feed', name: 'Dock power (starbase)', produces: { power: t.GRID.dock }, creative: { power: true }, upstream: { 'docking-connectors': { power: { pull: true, push: true } } } });
+    src('dockEps', 'dock-eps', { type: 'dock-feed', name: 'Dock EPS (starbase)', produces: { eps: t.GRID.dock }, creative: { eps: true }, upstream: { 'docking-connectors': { eps: { pull: true, push: true } } } });
+    for (const [sid, node] of [['dock-power', 'B'], ['dock-eps', 'EPS']]) if (systems[sid]) for (const n of keys[systems[sid].key]?.nodes || [node]) if (systems[BUS_ID[n]].upstream[sid]) systems[BUS_ID[n]].upstream[sid][resOf(n)].rate = t.GRID.dock;
     src('ship', 'ship-power', { type: 'dock-feed', name: 'Docked ship power', upstream: { 'docking-connectors': { power: { pull: true, push: true } } } });
     src('shipEps', 'ship-eps', { type: 'dock-feed', name: 'Docked ship EPS', upstream: { 'docking-connectors': { eps: { pull: true, push: true } } } });
   }
@@ -185,6 +192,18 @@ function convert(id, design, d) {
     const min = key.startsWith('console:') ? t.GRID.console : key.startsWith('sub:') || key.startsWith('contain:') || key === 'containment' ? 'all' : undefined;
     for (const n of k.nodes) link(sid, BUS_ID[n], resOf(n), { pull: allow(k.tied.includes(n)), push: false, pri, ...(min !== undefined ? { min } : {}) });
   }
+  // Power exported through the docking connectors (to the starbase; to a ship at each port), served
+  // after the computer cores as today (a starbase: to the ships docked with it, any number).
+  if (systems['docking-connectors']) {
+    const after = t.LOAD_ORDER.indexOf('sub:deuTransfer') - 0.5;
+    const exp = (key, sid, name, node, pri) => { idOf[key] = sid; add(sid, { key, type: 'export', name, parent: 'docking-connectors', upstream: { [BUS_ID[node]]: { [resOf(node)]: { pull: true, push: false, pri } } } }); };
+    exp('feed:station', 'export-station-power', 'Power out to the starbase', 'B', 1000 + t.LOAD_ORDER.indexOf('feed:station'));
+    exp('feedEps:station', 'export-station-eps', 'EPS out to the starbase', 'EPS', 1000 + t.LOAD_ORDER.indexOf('feedEps:station'));
+    (t.PORTS || []).forEach((p, i) => { exp(`feed:${p}`, `export-${p}-power`, `Power out at the ${p} port`, 'B', 1000 + after + i * 0.1); exp(`feedEps:${p}`, `export-${p}-eps`, `EPS out at the ${p} port`, 'EPS', 1000 + after + i * 0.1 + 0.05); });
+  }
+  // A design that's creative in some resources (a starbase, a shipyard, a GM object: "creative": ["deu",
+  // ...]): every source, store and tank of theirs never runs dry or fills.
+  for (const r of design.creative || []) for (const s of Object.values(systems)) if (['solar', 'emergency-battery', 'battery', 'eps-pressure', 'fusion-reactor', 'warp-core', 'tank'].includes(s.type) && (s.produces?.[r] !== undefined || s.capacity?.[r] !== undefined)) s.creative = { ...(s.creative || {}), [r]: true };
   // (A parent can only be pointed at once it exists: drop pointers at systems this class lacks.)
   for (const s of Object.values(systems)) if (s.parent && !systems[s.parent]) { s.parentName = s.parent; delete s.parent; }
   // Heat (schema now, simulated from step 2): every system that consumes or produces makes heat, a
@@ -243,7 +262,7 @@ function nodes(g) {
   walk(g.systems, null);
   return { all, parentOf };
 }
-const RANK = ['bus', 'eps-manifold', 'coolant-loop', 'heat-sink', 'radiator', 'solar', 'emergency-battery', 'battery', 'eps-pressure', 'dock-feed', 'docking-connectors', 'docking-port', 'fusion-reactor', 'thrusters', 'warp-core', 'fuel-bus', 'tank', 'place', 'conduit', 'group', 'console', 'system', 'subsystem', 'containment'];
+const RANK = ['bus', 'eps-manifold', 'export', 'coolant-loop', 'heat-sink', 'radiator', 'solar', 'emergency-battery', 'battery', 'eps-pressure', 'dock-feed', 'docking-connectors', 'docking-port', 'fusion-reactor', 'thrusters', 'warp-core', 'fuel-bus', 'tank', 'place', 'conduit', 'group', 'console', 'system', 'subsystem', 'containment'];
 const rank = (s) => { const i = RANK.indexOf(s.type); return i < 0 ? RANK.length : i; };
 
 // What's wrong with a graph (empty: nothing).
@@ -264,6 +283,7 @@ function check(g, lib = types()) {
       if (!RESOURCES.includes(r)) bad.push(`${where}.${f}: no resource "${r}"`);
       if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) bad.push(`${where}.${f}.${r}: a number, 0 or more`);
     }
+    if (s.creative !== undefined && !(s.creative && typeof s.creative === 'object' && Object.entries(s.creative).every(([r, v]) => RESOURCES.includes(r) && v === true))) bad.push(`${where}.creative: { resource: true }, for each it never runs short of`);
     if (s.effects !== undefined && !(s.effects && typeof s.effects === 'object' && !Array.isArray(s.effects) && Object.entries(s.effects).every(([x, v]) => /^[a-z][a-z-]*$/.test(x) && v && typeof v === 'object'))) bad.push(`${where}.effects: { effect name (lower-case, -): its parameters }`);
     const placeIds = new Set((g.places || []).map((p) => p.id).concat(Object.keys(all)));
     if (s.place !== undefined && !placeIds.has(s.place)) bad.push(`${where}.place: no place "${s.place}"`);
@@ -274,7 +294,8 @@ function check(g, lib = types()) {
       for (const [r, perm] of Object.entries(res)) {
         if (!RESOURCES.includes(r)) bad.push(`${where}.upstream.${up}: no resource "${r}"`);
         for (const w of ['pull', 'push', 'connect']) if (perm[w] !== undefined && !PERMS.includes(perm[w])) bad.push(`${where}.upstream.${up}.${r}.${w}: false, "warn", true or "auto"`);
-        for (const f of Object.keys(perm)) if (!['pull', 'push', 'connect', 'rate', 'why', 'pri', 'min'].includes(f)) bad.push(`${where}.upstream.${up}.${r}: no setting "${f}"`);
+        for (const f of Object.keys(perm)) if (!['pull', 'push', 'connect', 'rate', 'pushRate', 'why', 'pri', 'min'].includes(f)) bad.push(`${where}.upstream.${up}.${r}: no setting "${f}"`);
+        if (perm.pushRate !== undefined && !(typeof perm.pushRate === 'number' && perm.pushRate >= 0)) bad.push(`${where}.upstream.${up}.${r}.pushRate: a number, 0 or more`);
         if (perm.pri !== undefined && !(typeof perm.pri === 'number' && Number.isFinite(perm.pri))) bad.push(`${where}.upstream.${up}.${r}.pri: a number (lower is served first)`);
         if (perm.min !== undefined && !(perm.min === 'all' || (typeof perm.min === 'number' && perm.min >= 0))) bad.push(`${where}.upstream.${up}.${r}.min: a number, or "all"`);
         if (perm.why !== undefined && typeof perm.why !== 'string') bad.push(`${where}.upstream.${up}.${r}.why: a reason, as text`);

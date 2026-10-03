@@ -25,7 +25,8 @@ function solve(g, rt, { enforceMin = true } = {}) {
   for (let round = 0; round < 50; round++) {
     r = once(g, rt, off);
     if (!enforceMin) break;
-    const failing = r.consumers.filter((id) => !off.has(id) && r.want[id] > 0 && r.got[id] > 1e-9 && r.got[id] < r.min[id] - 1e-9);
+    // (Containment, served ahead of everything, never drops out: what it gets holds the antimatter.)
+    const failing = r.consumers.filter((id) => !off.has(id) && r.pri[id] >= 1000 && r.want[id] > 0 && r.got[id] > 1e-9 && r.got[id] < r.min[id] - 1e-9);
     if (!failing.length) break;
     for (const id of failing) off.add(id);
   }
@@ -49,8 +50,15 @@ function once(g, rt, off) {
   const srcIds = ids.filter((id) => ['source', 'store'].includes(typeOf(id).role) && NODES.some((n) => all[n].upstream?.[id]));
   const srcs = srcIds.map((id) => {
     const ties = NODES.filter((n) => all[n].upstream?.[id] && rt.on(n, id));
-    const full = ties.length ? rt.supply(id) : 0;
-    return { id, ties, left: full, full, share: ties.length > 1 ? Object.fromEntries(ties.map((n) => [n, full / ties.length])) : null };
+    // (Creative on what it gives (a starbase, a GM object): never runs dry while it's there; each
+    // link's rate still limits it.)
+    const creative = ties.some((n) => all[id].creative?.[resOf(n)]);
+    const rate = ties.reduce((m, n) => m + (all[n].upstream[id][resOf(n)]?.rate ?? Infinity), 0);
+    const avail = ties.length ? rt.supply(id) : 0;
+    // (There to give: a feed while its connection is (a starbase while docked); a store or a tank always.)
+    const there = avail > 0 || typeOf(id).role === 'store';
+    const full = Math.min(creative && there ? Infinity : avail, rate);
+    return { id, ties, left: full, full, given: 0, creative, share: ties.length > 1 ? Object.fromEntries(ties.map((n) => [n, full / ties.length])) : null };
   });
   const srcById = Object.fromEntries(srcs.map((s) => [s.id, s]));
   const blank = () => Object.fromEntries(NODES.map((n) => [n, 0]));
@@ -102,7 +110,7 @@ function once(g, rt, off) {
       const room = Math.min(b ? busRoom(node) - got : Infinity, viaTap ? maxOf(eps) - viaEps : Infinity, b && viaTap ? tapRoom(node) : Infinity);
       const t = Math.min(s.left, amt - got, room, s.share && !viaTap ? s.share[side] : Infinity);
       if (t <= 0) return;
-      s.left -= t; got += t;
+      s.left -= t; s.given += t; got += t;
       if (s.share && !viaTap) s.share[side] -= t;
       cell(s.id)[viaTap ? eps : side] += t;
       if (viaTap) viaEps += t;
@@ -147,12 +155,12 @@ function once(g, rt, off) {
   // Charging a bus's battery from what's left: its breaker closed, and not covering a shortfall itself.
   const charging = blank();
   const storeOf = (n) => srcs.find((s) => typeOf(s.id).role === 'store' && all[n].upstream?.[s.id]);
-  const usedOf = (s) => (s ? s.full - s.left : 0);
+  const usedOf = (s) => (s ? s.given : 0);
   const chargeFrom = (n, split) => {
     const st = storeOf(n);
     if (!st || !rt.on(n, st.id) || usedOf(st) > 0) return;
     const link = all[n].upstream[st.id][resOf(n)];
-    const room = Math.min(link.rate ?? Infinity, (all[st.id].capacity?.[resOf(n)] ?? Infinity) - rt.level(st.id));
+    const room = Math.min(link.pushRate ?? link.rate ?? Infinity, all[st.id].creative?.[resOf(n)] ? Infinity : (all[st.id].capacity?.[resOf(n)] ?? Infinity) - rt.level(st.id));
     for (const x of srcs) {
       if (lastResort(x.id) || charging[n] >= room || (!split && x.ties.length > 1) || (!rt.epsLive && x.ties.includes(eps))) continue;
       const sides = pool(n), direct = sides.some((y) => x.ties.includes(y));
@@ -160,7 +168,7 @@ function once(g, rt, off) {
       const via = sides.find((y) => x.ties.includes(y));
       const t = Math.min(x.left, room - charging[n], busRoom(n), direct ? (x.share ? x.share[via] : Infinity) : tapRoom(n));
       if (t <= 0) continue;
-      x.left -= t; charging[n] += t;
+      x.left -= t; x.given += t; charging[n] += t;
       if (direct && x.share) x.share[via] -= t;
       bus[n].need += t; bus[n].have += t;
       if (direct) xflow(via, n, t);
@@ -184,20 +192,20 @@ function once(g, rt, off) {
   for (const n of lows) chargeFrom(n, true);
   // The EPS's pressure builds from what's left of the EPS sources' output.
   const press = storeOf(eps);
-  const epsGen = srcs.filter((x) => !lastResort(x.id) && x.ties.includes(eps)).reduce((m, x) => m + x.full, 0);
+  const epsGen = srcs.filter((x) => !lastResort(x.id) && x.ties.includes(eps)).reduce((m, x) => m + (Number.isFinite(x.full) ? x.full : rt.epsChargeGen), 0);
   if (press && usedOf(press) <= 0 && (rt.epsLive || epsGen >= rt.epsChargeGen)) {
     const link = all[eps].upstream[press.id].eps;
-    const room = Math.min(link.rate ?? Infinity, (all[press.id].capacity?.eps ?? Infinity) - rt.level(press.id), maxOf(eps) - viaEps);
+    const room = Math.min(link.pushRate ?? link.rate ?? Infinity, all[press.id].creative?.eps ? Infinity : (all[press.id].capacity?.eps ?? Infinity) - rt.level(press.id), maxOf(eps) - viaEps);
     for (const x of srcs) {
       if (lastResort(x.id) || !x.ties.includes(eps) || charging[eps] >= room) continue;
       const t = Math.min(x.left, room - charging[eps]);
       if (t <= 0) continue;
-      x.left -= t; charging[eps] += t; viaEps += t;
+      x.left -= t; x.given += t; charging[eps] += t; viaEps += t;
       cell(press.id)[eps] -= t; cell(x.id)[eps] += t;
     }
   }
   const tapUsed = Object.fromEntries(lows.map((n) => [n, bus[n].tapUsed]));
-  return { cells, got, want, min, consumers, crossflow, charging, viaEps, tapUsed, used: Object.fromEntries(srcs.map((s) => [s.id, usedOf(s)])) };
+  return { cells, got, want, min, consumers, crossflow, charging, viaEps, tapUsed, buses: bus, pri: Object.fromEntries(consumers.map((id) => [id, priOf(id)])), used: Object.fromEntries(srcs.map((s) => [s.id, usedOf(s)])) };
 }
 
 // Today's relay state as a graph runtime (the bridge while both solvers run): its ties, taps,
@@ -206,6 +214,8 @@ function fromRelay(g, st, tables) {
   const { all } = GRAPH.nodes(g);
   const L = { 'bus-a': 'A', 'bus-b': 'B', 'bus-c': 'C', eps: 'EPS' };
   const keyOf = (id) => all[id]?.key;
+  // (Power out to the starbase or a docked ship goes the way it comes in: its connection's tie.)
+  const tieKey = (k) => ({ 'feed:station': 'dock', 'feedEps:station': 'dockEps' })[k] || (k?.startsWith('feedEps:') ? 'shipEps' : k?.startsWith('feed:') ? 'ship' : k);
   return {
     letters: L,
     epsLive: st.epsLive,
@@ -220,7 +230,7 @@ function fromRelay(g, st, tables) {
         if (k in tables.STORES) return tables.STORES[k] === 'EPS' || !!st.breakers[tables.STORES[k]];
         return (st.ties[k] || []).includes(L[down]);
       }
-      return (st.ties[keyOf(down)] || []).includes(L[up]); // a load or conduit on a bus
+      return (st.ties[tieKey(keyOf(down))] || []).includes(L[up]); // a load or conduit on a bus
     },
     crossOk: (from, to) => !st.xlBlock.includes(`${L[from]}>${L[to]}`),
     supply: (id) => st.srcCap[keyOf(id)] || 0,

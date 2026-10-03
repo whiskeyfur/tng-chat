@@ -468,6 +468,8 @@ function fillReassign() {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', textContent: name });
     b.dataset.station = name;
     if (ship) b.dataset.ship = ship;
+    // (A seat whose console has no power: standby.)
+    if (ships.find((x) => x.name === (ship || me.ship))?.standby?.includes(name)) { b.textContent = `${name} · standby`; b.classList.add('seat-standby'); b.title = 'Its console has no power'; }
     if (!ship && name === myPlace()) { b.disabled = true; b.title = 'You are here'; b.setAttribute('aria-current', 'true'); }
     // The brig's force field: nobody walks into the Brig, or out of it.
     else if (!ship && lastNav?.own?.grid?.brigSealed && (name === 'Brig' || myPlace() === 'Brig')) { b.disabled = true; b.title = 'The brig force field is up'; b.textContent = `${name} · brig field up`; }
@@ -776,9 +778,40 @@ function openSystem(k) {
 // Lines are lit where power flows. Tap a pill to tie it to this bus or untie it,
 // as on the grid. Deu. and AM show the fuel bus: the main storage, the tanks on it.
 let distBus = 'EPS';
+// The ship's graph (docs/ship-graph.md), fetched once per class and version; distRoot: the system
+// Distribution is centred on (null: a bus's view, distBus).
+let shipGraph = null, shipGraphLoading = null, distRoot = null;
+const GRAPH_LETTER = { 'bus-a': 'A', 'bus-b': 'B', 'bus-c': 'C', eps: 'EPS' };
+const GRAPH_BUS = { A: 'bus-a', B: 'bus-b', C: 'bus-c', EPS: 'eps' };
+function ensureShipGraph(grid) {
+  const want = grid?.graphId ? `${grid.graphId}@${grid.graphRev}` : null;
+  if (!want || shipGraph?.want === want || shipGraphLoading === want) return;
+  shipGraphLoading = want;
+  fetch(`/api/ships-graph/${encodeURIComponent(grid.graphId)}`, { credentials: 'same-origin' }).then((r) => r.json()).then((v) => {
+    if (!v.graph) return;
+    const all = {}, parent = {}, up = {}, down = {}, byKey = {};
+    const walk = (sys, p) => { for (const [id, s] of Object.entries(sys || {})) { all[id] = s; parent[id] = p; if (s.key) byKey[s.key] = id; walk(s.systems, id); } };
+    walk(v.graph.systems, null);
+    for (const id of Object.keys(all)) { up[id] = []; down[id] = []; }
+    for (const [id, s] of Object.entries(all)) for (const [u, res] of Object.entries(s.upstream || {})) if (all[u] && Object.keys(res).some((r) => r !== 'heat')) { up[id].push(u); down[u].push(id); }
+    shipGraph = { want, g: v.graph, all, parent, up, down, byKey, types: v.types || {} };
+    const box = document.querySelector('[data-distribution]');
+    if (box) box.dataset.sig = '';
+    renderDistribution(lastNav?.own?.grid);
+  }).catch(() => {}).finally(() => { if (shipGraphLoading === want) shipGraphLoading = null; });
+}
+// Centre Distribution on a system (a bus: its own view).
+function distCentre(id) {
+  if (GRAPH_LETTER[id]) { distBus = GRAPH_LETTER[id]; distRoot = null; } else distRoot = id;
+  const box = document.querySelector('[data-distribution]');
+  if (box) { box.dataset.sig = ''; delete box.dataset.focused; }
+  renderDistribution(lastNav?.own?.grid);
+}
 function renderDistribution(grid) {
   const box = document.querySelector('[data-distribution]');
   if (!box || !grid) return;
+  ensureShipGraph(grid);
+  if (distRoot && shipGraph?.all[distRoot]) return renderDistGraph(grid, box);
   const sig = JSON.stringify([distBus, grid.xlBlock, grid.ties, grid.cells, grid.cutOff, grid.totals, grid.stores, grid.fuel, grid.taps, grid.crossflow, grid.srcCap, grid.epsLive, grid.srcDamage, grid.tapAvail]);
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig;
@@ -878,6 +911,15 @@ function renderDistribution(grid) {
       svgEl('text', { x: 16, y: 17, 'font-size': 14, fill: n.st === 'open' || n.st === 'cut' ? 'var(--lcars-text)' : '#000' }, n.label.toUpperCase()),
       svgEl('text', { x: 16, y: 32, 'font-size': 11, fill: n.st === 'open' || n.st === 'cut' ? '#aaa' : '#000' }, `${n.value} · ${n.word || { live: 'live', idle: 'ready', dead: 'no power', open: 'standby', cut: 'CUT OFF' }[n.st]}`));
     gridJumpable(g, gridRowFor(n, X));
+    // (◎ at its end: centre Distribution on it.)
+    const gid = shipGraph && (n.graphId || (n.key && shipGraph.byKey[n.key]) || (n.xlKey === 'bus-here' ? GRAPH_BUS[X] : n.xlKey?.startsWith('xl-bus:') ? GRAPH_BUS[n.xlKey.slice(7)] : null) || (n.tapBus ? 'eps' : null));
+    if (gid && shipGraph.all[gid] && !(GRAPH_LETTER[gid] === X)) {
+      const c = svgEl('g', { class: 'dist-centre', transform: `translate(${w - 22} ${PH / 2})`, 'data-centre': gid, role: 'button', 'aria-label': `centre on ${n.label}` });
+      c.append(svgEl('circle', { r: 11, fill: '#000', opacity: 0.35 }), svgEl('circle', { r: 6, fill: 'none', stroke: n.st === 'open' || n.st === 'cut' ? 'var(--lcars-text)' : '#000', 'stroke-width': 2 }), svgEl('circle', { r: 2, fill: n.st === 'open' || n.st === 'cut' ? 'var(--lcars-text)' : '#000' }));
+      for (const ev of ['pointerdown', 'pointerup']) c.addEventListener(ev, (e) => e.stopPropagation());
+      c.addEventListener('click', (e) => { e.stopPropagation(); distCentre(gid); });
+      g.append(c);
+    }
     if (n.xlDir) g.addEventListener('click', () => send({ type: 'grid', xlDir: n.xlDir }));
     if (n.view) g.addEventListener('click', () => { distBus = n.view; box.dataset.sig = ''; renderDistribution(lastNav?.own?.grid); });
     if (n.tapBus) g.addEventListener('click', () => send({ type: 'grid', tap: { bus: n.tapBus, on: !(grid.taps?.[n.tapBus] > 0) } }));
@@ -1018,7 +1060,7 @@ document.addEventListener('pointermove', (e) => { if (distHold && Math.hypot(e.c
 for (const ev of ['pointerup', 'pointercancel']) document.addEventListener(ev, holdStop);
 function gridJumpable(g, ids) {
   const key = g.dataset.key;
-  if (distHold?.key === key) holdRing(g, Date.now() - distHold.t0);
+  if (distHold && key && distHold.key === key) holdRing(g, Date.now() - distHold.t0);
   g.addEventListener('click', (e) => {
     if (e.shiftKey || distJumped) { e.stopImmediatePropagation(); e.preventDefault(); if (e.shiftKey && !distJumped) gridJump(ids); distJumped = false; }
   });
@@ -1029,6 +1071,110 @@ function gridJumpable(g, ids) {
     distHold = { key, t0: Date.now(), start: [e.clientX, e.clientY], timer: setTimeout(() => { holdStop(); distJumped = true; gridJump(ids); }, 3000) };
     holdRing(g, 0);
   });
+}
+// Distribution centred on any system (the graph): what feeds it on the left, what it feeds on the
+// right, each a hop further out in the next column (two hops each way); its parts with what it feeds,
+// what it's part of above. Lit while power moves along a link; a tap on a neighbour ties or unties
+// its link to the centre (where that's a tie), ◎ centres on it, shift-click or a 3 s hold opens the
+// Power grid at it. The buses' own views are Bus A, B, C and EPS.
+function renderDistGraph(grid, box) {
+  const G = shipGraph, R = distRoot, all = G.all;
+  const sig = JSON.stringify([R, G.want, grid.ties, grid.cells, grid.taps, grid.crossflow, grid.srcDamage]);
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  const NS = 'http://www.w3.org/2000/svg';
+  const svgEl = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; };
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const L = GRAPH_LETTER, key = (id) => all[id]?.key;
+  // (A link's state now: tied or not, where it's a tie; null where it's structure.)
+  const on = (down, up) => {
+    if (L[down] && L[up]) return up === 'eps' ? (grid.taps?.[L[down]] || 0) > 0 : (grid.ties.crosslink || []).includes(L[down]) && (grid.ties.crosslink || []).includes(L[up]);
+    if (L[up] && key(down) && grid.ties[key(down)]) return grid.ties[key(down)].includes(L[up]);
+    if (L[down] && key(up) && grid.ties[key(up)]) return grid.ties[key(up)].includes(L[down]);
+    if (L[down] && /^battery-|^eps-pressure$/.test(up)) return up === 'eps-pressure' || grid.stores?.[L[down]]?.breaker !== false;
+    return null;
+  };
+  // (What's moving along it now, MW, upstream to downstream; null where it isn't power.)
+  const flow = (down, up) => {
+    if (L[down] && L[up]) { if (up === 'eps') return Math.max(0, grid.cells?.taps?.[L[down]] || 0); const k = [L[down], L[up]].sort().join(''), v = grid.crossflow?.[k] || 0; return Math.max(0, L[up] < L[down] ? v : -v); }
+    if (L[up] && key(down)) return Math.abs(grid.cells?.[key(down)]?.[L[up]] || 0);
+    if (L[down] && key(up) && grid.cells?.[key(up)]) return Math.max(0, grid.cells[key(up)][L[down]] || 0);
+    if (L[down] && /^battery-|^eps-pressure$/.test(up)) return Math.max(0, grid.cells?.stores?.[L[down]] || 0);
+    return null;
+  };
+  const nameOf = (id) => all[id]?.name || id;
+  // The columns: two hops out each way (each system once, nearest first), capped.
+  const seen = new Set([R]);
+  const hop = (from, dir) => { const out = []; for (const f of from) for (const x of (dir < 0 ? G.up : G.down)[f] || []) if (!seen.has(x)) { seen.add(x); out.push({ id: x, via: f }); } return out; };
+  const parts = Object.keys(all).filter((x) => G.parent[x] === R);
+  for (const p of parts) seen.add(p);
+  const left1 = hop([R], -1), right1 = [...hop([R], 1), ...parts.map((p) => ({ id: p, via: R, part: true }))];
+  const left2 = hop(left1.map((x) => x.id), -1), right2 = hop(right1.map((x) => x.id), 1);
+  const CAP = 24, cut = (list) => (list.length > CAP ? [...list.slice(0, CAP - 1), { more: list.length - CAP + 1 }] : list);
+  const cols = [cut(left2), cut(left1), [{ id: R }], cut(right1), cut(right2)];
+  const W = 1280, PH = 40, GAP = 10, CW = 230, xs = [10, 262, 525, 788, 1040];
+  const H = Math.max(...cols.map((c) => c.length)) * (PH + GAP) + 40, mid = H / 2;
+  const yOf = (ci, i) => mid - (cols[ci].length * (PH + GAP) - GAP) / 2 + i * (PH + GAP);
+  const svg = svgEl('svg', { class: 'dist-map dist-graph', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `${nameOf(R)}: what feeds it and what it feeds` });
+  const defs = svgEl('defs', {}), arrow = svgEl('marker', { id: 'dist-arrow', viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 5, markerHeight: 5, orient: 'auto-start-reverse' });
+  arrow.append(svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'var(--lcars-sky)' }));
+  defs.append(arrow); svg.append(defs);
+  const COLOR = { live: 'var(--lcars-sky)', idle: 'var(--lcars-gold)', open: '#3a3550', struct: 'var(--lcars-tan)', root: 'var(--lcars-orange)', dead: 'var(--lcars-tan)' };
+  const pos = {};
+  const lines = svgEl('g', {}), nodes = svgEl('g', {});
+  svg.append(lines, nodes);
+  cols.forEach((col, ci) => col.forEach((n, i) => {
+    const x = xs[ci], y = yOf(ci, i);
+    if (n.more) { nodes.append(svgEl('text', { x: x + 16, y: y + 24, 'font-size': 13, fill: 'var(--lcars-gold)' }, `+${n.more} more`)); return; }
+    pos[n.id] = { x, y };
+    // (Its link to the system it's next to, toward the centre.)
+    const [down, up] = ci < 2 ? [n.via, n.id] : ci > 2 ? (n.part ? [n.id, null] : [n.id, n.via]) : [null, null];
+    const tied = down && up ? on(down, up) : null, mw = down && up ? flow(down, up) : null;
+    const st = ci === 2 ? 'root' : tied === false ? 'open' : mw > 0.5 ? 'live' : tied ? 'idle' : 'struct';
+    const word = ci === 2 ? (all[R].type || '') : n.part ? 'part' : tied === false ? 'standby' : mw > 0.5 ? 'live' : tied ? 'idle' : Object.keys(all[down]?.upstream?.[up] || {}).join(', ') || 'link';
+    const g = svgEl('g', { class: `dist-node dist-node--${st}`, transform: `translate(${x} ${y})`, role: 'button', tabindex: 0, 'data-graph': n.id, ...(key(n.id) ? { 'data-key': key(n.id) } : {}) });
+    g.append(svgEl('rect', { width: CW, height: PH, rx: PH / 2, fill: COLOR[st] }),
+      svgEl('text', { x: 16, y: 17, 'font-size': 13, fill: st === 'open' ? 'var(--lcars-text)' : '#000' }, nameOf(n.id).toUpperCase().slice(0, 26)),
+      svgEl('text', { x: 16, y: 32, 'font-size': 11, fill: st === 'open' ? '#aaa' : '#000' }, `${mw != null ? `${Math.round(mw)} MW · ` : ''}${word}`));
+    gridJumpable(g, gridRowFor({ key: key(n.id), label: nameOf(n.id), xlKey: L[n.id] ? `xl-bus:${L[n.id]}` : undefined }, L[n.id] || 'A'));
+    // (A tap on a neighbour: its tie to the centre, where it's a tie.)
+    if (tied !== null && down && up) g.addEventListener('click', () => {
+      if (L[down] && L[up]) return up === 'eps' ? send({ type: 'grid', tap: { bus: L[down], on: !tied } }) : null;
+      const [k, b] = L[up] ? [key(down), L[up]] : [key(up), L[down]];
+      if (!k || !b) return;
+      const list = grid.ties[k] || [], multi = (grid.multi || []).includes(k);
+      send({ type: 'grid', ties: { [k]: multi ? ['A', 'B', 'C', 'EPS'].filter((x) => (x === b ? !list.includes(b) : list.includes(x))) : list.includes(b) ? [] : [b] } });
+    });
+    if (ci !== 2) {
+      const c = svgEl('g', { class: 'dist-centre', transform: `translate(${CW - 22} ${PH / 2})`, 'data-centre': n.id, role: 'button', 'aria-label': `centre on ${nameOf(n.id)}` });
+      c.append(svgEl('circle', { r: 11, fill: '#000', opacity: 0.35 }), svgEl('circle', { r: 6, fill: 'none', stroke: st === 'open' ? 'var(--lcars-text)' : '#000', 'stroke-width': 2 }), svgEl('circle', { r: 2, fill: st === 'open' ? 'var(--lcars-text)' : '#000' }));
+      for (const ev of ['pointerdown', 'pointerup']) c.addEventListener(ev, (e) => e.stopPropagation());
+      c.addEventListener('click', (e) => { e.stopPropagation(); distCentre(n.id); });
+      g.append(c);
+    }
+    nodes.append(g);
+    n.st = st; n.mw = mw;
+  }));
+  // (Lines: each to the system it's next to toward the centre; elbows, lit and running the way power goes.)
+  cols.forEach((col, ci) => col.forEach((n) => {
+    if (n.more || ci === 2 || !pos[n.id] || !pos[n.via]) return;
+    const a = pos[n.id], b = pos[n.via], left = ci < 2;
+    const x1 = left ? a.x + CW : a.x, x2 = left ? b.x : b.x + CW, y1 = a.y + PH / 2, y2 = b.y + PH / 2, xm = (x1 + x2) / 2;
+    const live = n.st === 'live';
+    lines.append(svgEl('path', { d: `M${x1},${y1} H${xm} V${y2} H${x2}`, fill: 'none', stroke: live ? 'var(--lcars-sky)' : '#444', 'stroke-width': live ? Math.min(6, 2.5 + (n.mw || 0) / 120).toFixed(1) : 1.5,
+      ...(live ? { class: `dist-flow${left ? '' : ' dist-flow--rev'}`, [left ? 'marker-end' : 'marker-start']: 'url(#dist-arrow)', 'data-flow': left ? `${nameOf(n.id)} → ${nameOf(n.via)}` : `${nameOf(n.via)} → ${nameOf(n.id)}` } : {}) }));
+  }));
+  const back = el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', id: 'dist-graph-back', textContent: `Bus ${distBus === 'EPS' ? 'EPS' : distBus}` });
+  back.onclick = () => distCentre(GRAPH_BUS[distBus]);
+  const up = G.parent[R];
+  box.replaceChildren(
+    el('div', { className: 'place-bar dist-buses' }, el('span', { className: 'place-label', textContent: 'Centre' }),
+      el('span', { className: 'dist-graph-root', id: 'dist-graph-root', textContent: nameOf(R) }),
+      ...(up ? [Object.assign(el('button', { type: 'button', className: 'lcars-button lcars-button--pill tr-tap', id: 'dist-graph-parent', textContent: `Part of ${nameOf(up)}` }), { onclick: () => distCentre(up) })] : []),
+      back, el('span', { className: 'place-cap place-cap--r' })),
+    el('div', { className: 'dist-wrap' }, svg),
+    el('p', { className: 'ops-hint', textContent: `What feeds ${nameOf(R)} is on the left, what it feeds (and its parts) on the right, a hop further out in each next column. Tap one next to it to tie or untie it; ◎ centres on it; shift-click, or hold 3 s, for the Power grid.` }));
+  window.__distGraph = { root: R, cols: cols.map((c) => c.map((n) => n.id || `+${n.more}`)) };
 }
 // A bus opened (Distribution shown, or another bus picked): its pill scrolled to the middle of
 // the view, once; live updates leave the scroll where it is.
@@ -1130,7 +1276,7 @@ function renderLifeSupport() {
 let ejectArmedAt = 0;
 const ejectArmed = () => Date.now() - ejectArmedAt < 5000;
 // Engineering's grid table order, remembered per console (this browser).
-const GRID_ORDERS = [['startup', 'Startup'], ['operations', 'Operations'], ['shutdown', 'Shutdown']];
+const GRID_ORDERS = [['startup', 'Startup'], ['operations', 'Operations'], ['systems', 'Systems'], ['shutdown', 'Shutdown']];
 let gridOrder = 'operations';
 try { const o = localStorage.getItem('stchat-grid-order'); if (GRID_ORDERS.some(([v]) => v === o)) gridOrder = o; } catch {}
 function setGridOrder(v) { gridOrder = v; try { localStorage.setItem('stchat-grid-order', v); } catch {} }
@@ -1922,7 +2068,39 @@ function renderCombat() {
         return row;
       };
       const rows = [];
-      if (gridOrder === 'operations') {
+      if (gridOrder === 'systems' && shipGraph) {
+        // Systems: the ship's graph, as a tree (docs/ship-graph.md): its sources, its buses and stores,
+        // its fuel, then each place's consoles and systems, each system's parts under it. Each row is
+        // the system's own; what no system in the graph has goes last.
+        const pool = new Map();
+        for (const r of [...sourceRows(), ...connectionRows(), xl(), ...storageRows(), ...consoles.flatMap((st) => consoleRows(st))]) if (r?.id && !pool.has(r.id)) pool.set(r.id, r);
+        const used = new Set();
+        const rowsOf = (id, s) => {
+          const k = s.key || '', ids = k ? [`ties-${k.replace(':', '-')}`, `ties-${k.split(':').pop()}-parent`, `ties-${k}`] : [];
+          if (/^emerg[ABC]$/.test(k)) ids.push('grid-emerg');
+          if (/^battery[ABC]$|^pressure$/.test(k)) ids.push('grid-stores');
+          if (/^tank-(deu|am)-/.test(id)) ids.push(`tank-${id.split('-')[1]}-${id.split('-').slice(2).join('-')}`);
+          if (id === 'eps') ids.push('eps-taps');
+          const out = [];
+          for (const x of ids) if (pool.has(x) && !used.has(x)) { used.add(x); out.push(pool.get(x)); }
+          return out;
+        };
+        const walk = (sys) => Object.entries(sys || {}).flatMap(([id, s]) => [...rowsOf(id, s), ...walk(s.systems)]);
+        const top = Object.entries(shipGraph.g.systems), roleOf = (s) => shipGraph.types?.[s.type]?.role;
+        const group = (title, pick) => { const r = walk(Object.fromEntries(top.filter(([, s]) => pick(s)))); if (r.length) rows.push(header(title), ...r); };
+        group('Sources', (s) => roleOf(s) === 'source');
+        group('Buses, crosslink and stores', (s) => ['bus', 'store'].includes(roleOf(s)) && !/^(tank|fuel-bus|coolant-loop|heat-sink)$/.test(s.type));
+        group('Fuel', (s) => /^(tank|fuel-bus)$/.test(s.type));
+        if (!used.has('ties-crosslink') && pool.has('ties-crosslink')) { used.add('ties-crosslink'); rows.splice(rows.findIndex((r) => r.textContent === 'Buses, crosslink and stores') + 1, 0, pool.get('ties-crosslink')); }
+        const placeOf = (s) => s.place;
+        for (const p of shipGraph.g.places || []) {
+          const r = walk(Object.fromEntries(top.filter(([, s]) => ['load', 'conduit', 'group'].includes(roleOf(s)) && placeOf(s) === p.id)));
+          rows.push(placeRow(`Deck ${p.deck} · ${p.name}`, p.name), ...r); // (every place: its conduit's ties)
+        }
+        const rest = walk(Object.fromEntries(top));
+        const leftover = [...pool.keys()].filter((x) => !used.has(x)).map((x) => pool.get(x));
+        if (rest.length || leftover.length) rows.push(header('Elsewhere'), ...rest, ...leftover);
+      } else if (gridOrder === 'operations' || gridOrder === 'systems') {
         // Management layout: power sources, the crosslink, batteries, then the consoles.
         rows.push(header('External sources'), ...divide([...sourceRows(), ...connectionRows()]), header('Bus crosslink'), ...divide([xl()]));
         // Then everything else by where it is aboard (the design's places, in deck order): a heading
@@ -2595,7 +2773,8 @@ function renderSignIn() {
   const mine = (id) => filled[id] && $('name').value.trim().toLowerCase() === filled[id].toLowerCase();
   if (signinPosition && !org.some((d) => d.positions.some((p) => p.id === signinPosition && (!filled[p.id] || mine(p.id))))) signinPosition = null;
   const choose = (station, position) => { signinPosition = position; stSel.value = station; updateSignInMode(); renderSignIn(); };
-  const stationTaps = [...stSel.querySelectorAll('option')].filter((o) => o.value && !o.disabled).map((o) => tap([o.value], !signinPosition && stSel.value === o.value, () => choose(o.value, null), { station: o.value }));
+  const standby = ships.find((x) => x.name === shipSel.value)?.standby || [];
+  const stationTaps = [...stSel.querySelectorAll('option')].filter((o) => o.value && !o.disabled).map((o) => tap([o.value, ...(standby.includes(o.value) ? [small('standby')] : [])], !signinPosition && stSel.value === o.value, () => choose(o.value, null), { station: o.value }));
   const unassigned = pick ? pillBar(org.length ? 'Unassigned' : 'Station', stationTaps) : null;
   unassigned?.setAttribute('id', 'signin-unassigned');
   $('signin-org').replaceChildren(...(pick ? [
