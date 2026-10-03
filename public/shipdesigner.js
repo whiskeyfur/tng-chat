@@ -1,9 +1,11 @@
 // The ship designer (admin): a vessel's graph of systems (docs/ship-graph.md) as litegraph nodes.
-//   A system is a node: one output per resource it gives, one input per link it draws on, and a
-//   spare "+ resource" input to draw a new one. A wire is a link, from the upstream system to the
-//   one that draws on it; its settings (pull, push, connect, rate, pri, min...) are in the panel.
-//   A system's parts (child systems) sit in a box with it; the panel's Parent moves one.
-//   The node menu (right-click, or double-click for search) is the type library.
+//   A system is a node with one input and one output; the input takes any number of wires. A wire
+//   is a bundle: everything a system draws from another (upstream[id]), a resource each with its
+//   settings (pull, push, connect, rate, pri, min...) in the wire's panel. The node's panel has
+//   the rest of the system (its type, place, draws, effects...). A system's parts (child systems)
+//   sit in a box with it; the panel's Parent moves one.
+//   The node menu (right-click, or double-click for search): a node per feature (effect), and one
+//   with none; litegraph's own nodes are taken out.
 // Saving checks it first (tools/ship-graph.js check, as the relay loads it) and keeps the old
 // file; positions are kept apart, in config/layouts/ships/<id>.json.
 (function () {
@@ -17,7 +19,8 @@
   const STATE_COLOUR = { auto: '#3fb950', true: '#58a6ff', warn: '#d29922', false: '#6e7681' };
   const ROLE_COLOUR = { bus: '#3a3f1c', source: '#1c3a2a', store: '#1c2f3a', conduit: '#2f2f2f', load: '#3a2a1c', group: '#2a1c3a', sink: '#3a1c1c' };
   const HANDLED = ['type', 'name', 'key', 'place', 'via', 'parentName', 'count', 'consumes', 'produces', 'capacity', 'creative', 'effects', 'upstream', 'systems'];
-  const EFFECTS = ['ftl', 'jump', 'impulse', 'maneuver', 'shields', 'phasers', 'torpedoes', 'tractor', 'transport', 'sensors', 'comms', 'life-support', 'gravity', 'dampers', 'sif', 'deflector', 'holo', 'force-fields', 'brig', 'shuttle-bay', 'docking', 'computing', 'replication', 'seat', 'cloak'];
+  // The features: these (docs/ship-graph.md), and any other effect a design file uses.
+  let EFFECTS = ['ftl', 'jump', 'impulse', 'maneuver', 'shields', 'phasers', 'torpedoes', 'tractor', 'transport', 'sensors', 'comms', 'life-support', 'gravity', 'dampers', 'sif', 'deflector', 'holo', 'force-fields', 'brig', 'shuttle-bay', 'docking', 'computing', 'replication', 'seat', 'cloak'];
 
   const st = {
     lib: null, types: {}, resources: [], designs: [],
@@ -41,7 +44,7 @@
 
   // Heat wires hidden: not drawn at all.
   const renderLink = canvas.renderLink.bind(canvas);
-  canvas.renderLink = (ctx, a, b, link, ...rest) => (st.hideHeat && link?.type === 'heat' ? undefined : renderLink(ctx, a, b, link, ...rest));
+  canvas.renderLink = (ctx, a, b, link, ...rest) => (st.hideHeat && link && heatOnly(link) ? undefined : renderLink(ctx, a, b, link, ...rest));
   // A click on a wire's centre selects it (instead of litegraph's menu).
   canvas.showLinkMenu = (segment) => {
     const link = graph.links.get ? graph.links.get(segment.id) : graph.links[segment.id];
@@ -55,78 +58,87 @@
     else if (!nodes.length && st.sel?.kind === 'node') select(null);
   };
 
-  // --- the type library as node kinds ----------------------------------------------------------
-  const nodeType = (t) => `${st.types[t]?.role || 'other'}/${t}`;
+  // --- node kinds: one per feature (effect), and one with none ----------------------------------
+  // Every node has one input and one output. The input takes any number of wires: litegraph gives
+  // an input one link, so each wire has its own input slot, all drawn at the same spot, with a
+  // free one on top to drop the next wire on. A wire is a bundle: everything one system draws from
+  // another (upstream[id] in the file: a resource each, with its own settings, in its panel).
+  const PLAIN = 'system/no feature';
+  const featureOf = (sys) => Object.keys(sys.effects || {}).find((k) => EFFECTS.includes(k)) || null;
+  const nodeType = (feature) => (feature ? `feature/${feature}` : PLAIN);
   function registerTypes() {
-    const names = Object.keys(st.types).concat(['unknown']);
-    for (const t of names) {
-      const def = st.types[t] || { role: 'other', resources: [] };
+    // (litegraph's own nodes gone: only these are in the menu.)
+    for (const k of Object.keys(LiteGraph.registered_node_types)) LiteGraph.unregisterNodeType(k);
+    for (const f of [...EFFECTS, null]) {
       class SystemNode extends LGraphNode {
-        constructor(title) { super(title || t); this.sysType = t; this.serialize_widgets = false; }
-        onConnectInput(slot, type, output, origin) { return canDraw(this, origin, type, slot); }
+        constructor(title) { super(title || f || 'system'); this.feature = f; this.serialize_widgets = false; }
+        onConnectInput(slot, type, output, origin, originSlot) { return canDraw(this, origin, slot, originSlot); }
         onConnectionsChange(io, index, connected, link) { connectionChanged(this, io, index, connected, link); }
         onRemoved() { nodeRemoved(this); }
       }
-      SystemNode.title = t;
-      SystemNode.desc = def.about || '';
-      LiteGraph.registerNodeType(nodeType(t), SystemNode);
+      SystemNode.title = f || 'no feature';
+      SystemNode.desc = f ? `A system with the ${f} effect` : 'A system with no effect';
+      LiteGraph.registerNodeType(nodeType(f), SystemNode);
     }
   }
 
   // --- systems as nodes --------------------------------------------------------------------------
   // node.sys: the system's fields (without upstream and systems); node.sysId, node.parentId;
-  // node.keyOrder / node.upOrder: the file's key order, kept on saving.
+  // node.keyOrder / node.upOrder: the file's key order, kept on saving. A wire's bundle: link.bundle,
+  // { resource: { pull, push, connect, rate, pushRate, pri, min, why } }.
   const nodeById = (id) => graph._nodes.find((n) => n.sysId === id);
   const linkOf = (id) => (graph.links.get ? graph.links.get(id) : graph.links[id]);
   const allLinks = () => (graph.links.values ? [...graph.links.values()] : Object.values(graph.links)).filter(Boolean);
   const label = (n) => `${n.sys.name || n.sysId}`;
+  const linksIn = (n) => (n.inputs || []).filter((i) => i.link != null).map((i) => linkOf(i.link)).filter(Boolean);
+  const linksOut = (n) => allLinks().filter((l) => l.origin_id === n.id);
+  const SLOT = 'system';
+  const IN_POS = [10, 14];
 
   function styleNode(n) {
     const role = st.types[n.sys.type]?.role;
     n.title = label(n);
     n.bgcolor = ROLE_COLOUR[role] || '#333';
     n.color = '#222';
+    const fx = Object.keys(n.sys.effects || {});
     n.badges = [new LGraphBadge({ text: n.sysId, fgColor: '#ccc', bgColor: '#0006' })];
+    if (fx.length) n.badges.push(new LGraphBadge({ text: fx.join(' · '), fgColor: '#fff', bgColor: '#1f6feb99' }));
     if (!st.types[n.sys.type]) n.badges.push(new LGraphBadge({ text: `no type ${n.sys.type}`, fgColor: '#fff', bgColor: '#a33' }));
   }
-  function slotColours(slot, r) { slot.color_on = RES_COLOUR[r] || '#ccc'; slot.color_off = RES_COLOUR[r] || '#888'; }
-  function addOutputFor(n, r) {
-    if (n.outputs?.some((o) => o.type === r)) return;
-    slotColours(n.addOutput(r, r), r);
+  function addSlots(n) {
+    if (!n.outputs?.length) n.addOutput('out', SLOT);
+    addSpare(n);
   }
-  function addSpare(n, r) {
-    if (n.inputs?.some((i) => i.spare && i.type === r)) return;
-    const s = n.addInput(`+ ${r}`, r); s.spare = true; slotColours(s, r);
+  // The free input, on top: dropping a wire on the input lands there.
+  function addSpare(n) {
+    if (n.inputs?.some((i) => i.spare)) return;
+    const s = n.addInput('in', SLOT, { pos: [...IN_POS] }); s.spare = true;
   }
-  // An input's label: the resource and where it's drawn from.
   function labelInputs(n) {
-    for (const inp of n.inputs || []) {
-      if (inp.spare) { inp.label = `+ ${inp.type}`; continue; }
-      const l = inp.link != null && linkOf(inp.link), o = l && graph.getNodeById(l.origin_id);
-      inp.label = o ? `${inp.type} ← ${label(o)}` : inp.type;
-    }
+    const count = linksIn(n).length;
+    for (const inp of n.inputs || []) { inp.pos = [...IN_POS]; inp.label = inp.spare ? (count ? `in (${count})` : 'in') : ' '; }
+    if (n.outputs?.[0]) n.outputs[0].label = `out${linksOut(n).length ? ` (${linksOut(n).length})` : ''}`;
   }
   const labelAll = () => { for (const n of graph._nodes) if (n.sys) labelInputs(n); };
-  function resourcesOf(n) { return [...new Set((n.outputs || []).map((o) => o.type).concat((n.inputs || []).map((i) => i.type)))]; }
-  function addResource(n, r) { addOutputFor(n, r); addSpare(n, r); fitNode(n); canvas.setDirty(true, true); }
-  function fitNode(n) { const s = n.computeSize(); n.setSize([Math.max(s[0], 180), s[1]]); }
+  function fitNode(n) { n.setSize([200, LiteGraph.NODE_SLOT_HEIGHT * 1.4]); }
 
   function makeNode(id, sys, parentId) {
-    const n = LiteGraph.createNode(nodeType(st.types[sys.type] ? sys.type : 'unknown'));
+    const n = LiteGraph.createNode(nodeType(featureOf(sys)));
     n.sysId = id; n.parentId = parentId || null;
     n.keyOrder = Object.keys(sys); n.upOrder = Object.keys(sys.upstream || {});
     n.sys = clone(sys); delete n.sys.upstream; delete n.sys.systems;
     styleNode(n);
     return n;
   }
-  // A resource's slots: what the type says, what it consumes, produces, holds, and what its links carry.
-  function initialResources(sys, outgoing) {
-    const r = new Set(st.types[sys.type]?.resources || []);
-    for (const f of ['consumes', 'produces', 'capacity', 'creative']) for (const k of Object.keys(sys[f] || {})) r.add(k);
-    for (const res of Object.values(sys.upstream || {})) for (const k of Object.keys(res)) r.add(k);
-    for (const k of outgoing || []) r.add(k);
-    return [...r];
+  // What a system gives and takes: its type's resources and what it produces, holds or consumes.
+  const gives = (n) => new Set([...(st.types[n.sys.type]?.resources || []), ...Object.keys(n.sys.produces || {}), ...Object.keys(n.sys.capacity || {}), ...Object.keys(n.sys.creative || {})]);
+  const takes = (n) => new Set([...(st.types[n.sys.type]?.resources || []), ...Object.keys(n.sys.consumes || {})]);
+  // A new wire's bundle: what the two have in common (power, if nothing).
+  function newBundle(origin, node) {
+    const g = gives(origin), t = takes(node), common = [...g].filter((r) => t.has(r) && r !== 'heat');
+    return Object.fromEntries((common.length ? common.slice(0, 1) : [[...g][0] || 'power']).map((r) => [r, { pull: 'auto', push: false }]));
   }
+  const resOf = (l) => Object.keys(l.bundle || {});
 
   // --- loading a design ---------------------------------------------------------------------------
   function walk(systems, parent, out) {
@@ -140,29 +152,24 @@
     st.root = clone(file); delete st.root.systems;
     const list = walk(file.systems, null, []);
     st.order = list.map((x) => x.id);
-    const outgoing = {};
-    for (const { s } of list) for (const [u, res] of Object.entries(s.upstream || {})) for (const r of Object.keys(res)) (outgoing[u] ||= new Set()).add(r);
     const pending = [];
     for (const { id: sid, s, parent } of list) {
       const n = makeNode(sid, s, parent);
-      const res = initialResources(s, outgoing[sid]);
-      for (const r of res) addOutputFor(n, r);
-      // (Inputs by resource: a slot per link, then the spare.)
-      for (const r of res) {
-        for (const [u, rs] of Object.entries(s.upstream || {})) if (rs[r]) { const slot = n.addInput(r, r); slotColours(slot, r); pending.push({ n, slot: n.inputs.length - 1, u, r, perm: rs[r] }); }
-        addSpare(n, r);
-      }
+      n.addOutput('out', SLOT);
+      // (An input per wire, in the file's order, then the free one.)
+      for (const [u, rs] of Object.entries(s.upstream || {})) { n.addInput('in', SLOT, { pos: [...IN_POS] }); pending.push({ n, slot: n.inputs.length - 1, u, bundle: rs }); }
+      addSpare(n);
       fitNode(n);
       graph.add(n);
     }
     for (const p of pending) {
       const up = nodeById(p.u);
       if (!up) continue; // (an upstream that isn't there: the checker names it; dropped here)
-      const link = up.connect(up.findOutputSlot(p.r), p.n, p.slot);
-      if (link) { link.perm = clone(p.perm); colourLink(link); }
+      const link = up.connect(0, p.n, p.slot);
+      if (link) { link.bundle = clone(p.bundle); colourLink(link); }
     }
+    // (The free input last means it's drawn last: on top, where a wire is dropped.)
     labelAll();
-    for (const n of graph._nodes) fitNode(n);
     if (layout?.nodes && list.every(({ id: sid }) => layout.nodes[sid])) {
       for (const n of graph._nodes) n.pos = [...layout.nodes[n.sysId]];
       regroup(layout.groups);
@@ -182,37 +189,50 @@
     if (!vals.length) return 'false';
     return String(vals.sort((a, b) => PERM_RANK[b] - PERM_RANK[a])[0]);
   }
+  // A bundle's state: its strongest resource's. Its colour by resource: the one it carries, or white for several.
   function colourLink(link) {
-    link.color = st.wireMode === 'resource' ? RES_COLOUR[link.type] || '#999' : STATE_COLOUR[stateOf(link.perm)];
+    const rs = resOf(link), states = Object.values(link.bundle || {}).map(stateOf);
+    link.color = st.wireMode === 'resource' ? (rs.length === 1 ? RES_COLOUR[rs[0]] || '#999' : '#e6e6e6') : STATE_COLOUR[states.sort((a, b) => PERM_RANK[b] - PERM_RANK[a])[0] || 'false'];
   }
+  const heatOnly = (l) => { const rs = resOf(l); return rs.length > 0 && rs.every((r) => r === 'heat'); };
   const recolour = () => { for (const l of allLinks()) colourLink(l); canvas.setDirty(true, true); legend(); };
   function legend() {
-    const items = st.wireMode === 'resource' ? Object.entries(RES_COLOUR) : Object.entries(STATE_COLOUR).reverse().map(([k, c]) => [k === 'true' ? 'true (crew turns on)' : k === 'auto' ? 'auto (on at load)' : k === 'warn' ? 'warn' : 'false', c]);
+    const items = st.wireMode === 'resource' ? [...Object.entries(RES_COLOUR), ['several', '#e6e6e6']] : Object.entries(STATE_COLOUR).reverse().map(([k, c]) => [k === 'true' ? 'true (crew turns on)' : k === 'auto' ? 'auto (on at load)' : k === 'warn' ? 'warn' : 'false', c]);
     $('legend').innerHTML = items.map(([k, c]) => `<span><i style="background:${c}"></i>${esc(k)}</span>`).join('');
   }
 
-  // May `node` draw `type` from `origin`? Not from itself, and once per resource per upstream system.
-  function canDraw(node, origin, type, slot) {
-    if (!origin || origin === node) return false;
-    return !(node.inputs || []).some((inp, i) => i !== slot && inp.link != null && linkOf(inp.link)?.origin_id === origin.id && inp.type === type);
+  // May `node` take a wire from `origin`? Not from itself, and one wire (one bundle) per pair.
+  // A wire dropped on a taken slot (they share a spot) goes to the free one instead.
+  function canDraw(node, origin, slot, originSlot) {
+    if (st.loading) return true;
+    if (!origin || origin === node || linksIn(node).some((l) => l.origin_id === origin.id && l.target_slot !== slot)) return false;
+    const inp = node.inputs[slot];
+    if (inp && !inp.spare) {
+      setTimeout(() => { const free = node.inputs.findIndex((i) => i.spare); if (free >= 0) origin.connect(originSlot ?? 0, node, free); });
+      return false;
+    }
+    return true;
   }
   function connectionChanged(node, io, index, connected, link) {
-    if (st.loading || io !== LiteGraph.INPUT) return;
-    const slot = node.inputs[index];
-    if (!slot) return;
-    if (connected) {
-      if (link && !link.perm) link.perm = { pull: 'auto', push: false };
-      if (link) colourLink(link);
-      if (slot.spare) { slot.spare = false; slot.name = slot.type; setTimeout(() => { addSpare(node, slot.type); labelInputs(node); fitNode(node); canvas.setDirty(true, true); }); }
-      labelInputs(node);
-    } else if (!slot.spare) {
-      // (A link gone: its slot goes too, unless it's being replaced right now.)
-      setTimeout(() => {
-        const i = node.inputs.indexOf(slot);
-        if (i >= 0 && slot.link == null) { node.removeInput(i); addSpare(node, slot.type); fitNode(node); canvas.setDirty(true, true); }
-      });
+    if (st.loading) return;
+    if (io === LiteGraph.INPUT) {
+      const slot = node.inputs[index];
+      if (!slot) return;
+      if (connected) {
+        if (link && !link.bundle) { const o = graph.getNodeById(link.origin_id); link.bundle = newBundle(o, node); }
+        if (link) colourLink(link);
+        if (slot.spare) { slot.spare = false; addSpare(node); }
+      } else if (!slot.spare) {
+        // (A wire gone: its slot goes too, unless it's being replaced right now.)
+        setTimeout(() => {
+          const i = node.inputs.indexOf(slot);
+          if (i >= 0 && slot.link == null) { node.removeInput(i); addSpare(node); labelInputs(node); canvas.setDirty(true, true); }
+        });
+      }
     }
+    setTimeout(() => { labelAll(); canvas.setDirty(true, true); });
     if (st.sel?.kind === 'link' && !linkOf(st.sel.link.id)) select(null);
+    else if (st.sel?.kind === 'node') select(st.sel);
     setDirty(true);
   }
   function nodeRemoved(node) {
@@ -223,15 +243,14 @@
     setTimeout(() => regroup());
   }
 
-  // A node added from the menu: a new system of that type.
+  // A node added from the menu: a new system, with that feature.
   graph.onNodeAdded = (n) => {
     if (st.loading || n.sys) return;
-    const t = n.sysType;
-    let i = 1; while (nodeById(`${t}-${i}`)) i++;
-    n.sysId = `${t}-${i}`; n.parentId = null; n.keyOrder = []; n.upOrder = [];
-    n.sys = { type: t, name: `New ${t.replace(/-/g, ' ')}` };
-    for (const r of st.types[t]?.resources || []) { addOutputFor(n, r); addSpare(n, r); }
-    styleNode(n); fitNode(n);
+    const f = n.feature, base = f || 'system';
+    let i = 1; while (nodeById(`${base}-${i}`)) i++;
+    n.sysId = `${base}-${i}`; n.parentId = null; n.keyOrder = []; n.upOrder = [];
+    n.sys = { type: f === 'seat' ? 'console' : 'system', name: `New ${(f || 'system').replace(/-/g, ' ')}`, ...(f ? { effects: { [f]: {} } } : {}) };
+    addSlots(n); styleNode(n); fitNode(n); labelInputs(n);
     setDirty(true);
     setTimeout(() => select({ kind: 'node', node: n }));
   };
@@ -248,7 +267,7 @@
       if (inp.link == null) continue;
       const l = linkOf(inp.link), o = l && graph.getNodeById(l.origin_id);
       if (!o) continue;
-      (up[o.sysId] ||= {})[l.type] = clone(l.perm || { pull: 'auto', push: false });
+      up[o.sysId] = clone(l.bundle || {});
     }
     // (In the file's order: its upstream systems, and each one's resources.)
     const upOrdered = ordered(up, n.upOrder);
@@ -289,12 +308,12 @@
     const top = nodes.filter((n) => !n.parentId || !nodeById(n.parentId));
     const topOf = (n) => { let x = n, guard = 0; while (x.parentId && nodeById(x.parentId) && guard++ < 20) x = nodeById(x.parentId); return x; };
     const edges = new Map(top.map((n) => [n, new Set()]));
-    const heatOnly = new Set(top);
+    const noFlow = new Set(top);
     for (const l of allLinks()) {
       const a = topOf(graph.getNodeById(l.origin_id)), b = topOf(graph.getNodeById(l.target_id));
       if (!a || !b || a === b) continue;
-      if (l.type === 'heat') continue;
-      heatOnly.delete(a); heatOnly.delete(b);
+      if (heatOnly(l)) continue;
+      noFlow.delete(a); noFlow.delete(b);
       edges.get(a).add(b);
     }
     // (Drop the edges that close loops: depth-first, an edge to a node still open.)
@@ -314,8 +333,8 @@
     const topo = (n) => { if (seen.has(n)) return; seen.add(n); for (const m of dag.get(n)) topo(m); order.unshift(n); };
     for (const n of top) topo(n);
     for (const n of order) for (const m of dag.get(n)) depth.set(m, Math.max(depth.get(m), depth.get(n) + 1));
-    const maxD = Math.max(0, ...[...depth.entries()].filter(([n]) => !heatOnly.has(n)).map(([, d]) => d));
-    for (const n of heatOnly) if (n.inputs?.some((i) => i.type === 'heat' && i.link != null)) depth.set(n, maxD + 1);
+    const maxD = Math.max(0, ...[...depth.entries()].filter(([n]) => !noFlow.has(n)).map(([, d]) => d));
+    for (const n of noFlow) if (linksIn(n).some(heatOnly)) depth.set(n, maxD + 1);
     const cols = new Map();
     for (const n of top) { const d = depth.get(n); if (!cols.has(d)) cols.set(d, []); cols.get(d).push(n); }
     const TH = LiteGraph.NODE_TITLE_HEIGHT, GAP = 30, COLW = 280, GROUP_PAD = 12;
@@ -404,7 +423,8 @@
     const s = n.sys, def = st.types[s.type];
     const others = Object.fromEntries(Object.entries(s).filter(([k]) => !HANDLED.includes(k)));
     const nodes = graph._nodes.filter((m) => m.sys && m !== n);
-    const res = resourcesOf(n);
+    const wire = (l, other) => `<li><a href="#" data-goto-link="${l.id}">${esc(other ? label(other) : '?')}</a>: ${esc(resOf(l).join(', ') || '(nothing)')}</li>`;
+    const ins = linksIn(n), outs = linksOut(n);
     return `<h2>${esc(label(n))}</h2>
       <div class="about">${esc(def ? `${s.type} (${def.role}): ${def.about || ''}` : `no system type "${s.type}"`)}</div>
       ${row('Id', `<input data-f="id" value="${esc(n.sysId)}">`, 'Lower-case letters, digits and -; other systems refer to it by this')}
@@ -422,26 +442,33 @@
       <h3>effects</h3>
       <textarea data-json="effects" placeholder='{ "ftl": { "maxWarp": 5 } }'>${esc(s.effects ? JSON.stringify(s.effects, null, 1) : '')}</textarea>
       <p class="hint">Names: ${EFFECTS.join(', ')}. A console's seat: { "seat": { "station": "Helm" } }.</p>
-      <h3>slots</h3>
-      <div class="chips">${res.map((r) => `<span class="chip"><span class="dot" style="background:${RES_COLOUR[r] || '#ccc'}"></span>${r}</span>`).join('')}</div>
-      <p><select id="add-res">${st.resources.filter((r) => !res.includes(r)).map((r) => opt(r, '')).join('')}</select> <button id="add-res-go">+ resource slot</button></p>
+      <h3>draws from (${ins.length})</h3><ul class="wires">${ins.map((l) => wire(l, graph.getNodeById(l.origin_id))).join('')}</ul>
+      <h3>feeds (${outs.length})</h3><ul class="wires">${outs.map((l) => wire(l, graph.getNodeById(l.target_id))).join('')}</ul>
       ${Object.keys(others).length ? `<h3>other fields</h3><textarea data-json="others">${esc(JSON.stringify(others, null, 1))}</textarea>` : ''}
       <div class="actions"><button id="centre">Centre</button><button id="del-node" class="danger">Delete system</button></div>`;
   }
+  // A wire: its bundle, a block of settings per resource.
   function linkPanel(l) {
-    const a = graph.getNodeById(l.origin_id), b = graph.getNodeById(l.target_id), p = l.perm || {};
-    const permSel = (k) => `<select data-p="${k}"><option value="">(not set)</option>${['false', 'warn', 'true', 'auto'].map((v) => opt(v, p[k] === undefined ? '' : String(p[k]))).join('')}</select>`;
-    const num = (k, t) => row(k, `<input type="number" step="any" data-pn="${k}" value="${esc(p[k] ?? '')}">`, t);
-    return `<h2>${esc(l.type)} link</h2>
-      <div class="about"><b>${esc(b ? label(b) : '?')}</b> draws ${esc(l.type)} from <b>${esc(a ? label(a) : '?')}</b>. Stored on ${esc(b?.sysId)}, under upstream.${esc(a?.sysId)}.${esc(l.type)}.</div>
-      ${row('pull', permSel('pull'), 'May the downstream system draw from the upstream one?')}
-      ${row('push', permSel('push'), 'May it send back the other way?')}
-      ${row('connect', permSel('connect'), 'For a resource connected rather than moved')}
+    const a = graph.getNodeById(l.origin_id), b = graph.getNodeById(l.target_id), bundle = l.bundle || {};
+    const block = (r, p) => {
+      const permSel = (k) => `<select data-bp="${k}" data-r="${esc(r)}"><option value="">(not set)</option>${['false', 'warn', 'true', 'auto'].map((v) => opt(v, p[k] === undefined ? '' : String(p[k]))).join('')}</select>`;
+      const num = (k, t) => row(k, `<input type="number" step="any" data-bn="${k}" data-r="${esc(r)}" value="${esc(p[k] ?? '')}">`, t);
+      return `<fieldset class="res-block" style="border-color:${RES_COLOUR[r] || '#555'}"><legend><select data-bres data-r="${esc(r)}">${st.resources.map((x) => opt(x, r)).join('')}</select> <button data-bdel="${esc(r)}" title="Take it out of the bundle">×</button></legend>
+        ${row('pull', permSel('pull'), 'May the downstream system draw from the upstream one?')}
+        ${row('push', permSel('push'), 'May it send back the other way?')}
+        ${row('connect', permSel('connect'), 'For a resource connected rather than moved')}
+        ${num('rate', 'Its limit on a pull')}${num('pushRate', 'Its limit the other way')}${num('pri', 'Who is served first when short (lower first)')}
+        ${row('min', `<input data-bf="min" data-r="${esc(r)}" value="${esc(p.min ?? '')}" placeholder='a number, or "all"'>`, 'The least it must get to work at all')}
+        ${row('why', `<input data-bf="why" data-r="${esc(r)}" value="${esc(p.why ?? '')}">`, "Why it's false or warn, shown to the crew")}
+      </fieldset>`;
+    };
+    const left = st.resources.filter((r) => !(r in bundle));
+    return `<h2>${esc(a ? label(a) : '?')} → ${esc(b ? label(b) : '?')}</h2>
+      <div class="about">A bundle: what <b>${esc(b ? label(b) : '?')}</b> draws from <b>${esc(a ? label(a) : '?')}</b>, a resource each. Stored on ${esc(b?.sysId)}, under upstream.${esc(a?.sysId)}.</div>
       <p class="hint">false: never. warn: allowed, not advised (a confirming tap). true: allowed, off at load. auto: allowed and on at load.</p>
-      ${num('rate', 'Its limit on a pull')}${num('pushRate', 'Its limit the other way')}${num('pri', 'Who is served first when short (lower first)')}
-      ${row('min', `<input data-f="min" value="${esc(p.min ?? '')}" placeholder='a number, or "all"'>`, 'The least it must get to work at all')}
-      ${row('why', `<input data-f="why" value="${esc(p.why ?? '')}">`, "Why it's false or warn, shown to the crew")}
-      <div class="actions"><button id="del-link" class="danger">Delete link</button></div>`;
+      ${Object.entries(bundle).map(([r, p]) => block(r, p)).join('') || '<p class="hint">It carries nothing yet.</p>'}
+      ${left.length ? `<p><select id="bundle-add">${left.map((r) => opt(r, '')).join('')}</select> <button id="bundle-add-go">+ resource</button></p>` : ''}
+      <div class="actions"><button id="del-link" class="danger">Delete wire</button></div>`;
   }
   function vesselPanel() {
     if (!st.root) return '<p class="hint">Pick a design.</p>';
@@ -449,7 +476,7 @@
     const meta = Object.fromEntries(Object.entries(r).filter(([k]) => !['schema', 'type', 'class', 'name', 'places'].includes(k)));
     const nodes = graph._nodes.filter((n) => n.sys);
     return `<h2>${esc(r.name || st.id)}</h2>
-      <div class="about">${nodes.length} systems, ${allLinks().length} links. Select a node or click a wire's centre to edit it. Right-click the canvas (or double-click) to add a system; drag from an output to a "+" input to link.</div>
+      <div class="about">${nodes.length} systems, ${allLinks().length} links. Select a node or click a wire's centre to edit it. Right-click the canvas (or double-click) to add a system; drag from a node's out to another's in to wire them (one wire per pair, a bundle of resources).</div>
       ${row('Design id', `<input value="${esc(st.id)}" disabled>`, 'config/ships/<id>.json')}
       ${row('Name', `<input data-v="name" value="${esc(r.name ?? '')}">`)}
       ${row('Kind', `<select data-v="type">${['ship', 'starbase', 'relay'].map((t) => opt(t, r.type)).join('')}</select>`)}
@@ -475,7 +502,7 @@
           n.parentId = v || null; regroup();
         } else if (f === 'count') {
           if (v === '') delete s.count; else if (v === 'null') s.count = null; else if (Number.isFinite(Number(v))) s.count = Number(v); else { el.classList.add('bad'); return; }
-        } else if (f === 'type') { s.type = v; for (const r of st.types[v]?.resources || []) addResource(n, r); }
+        } else if (f === 'type') s.type = v;
         else if (f === 'name') s.name = v;
         else if (v === '') delete s[f]; else s[f] = v;
         changed(n);
@@ -486,7 +513,6 @@
         if (el.dataset.part === 'res') {
           if (el.value in obj) { el.value = k; return; }
           s[f] = Object.fromEntries(Object.entries(obj).map(([r, x]) => [r === k ? el.value : r, x]));
-          addResource(n, el.value);
         } else obj[k] = Number(el.value) || 0;
         changed(n); select(sel);
       }));
@@ -495,11 +521,11 @@
       }));
       p.querySelectorAll('[data-rt-add]').forEach((el) => el.addEventListener('click', () => {
         const f = el.dataset.rtAdd, obj = (s[f] ||= {}); const r = st.resources.find((x) => !(x in obj)); if (!r) return;
-        obj[r] = 0; addResource(n, r); changed(n); select(sel);
+        obj[r] = 0; changed(n); select(sel);
       }));
       p.querySelectorAll('[data-creative]').forEach((el) => el.addEventListener('change', () => {
         const r = el.dataset.creative; s.creative ||= {};
-        if (el.checked) { s.creative[r] = true; addResource(n, r); } else delete s.creative[r];
+        if (el.checked) s.creative[r] = true; else delete s.creative[r];
         if (!Object.keys(s.creative).length) delete s.creative;
         changed(n);
       }));
@@ -511,24 +537,32 @@
         else { for (const k of Object.keys(s)) if (!HANDLED.includes(k)) delete s[k]; Object.assign(s, v || {}); }
         changed(n);
       }));
-      $('add-res-go')?.addEventListener('click', () => { const r = $('add-res').value; if (r) { addResource(n, r); changed(n); select(sel); } });
+      p.querySelectorAll('[data-goto-link]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); const l = linkOf(Number(el.dataset.gotoLink)); if (l) select({ kind: 'link', link: l }); }));
       $('centre')?.addEventListener('click', () => centreOn(n));
       $('del-node')?.addEventListener('click', () => { graph.remove(n); select(null); });
     } else if (sel?.kind === 'link') {
-      const l = sel.link; l.perm ||= {};
+      const l = sel.link; l.bundle ||= {};
       const parse = (v) => ({ false: false, true: true, warn: 'warn', auto: 'auto' }[v]);
-      p.querySelectorAll('[data-p]').forEach((el) => el.addEventListener('change', () => {
-        if (el.value === '') delete l.perm[el.dataset.p]; else l.perm[el.dataset.p] = parse(el.value);
-        colourLink(l); changed();
+      const done = () => { colourLink(l); changed(); };
+      p.querySelectorAll('[data-bp]').forEach((el) => el.addEventListener('change', () => {
+        const perm = l.bundle[el.dataset.r]; if (el.value === '') delete perm[el.dataset.bp]; else perm[el.dataset.bp] = parse(el.value); done();
       }));
-      p.querySelectorAll('[data-pn]').forEach((el) => el.addEventListener('change', () => {
-        const k = el.dataset.pn; if (el.value === '') delete l.perm[k]; else l.perm[k] = Number(el.value); changed();
+      p.querySelectorAll('[data-bn]').forEach((el) => el.addEventListener('change', () => {
+        const perm = l.bundle[el.dataset.r], k = el.dataset.bn; if (el.value === '') delete perm[k]; else perm[k] = Number(el.value); done();
       }));
-      p.querySelectorAll('[data-f]').forEach((el) => el.addEventListener('change', () => {
-        const k = el.dataset.f, v = el.value.trim();
-        if (v === '') delete l.perm[k]; else if (k === 'min') l.perm.min = v === 'all' ? 'all' : Number.isFinite(Number(v)) ? Number(v) : v; else l.perm[k] = v;
-        changed();
+      p.querySelectorAll('[data-bf]').forEach((el) => el.addEventListener('change', () => {
+        const perm = l.bundle[el.dataset.r], k = el.dataset.bf, v = el.value.trim();
+        if (v === '') delete perm[k]; else if (k === 'min') perm.min = v === 'all' ? 'all' : Number.isFinite(Number(v)) ? Number(v) : v; else perm[k] = v;
+        done();
       }));
+      p.querySelectorAll('[data-bres]').forEach((el) => el.addEventListener('change', () => {
+        const was = el.dataset.r;
+        if (el.value in l.bundle) { el.value = was; return; }
+        l.bundle = Object.fromEntries(Object.entries(l.bundle).map(([r, x]) => [r === was ? el.value : r, x]));
+        done(); select(sel);
+      }));
+      p.querySelectorAll('[data-bdel]').forEach((el) => el.addEventListener('click', () => { delete l.bundle[el.dataset.bdel]; done(); select(sel); }));
+      $('bundle-add-go')?.addEventListener('click', () => { const r = $('bundle-add').value; if (r && !(r in l.bundle)) { l.bundle[r] = { pull: 'auto', push: false }; done(); select(sel); } });
       $('del-link')?.addEventListener('click', () => {
         const t = graph.getNodeById(l.target_id);
         if (t) t.disconnectInput(l.target_slot);
@@ -660,6 +694,7 @@
     try {
       await listDesigns();
       st.types = st.lib.types; st.resources = st.lib.resources;
+      EFFECTS = [...new Set([...EFFECTS, ...(st.lib.effects || [])])];
       registerTypes();
       legend();
       let pick = null; try { pick = localStorage.getItem('shipdesigner.design'); } catch { /* (no storage) */ }

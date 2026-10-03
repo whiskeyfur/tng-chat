@@ -1,7 +1,8 @@
 // The ship designer (/shipdesigner), on a copy of config/: every design file opens and is written
-// back exactly as it was; a radiator added from the type library and wired to Bus B with the
-// mouse, its link set to "warn" with a reason in the panel; Check finds no problems but says it
-// isn't stable (the old design fields have no place for it); Save as a new design writes it
+// back exactly as it was; the node menu is a node per feature and one with none; a shields node
+// added and wired from Bus B and Bus A with the mouse (both into its one input), Bus B's wire set
+// to "warn" with a reason in its panel; Check finds no problems but says it isn't stable (the old
+// design fields have no place for it); Save as a new design writes it
 // (and its positions) and the page opens it again just as it was; a bad graph is refused.
 const fs = require('fs');
 const os = require('os');
@@ -47,49 +48,67 @@ const step = (s) => console.log(`ok - ${s}`);
     }
     step(`all ${ids.length} designs open and are written back unchanged`);
 
-    // A radiator from the type library, near Bus B; Bus B's power dragged to its "+ power".
+    // The node menu: a node per feature (effect), and one with none; nothing of litegraph's own.
+    const kinds = await page.evaluate(() => Object.keys(window.litegraph.js.LiteGraph.registered_node_types).sort());
+    assert.ok(kinds.includes('feature/shields') && kinds.includes('feature/ftl') && kinds.includes('feature/seat') && kinds.includes('system/no feature'), `the node kinds: ${kinds}`);
+    assert.ok(kinds.every((k) => k.startsWith('feature/') || k === 'system/no feature'), `only ours: ${kinds}`);
+    step(`the node menu: ${kinds.length - 1} features (every effect the designs use too) and a node with none`);
+    assert.ok(kinds.includes('feature/antimatter-transfer'), 'an effect a design uses (not in the docs list) is a feature');
+
+    // A shields node, near Bus B; Bus B's out dragged to its in, then Bus A's onto the same in.
     await page.selectOption('#design', 'runabout');
     await page.waitForFunction(() => window.__shipdesigner.id === 'runabout');
     const added = await page.evaluate(() => {
       const st = window.__shipdesigner, L = window.litegraph.js.LiteGraph, bus = st.graph._nodes.find((n) => n.sysId === 'bus-b');
-      st.canvas.ds.scale = 1; st.canvas.ds.offset = [-bus.pos[0] + 100, -bus.pos[1] + 120];
-      const n = L.createNode('sink/radiator'); n.pos = [bus.pos[0] + 400, bus.pos[1]]; st.graph.add(n);
+      // (Out to the left of everything, so the wires' centres are clear of other nodes.)
+      const minX = Math.min(...st.graph._nodes.map((m) => m.pos[0])), x = minX - 600;
+      st.canvas.ds.scale = 0.6; st.canvas.ds.offset = [-x + 40, -bus.pos[1] + 300];
+      const n = L.createNode('feature/shields'); n.pos = [x, bus.pos[1] + 200]; st.graph.add(n);
       st.canvas.setDirty(true, true);
       return { node: n.id, sysId: n.sysId };
     });
-    assert.ok(/^radiator-\d+$/.test(added.sysId), `a new radiator's id: ${added.sysId}`);
+    assert.ok(/^shields-\d+$/.test(added.sysId), `a new shields node's id: ${added.sysId}`);
+    assert.equal(await page.evaluate((id) => { const n = window.__shipdesigner.graph.getNodeById(id); return `${n.inputs.length}/${n.outputs.length}`; }, added.node), '1/1', 'one input, one output');
     await wait(200);
     const box = await page.locator('#graph-canvas').boundingBox();
     const screen = (pt, ds) => [box.x + (pt[0] + ds[0]) * ds[2], box.y + (pt[1] + ds[1]) * ds[2]];
-    const pts = await page.evaluate((id) => {
-      const st = window.__shipdesigner, bus = st.graph._nodes.find((n) => n.sysId === 'bus-b'), r = st.graph.getNodeById(id);
-      return { a: [...bus.getConnectionPos(false, bus.findOutputSlot('power'))], b: [...r.getConnectionPos(true, r.inputs.findIndex((i) => i.spare && i.type === 'power'))], ds: [...st.canvas.ds.offset, st.canvas.ds.scale] };
-    }, added.node);
-    const [A, B] = [screen(pts.a, pts.ds), screen(pts.b, pts.ds)];
-    await page.mouse.move(...A); await page.mouse.down();
-    for (let i = 1; i <= 8; i++) await page.mouse.move(A[0] + ((B[0] - A[0]) * i) / 8, A[1] + ((B[1] - A[1]) * i) / 8);
-    await page.mouse.up();
-    await wait(200);
+    const wireFrom = async (busId) => {
+      const pts = await page.evaluate(([id, busId]) => {
+        const st = window.__shipdesigner, bus = st.graph._nodes.find((n) => n.sysId === busId), r = st.graph.getNodeById(id);
+        return { a: [...bus.getConnectionPos(false, 0)], b: [...r.getConnectionPos(true, 0)], ds: [...st.canvas.ds.offset, st.canvas.ds.scale] };
+      }, [added.node, busId]);
+      const [A, B] = [screen(pts.a, pts.ds), screen(pts.b, pts.ds)];
+      await page.mouse.move(...A); await page.mouse.down();
+      for (let i = 1; i <= 8; i++) await page.mouse.move(A[0] + ((B[0] - A[0]) * i) / 8, A[1] + ((B[1] - A[1]) * i) / 8);
+      await page.mouse.up();
+      await wait(300);
+    };
+    await wireFrom('bus-b');
     const up = () => page.evaluate((id) => window.__shipdesigner.toGraph().systems[id].upstream, added.sysId);
-    assert.deepEqual(await up(), { 'bus-b': { power: { pull: 'auto', push: false } } }, 'the radiator draws power from Bus B');
-    const labels = await page.evaluate((id) => window.__shipdesigner.graph.getNodeById(id).inputs.map((i) => i.label), added.node);
-    assert.ok(labels.includes('power ← Bus B') && labels.includes('+ power'), `its inputs: ${labels}`);
-    step('a radiator added from the type library and wired to Bus B with the mouse');
+    assert.deepEqual(await up(), { 'bus-b': { power: { pull: 'auto', push: false } } }, 'it draws power from Bus B');
+    await wireFrom('bus-a');
+    assert.deepEqual(await up(), { 'bus-b': { power: { pull: 'auto', push: false } }, 'bus-a': { power: { pull: 'auto', push: false } } }, 'and from Bus A, into the same input');
+    const shown = await page.evaluate((id) => { const n = window.__shipdesigner.graph.getNodeById(id); return n.inputs.find((i) => i.spare).label; }, added.node);
+    assert.equal(shown, 'in (2)', 'its input shows two wires');
+    step('a shields node added from the menu; Bus B and Bus A wired into its one input with the mouse');
 
     // The wire's centre clicked: the link in the panel, set to warn with a reason.
     const mid = await page.evaluate((id) => {
-      const st = window.__shipdesigner, r = st.graph.getNodeById(id), l = st.graph.links.get(r.inputs.find((i) => i.link != null).link);
+      const st = window.__shipdesigner, r = st.graph.getNodeById(id), l = st.graph.links.get(r.inputs.find((i) => i.link != null).link); // (Bus B's)
       return { pos: [...l._pos], ds: [...st.canvas.ds.offset, st.canvas.ds.scale] };
     }, added.node);
     await page.mouse.click(...screen(mid.pos, mid.ds));
-    await page.waitForSelector('#panel [data-p="pull"]');
-    await page.selectOption('#panel [data-p="pull"]', 'warn');
-    await page.fill('#panel [data-f="why"]', 'it runs hot');
-    await page.press('#panel [data-f="why"]', 'Tab');
-    assert.deepEqual(await up(), { 'bus-b': { power: { pull: 'warn', push: false, why: 'it runs hot' } } }, 'the link set in the panel');
-    step("the wire's centre clicked opens its link; pull set to warn, with a reason");
+    await page.waitForSelector('#panel [data-bp="pull"][data-r="power"]');
+    await page.selectOption('#panel [data-bp="pull"][data-r="power"]', 'warn');
+    await page.fill('#panel [data-bf="why"][data-r="power"]', 'it runs hot');
+    await page.press('#panel [data-bf="why"][data-r="power"]', 'Tab');
+    await page.selectOption('#bundle-add', 'eps'); await page.click('#bundle-add-go');
+    assert.deepEqual((await up())['bus-b'], { power: { pull: 'warn', push: false, why: 'it runs hot' }, eps: { pull: 'auto', push: false } }, 'the bundle set in the panel');
+    await page.click('#panel [data-bdel="eps"]');
+    assert.deepEqual((await up())['bus-b'], { power: { pull: 'warn', push: false, why: 'it runs hot' } }, 'eps taken out again');
+    step("the wire's centre clicked opens its bundle: power set to warn with a reason, eps added and taken out");
 
-    // Check: no problems, but not stable (the old design fields have no radiator-N).
+    // Check: no problems, but not stable (the old design fields have no shields-N).
     await page.click('#check');
     await page.waitForFunction(() => /problem|No problems/.test(document.getElementById('problems').textContent));
     const checked = await page.textContent('#problems');
@@ -102,7 +121,8 @@ const step = (s) => console.log(`ok - ${s}`);
     await page.waitForFunction(() => /saved/.test(document.getElementById('problems').textContent));
     const file = JSON.parse(fs.readFileSync(path.join(CONFIG, 'ships', 'test-runabout.json'), 'utf8'));
     assert.equal(file.class, 'test-runabout');
-    assert.deepEqual(file.systems[added.sysId].upstream, { 'bus-b': { power: { pull: 'warn', push: false, why: 'it runs hot' } } }, 'the saved file has the radiator and its link');
+    assert.deepEqual(file.systems[added.sysId].upstream, { 'bus-b': { power: { pull: 'warn', push: false, why: 'it runs hot' } }, 'bus-a': { power: { pull: 'auto', push: false } } }, 'the saved file has the shields and its wires');
+    assert.deepEqual(file.systems[added.sysId].effects, { shields: {} }, 'with its feature');
     assert.deepEqual({ ...file, class: 'runabout' }, before, 'the saved file is the graph as edited');
     const layout = JSON.parse(fs.readFileSync(path.join(CONFIG, 'layouts', 'ships', 'test-runabout.json'), 'utf8'));
     assert.ok(layout.nodes[added.sysId] && layout.nodes['bus-b'], 'positions saved');
@@ -111,7 +131,7 @@ const step = (s) => console.log(`ok - ${s}`);
     await page.waitForFunction(() => window.__shipdesigner?.id === 'test-runabout' && window.__shipdesigner.graph._nodes.length);
     const again = await page.evaluate((id) => { const st = window.__shipdesigner, n = st.graph._nodes.find((x) => x.sysId === id); return { pos: [...n.pos], graph: st.toGraph() }; }, added.sysId);
     assert.deepEqual(again.graph, file, 'opened again: the same graph');
-    assert.deepEqual(again.pos.map(Math.round), layout.nodes[added.sysId], 'opened again: the radiator where it was');
+    assert.deepEqual(again.pos.map(Math.round), layout.nodes[added.sysId], 'opened again: the shields node where it was');
     step('Save as writes the design and its positions; the page opens it again just as it was');
 
     // A bad graph refused, the file untouched.

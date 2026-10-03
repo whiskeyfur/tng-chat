@@ -96,6 +96,8 @@ function request(req, res, urlPath, { admin, log = console.log }) {
     const lib = library();
     return json(200, {
       designs: Object.entries(files).map(([id, g]) => ({ id, name: g.name || id, graph: GRAPH.isGraphFile(g), type: g.type || g.kind || 'ship' })).sort((a, b) => a.id.localeCompare(b.id)),
+      // (The features: every effect a design file uses, for the node menu.)
+      effects: [...new Set(Object.values(files).filter(GRAPH.isGraphFile).flatMap((g) => Object.values(GRAPH.nodes(g).all).flatMap((x) => Object.keys(x?.effects || {}))))].sort(),
       types: lib.types, heat: lib.heat, resources: GRAPH.RESOURCES, perms: GRAPH.PERMS, meta: GRAPH.META, schema: GRAPH.SCHEMA,
     });
   }

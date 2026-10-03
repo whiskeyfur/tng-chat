@@ -4,17 +4,16 @@
 
 | In the graph | In the designer |
 |---|---|
-| A system | A node, coloured by its role. Its title is its name; its id is the tag above it. |
-| A resource | A slot, coloured by resource: one output per resource it gives, one input per link it draws on, and a spare `+ resource` input to draw a new one. |
-| A link (`upstream`) | A wire from the upstream system's output to the input of the system that draws on it. Coloured by its state (the strongest of pull, push and connect: auto, true, warn, false) or by resource. Click its centre to edit pull, push, connect, rate, pushRate, pri, min and why. |
+| A system | A node, coloured by its role, with **one input and one output**; the input takes any number of wires. Its title is its name; its id and its effects are the tags above it. Its panel has the rest of the system (type, parent, place, via, key, count, consumes, produces, capacity, creative, effects), and lists the wires in and out. |
+| What a system draws from another (`upstream[id]`) | **One wire per pair, a bundle**: it carries a resource each (power, EPS, fuel, heat…), each with its own pull, push, connect, rate, pushRate, pri, min and why. Click a wire's centre to edit the bundle: add or take out a resource, set its settings. A new wire carries what the two have in common (power, if nothing). Wires are coloured by state (the strongest of the bundle's: auto, true, warn, false) or by resource (white for several). |
 | Child systems (`systems`) | A box round the system and its parts. Parent, in the node's panel, moves one; Regroup redraws the boxes. |
-| The type library (`config/system-types.json`) | The node menu: right-click the canvas (Add Node, by role), or double-click to search. |
+| Features (effects) | The node menu (right-click the canvas, or double-click to search): a node per feature (the effects listed in ship-graph.md and any other a design uses) and one with none. litegraph's own nodes are taken out. A new node gets that effect (`{}`, its parameters in the panel) and the `system` type (`console` for a seat). |
 | The vessel's own fields | The panel with nothing selected: its name, kind, places and the rest (JSON). |
 
 - **Check** runs the checker as saving does (`check`, then the design fields worked out of it, as the relay loads them). It also says whether the graph is **stable**, as `node tools/ship-graph.js --check` does: until step 4c/4d, parts of the relay still read the old design fields, and a system they have no table for (a new radiator, say) plays partly as the graph rebuilt from them. That's a warning, not a refusal.
 - **Save** (Ctrl+S) refuses a graph with problems; otherwise it writes the file through `config.saveShip`, keeping the old one in `config/ships/.backup/`, and the supervisor reloads the relay. A design that hasn't changed isn't rewritten. **Save as** writes a new design; **New** starts an empty one.
 - Positions are the designer's own, in `config/layouts/ships/<id>.json` (not read by the game, and the supervisor doesn't reload for them). A design with none is laid out by what feeds what: a column a hop right of what each system draws from, heat left out, a system's parts under it. **Auto-arrange** does that again.
-- **Hide heat** stops drawing the heat wires (every system to the coolant loop).
+- **Hide heat** stops drawing the wires that carry only heat (every system to the coolant loop).
 
 Opening a design and saving it without changes writes back exactly the same file (`test/shipdesigner.js` checks every design).
 
