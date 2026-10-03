@@ -1,13 +1,15 @@
 // The relay's own settings, kept on this machine (data/settings.json, not in git):
 // the address it listens on (host, port), how new accounts are let in, and where
 // the admin page answers from. PORT and HOST in the environment win over the file.
+// "database" ({ host, port, user, password, database }), set by hand here: the game's database
+// (tools/store.js); kept as it is by every save.
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
 
 const DIR = process.env.RELAY_DATA || path.join(__dirname, '..', 'data');
 const FILE = path.join(DIR, 'settings.json');
-const DEFAULTS = { host: '', port: 8085, registration: 'approval', adminAccess: 'localhost', engine: 'relay', game: '' };
+const DEFAULTS = { host: '', port: 8085, registration: 'approval', adminAccess: 'localhost', engine: 'relay', game: '', database: null };
 const ENGINES = ['relay', 'graph']; // (what plays the power grid: the relay's own solver, or the ship graphs')
 const REGISTRATION = ['open', 'approval', 'closed'];
 const ADMIN_ACCESS = ['localhost', 'lan'];
@@ -38,7 +40,7 @@ const portFree = (port, host) => new Promise((resolve) => {
 function save(change) {
   const next = { ...read(), ...change };
   fs.mkdirSync(DIR, { recursive: true });
-  const keep = Object.fromEntries(Object.keys(DEFAULTS).map((k) => [k, next[k]]));
+  const keep = Object.fromEntries(Object.keys(DEFAULTS).filter((k) => next[k] !== null).map((k) => [k, next[k]]));
   const tmp = path.join(DIR, '.settings.json.tmp'); // (a dotfile: only the rename is a change to the supervisor)
   fs.writeFileSync(tmp, JSON.stringify(keep, null, 2) + '\n');
   fs.renameSync(tmp, FILE);

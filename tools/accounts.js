@@ -3,9 +3,12 @@
 // sessions (a random token a browser keeps in a cookie) in data/sessions.json.
 // Passwords are scrypt hashes with a salt each; tokens are kept only as their
 // SHA-256. Nothing here logs a password or a token.
+// With a database (tools/store.js), the accounts and sessions are its users and sessions tables
+// instead (the files brought in the first time; they're left as they were).
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const STORE = require('./store');
 
 const DIR = process.env.RELAY_DATA || path.join(__dirname, '..', 'data');
 const USERS_FILE = path.join(DIR, 'users.json');
@@ -25,14 +28,31 @@ const write = (file, v) => {
   if (file === USERS_FILE && fs.existsSync(file)) { try { fs.copyFileSync(file, path.join(DIR, '.users.json.bak')); } catch {} }
   fs.renameSync(tmpOf(file), file);
 };
-let users = read(USERS_FILE, {});      // username -> { salt, hash, role, status, created, lastLogin, characters }
-let sessions = read(SESSIONS_FILE, {}); // sha256(token) -> { user, created, seen }
+let users = {};      // username -> { salt, hash, role, status, created, lastLogin, characters }
+let sessions = {};   // sha256(token) -> { user, created, seen }
+// (What the database was last told, by key: only what changes since is written, so an account
+// changed by another process, npm run make-admin, isn't put back by this one.)
+const told = { users: new Map(), sessions: new Map() };
+const tell = (kind, now) => {
+  const was = told[kind], put = {}, drop = [];
+  for (const [k, v] of Object.entries(now)) { const t = JSON.stringify(v); if (was.get(k) !== t) { put[k] = v; was.set(k, t); } }
+  for (const k of [...was.keys()]) if (!(k in now)) { drop.push(k); was.delete(k); }
+  if (Object.keys(put).length || drop.length) STORE.write(`${kind}:${crypto.randomBytes(6).toString('hex')}`, { kind, put, drop });
+};
+const startFresh = () => {
+  if (STORE.enabled()) {
+    const s = STORE.relayState({ starbases: null, users: USERS_FILE, sessions: SESSIONS_FILE });
+    users = s.users; sessions = s.sessions;
+    for (const [kind, v] of [['users', users], ['sessions', sessions]]) { told[kind].clear(); for (const [k, x] of Object.entries(v)) told[kind].set(k, JSON.stringify(x)); }
+  } else { users = read(USERS_FILE, {}); sessions = read(SESSIONS_FILE, {}); }
+};
+startFresh();
 // (The users file changed under us, npm run make-admin from the shell: read it again.)
 const mtime = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
 let usersAt = mtime(USERS_FILE);
-const fresh = () => { const t = mtime(USERS_FILE); if (t !== usersAt) { usersAt = t; users = read(USERS_FILE, {}); } };
-const saveUsers = () => { write(USERS_FILE, users); usersAt = mtime(USERS_FILE); };
-const saveSessions = () => write(SESSIONS_FILE, sessions);
+const fresh = () => { if (STORE.enabled()) return; const t = mtime(USERS_FILE); if (t !== usersAt) { usersAt = t; users = read(USERS_FILE, {}); } };
+const saveUsers = () => { if (STORE.enabled()) return tell('users', users); write(USERS_FILE, users); usersAt = mtime(USERS_FILE); };
+const saveSessions = () => (STORE.enabled() ? tell('sessions', sessions) : write(SESSIONS_FILE, sessions));
 const sha = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 const hashOf = (password, salt) => crypto.scryptSync(String(password), salt, 64).toString('hex');
 const same = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
@@ -142,6 +162,6 @@ function update(name, change) {
 }
 // npm run make-admin <user>
 function makeAdmin(name) { name = norm(name); if (!users[name]) return false; users[name].role = 'admin'; users[name].status = 'active'; saveUsers(); return true; }
-const reload = () => { users = read(USERS_FILE, {}); sessions = read(SESSIONS_FILE, {}); };
+const reload = () => startFresh();
 
 module.exports = { DIR, USERS_FILE, SESSIONS_FILE, any, register, login, session, logout, endSessions, usedCharacter, list, update, makeAdmin, reload, norm };

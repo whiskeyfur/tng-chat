@@ -250,7 +250,7 @@ function fromRelay(g, st, tables) {
 // state: { temp: { id: 0..1+ }, sink: heat held } (kept between ticks). Returns what happened.
 function heatStep(g, r, state, { dt = 1, pumps = true } = {}) {
   const { all } = GRAPH.nodes(g);
-  const lib = JSON.parse(require('fs').readFileSync(require('path').join(require('./config').DIR, 'system-types.json'), 'utf8'));
+  const lib = require('./config').systemTypes();
   const { warm, hot } = lib.heat.temperature;
   state.temp ||= {}; state.sink ||= 0;
   const loop = Object.keys(all).find((id) => all[id].type === 'coolant-loop');

@@ -44,7 +44,8 @@ function effectsOf(key, z) {
   if (key?.startsWith('console:')) return { seat: { station: key.slice(8) } };
   return E[key] || null;
 }
-const types = () => JSON.parse(fs.readFileSync(TYPES_FILE, 'utf8')).types;
+// (The system library: config/system-types.json, or the database's: tools/config.js.)
+const types = () => require('./config').systemTypes().types;
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const BUS_ID = { A: 'bus-a', B: 'bus-b', C: 'bus-c', EPS: 'eps' };
 const resOf = (node) => (node === 'EPS' ? 'eps' : 'power');
@@ -210,7 +211,7 @@ function convert(id, design, d) {
   // share of what it handles (the type library's, or its effect's); the coolant loop carries it from
   // each to the heat sink and the radiators, which dump it to space (their pumps on Bus B). Sized so
   // a vessel running every system at once just balances.
-  const lib = types(), heatLib = JSON.parse(fs.readFileSync(TYPES_FILE, 'utf8')).heat;
+  const lib = types(), heatLib = require('./config').systemTypes().heat;
   let heatTotal = 0;
   add('coolant-loop', { type: 'coolant-loop', name: 'Coolant loop' });
   for (const [id, s] of Object.entries(systems)) {

@@ -25,6 +25,7 @@ create table if not exists star_systems (
   star_system_name varchar(64) not null,
   size             int not null
 );
+alter table star_systems add column if not exists about text null;
 create table if not exists chart_objects (
   chart_object_id int not null auto_increment primary key,
   star_system_id  int not null,
@@ -35,6 +36,8 @@ create table if not exists chart_objects (
   unique key (star_system_id, kind, name),
   foreign key (star_system_id) references star_systems (star_system_id) on delete cascade
 );
+-- (What else the chart says of it: a shipyard's berths.)
+alter table chart_objects add column if not exists props json not null default '{}';
 
 -- Stars, by their Morgan-Keenan class (G2V): spectral class, subclass (0-9.5), luminosity class, and
 -- any peculiarity (e, m, n, p, var...); mk_code puts them together.
@@ -83,6 +86,8 @@ create table if not exists planets (
 );
 alter table planets add column if not exists planet_type int null, add column if not exists planet_owner int null,
   add column if not exists star_id int null, add column if not exists x double null, add column if not exists y double null, add column if not exists radius double null;
+-- (A body that isn't a star: a planet, by default; a moon, an asteroid field... as the chart has it.)
+alter table planets add column if not exists body_kind varchar(16) not null default 'planet';
 alter table planets add constraint planets_star foreign key if not exists planets_star (star_id) references stars (star_id);
 alter table planets add unique key if not exists planet_of_star (star_id, planet_name);
 
@@ -94,6 +99,19 @@ create table if not exists base_systems (
 );
 alter table base_systems add column if not exists role varchar(16) null, add column if not exists info json null,
   add column if not exists defaults json not null default '{}';
+-- (The heat a system of the type makes: { of: "consumes" | "produces", share }.)
+alter table base_systems add column if not exists heat json null;
+-- What a system can do (ftl, shields, phasers...): the extra share of heat doing it makes.
+create table if not exists effects (
+  effect_name varchar(32) not null primary key,
+  heat_share  double not null
+);
+-- The game's rules that belong to no one table: the system library's description, heat's
+-- (its description, a radiator pump's draw, the temperatures a system works less well and is damaged at).
+create table if not exists game_rules (
+  rule_name varchar(64) not null primary key,
+  value     json not null
+);
 
 
 -- A vessel kind (a ship class, the starbases', the relays'): its name and everything about it that
@@ -105,6 +123,8 @@ create table if not exists classes (
 alter table classes add column if not exists class_code varchar(32) null, add column if not exists kind enum('ship', 'starbase', 'relay') not null default 'ship',
   add column if not exists faction_id int null, add column if not exists design json not null default '{}';
 alter table classes add unique key if not exists class_code (class_code);
+-- (design: the design as its file has it, every field; graph_places: its places as the graph has them.)
+alter table classes add column if not exists graph_places json null;
 alter table classes add constraint classes_faction foreign key if not exists classes_faction (faction_id) references factions (faction_id);
 
 -- Its systems: the graph's nodes, by their id in the design (console-helm, warp-core, ...), each
@@ -169,6 +189,31 @@ create table if not exists ship_links (
 -- restock, timers, history; the relay keeps the fast ship ticks). Rows here, no events yet.
 alter table ships add column if not exists mothballed boolean not null default false, add column if not exists state json not null default '{}',
   add column if not exists updated_at timestamp not null default current_timestamp on update current_timestamp;
+-- (Which game a vessel's state belongs to: one saved in another game starts new.)
+alter table ships add column if not exists game varchar(64) null;
+alter table ships add constraint ships_class foreign key if not exists ships_class (ship_class) references classes (class_id);
+
+-- Accounts (tools/accounts.js): a username and password (an scrypt hash with its salt), a role, a
+-- status; the characters it signed in as, most recent first. Times are ms since 1970, as the relay keeps them.
+create table if not exists users (
+  username   varchar(24) not null primary key,
+  salt       char(32) not null,
+  hash       char(128) not null,
+  role       enum('admin', 'player') not null,
+  status     enum('active', 'pending', 'disabled') not null,
+  created    bigint not null,
+  last_login bigint null,
+  characters json not null default '[]'
+);
+-- Sessions: a browser's token, kept only as its SHA-256.
+create table if not exists sessions (
+  token_sha char(64) not null primary key,
+  username  varchar(24) not null,
+  created   bigint not null,
+  seen      bigint not null,
+  foreign key (username) references users (username) on delete cascade
+);
+
 -- A planet's orbit: where it is at any time (an event moves planets.x and y along it).
 create table if not exists orbits (
   planet_id      int not null primary key,

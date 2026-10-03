@@ -1,19 +1,60 @@
-# The database (branch `database`, not in play yet)
+# The database
 
-MariaDB 10.11 on localhost:3306, database `startrek`. `tools/db.js` builds the schema and loads the game's designs and star charts into it. The game itself still reads its files: nothing in play uses the database yet, and saves and accounts haven't moved.
+MariaDB 10.11 on localhost:3306, database `startrek`. With `"database"` in `data/settings.json`, the game is played from it: the relay and the ship's computers read the designs, the star chart and the system library from it, and keep the ships' saves, the starbases' state and the accounts there. Without it, the game keeps to its files as before (the tests do, apart from the database's own).
+
+## Turning it on
+
+In `data/settings.json` (by hand: it's never in git, and the admin page never shows the password):
+
+```
+"database": { "host": "127.0.0.1", "port": 3306, "user": "startrek", "password": "...", "database": "startrek" }
+```
+
+The supervisor restarts the relay on the change, and the ship's computers take it when they next reload (a change to `tools/shipcore.js`, or `npm start` again). On the first start:
+
+- an empty database is loaded from `config/` (the designs, the star chart, the system library);
+- each ship's computer brings in its ship's `.nav.json`, and the relay `data/starbases.json`, `users.json` and `sessions.json`, each once: the files are left as they were, and not written after that.
+
+To go back to the files: take `"database"` out of `data/settings.json`. The files are as they were when the database took over (the backups in `backups/` too).
+
+A database that can't be reached is said in the log, and waited for: the relay doesn't start serving, and each ship's computer tries again every 10 seconds. The game never quietly plays from the files instead.
+
+## What's where
+
+| | Files | Database |
+|---|---|---|
+| Designs | `config/ships/<class>.json` | `classes.design` (every field, as the file has it), with its systems and links (`class_systems`, `class_links`) |
+| Star chart | `config/starsystem/<id>.json` | `star_systems`, `stars`, `planets`, `chart_objects` |
+| System library | `config/system-types.json` | `base_systems` (info, heat, defaults), `effects`, `game_rules` |
+| A ship's save | `shipcore-data/<ship>/.nav.json` | `ships.state` (and its class, position and game) |
+| Starbases, relays | `data/starbases.json` | `ships.state`, as vessels of class starbase or subspace-relay |
+| Accounts, sessions | `data/users.json`, `sessions.json` | `users`, `sessions` |
+| Settings | `data/settings.json` | (stays a file: it says where the database is) |
+| Ships' libraries | `shipcore-data/<ship>/` | (stay files) |
+
+The admin page's design editor saves to the database and to `config/ships/<class>.json` (its copy for git, and what the supervisor reloads on). At start, the relay says if a design in `config/` isn't what the database has (the database's is used).
+
+## Writes
+
+Each cycle of writes (what's waiting: a ship's save, the starbases', the accounts' changes) is one transaction: all of it or none, so a crash or an error part-way leaves the database as it was. Rows are taken in one order (accounts, starbases, then ships by name), and a deadlock or a lock wait that timed out is tried again. Every table is InnoDB. A write that fails (the database away) is kept, the newest of each kind, and tried every 5 seconds; what's waiting is written before the relay or a ship's computer stops.
+
+The ship's computers in one supervisor share one writer, so saves that are waiting together (both ships of a dock, say) go in one transaction; each is still its own computer's save, so two vessels' saves aren't yet guaranteed to be in the same transaction.
 
 ## Running it
 
-The connection comes from `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` and `DB_NAME` in the environment, or else from `"database": { "host", "port", "user", "password", "database" }` in `data/settings.json`. It's never stored in git.
+The connection comes from `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` and `DB_NAME` in the environment, or else from `"database"` in `data/settings.json`.
 
 ```
-DB_USER=startrek DB_PASSWORD=startrek node tools/db.js migrate          # db/schema.sql, db/seed.sql (safe to run again)
-DB_USER=startrek DB_PASSWORD=startrek node tools/db.js load             # the designs (as the relay builds them) and the star charts
-DB_USER=startrek DB_PASSWORD=startrek node tools/db.js check            # each class read back is the relay's graph
-DB_USER=startrek DB_PASSWORD=startrek node tools/db.js show runabout    # a class's systems, merged (or: show runabout console-helm)
+node tools/db.js migrate          # db/schema.sql, db/seed.sql (safe to run again)
+node tools/db.js load             # config/ into the database: the designs (their graphs as the relay builds them), the star chart, the system library
+node tools/db.js export           # the other way: the database's designs and star chart into config/ (for git)
+node tools/db.js check            # each class read back is the relay's graph
+node tools/db.js show runabout    # a class's systems, merged (or: show runabout console-helm)
 ```
 
-`migrate` refuses to drop a table from the first draft (`systems`, `system_properties`, `default_properties`) if it holds rows.
+`load` replaces the designs in the database with `config/`'s: a design saved from the admin page since is in `config/` too, so nothing's lost. `migrate` refuses to drop a table from the first draft (`systems`, `system_properties`, `default_properties`) if it holds rows.
+
+The tests use the database `startrek_test` (`DB_TEST_NAME`), never the game's: `test/db.js` (the schema, the round trip, the transactions, bringing the files in) and `test/db-game.js` (the relay and a ship's computer on the database, through restarts). They're skipped without a database.
 
 ## Layers, merged with JSON_MERGE_PATCH
 
@@ -50,7 +91,7 @@ A patch sets what it names, at any depth, and keeps everything else. For example
 
 ## World state for the database's own ticks
 
-These tables are laid out so a database event can move them by itself. There are no events yet. The server's `event_scheduler` is OFF, and turning it on (`SET GLOBAL event_scheduler = ON`) needs an admin.
+These tables are laid out so a database event can move them by itself. There are no events yet; the server's `event_scheduler` is ON. Each world tick an event runs is to be one transaction.
 
 | Table | What an event would do |
 |---|---|
@@ -62,6 +103,3 @@ These tables are laid out so a database event can move them by itself. There are
 
 The relay keeps the fast ship ticks (the power solver, combat, helm). The database's events would take the slow world ticks.
 
-## Tests
-
-`test/db.js`, in `npm test`, is skipped when no database is configured. It runs the schema twice, loads, checks that every class reads back as the relay's graph, and checks the merge rules and Sol's class.

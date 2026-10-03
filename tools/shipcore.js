@@ -16,13 +16,19 @@
 // Files live in <data>/<ship>/ (default ./shipcore-data, next to where you run
 // it), with an index (.index.json) that also remembers deletions, so a file
 // deleted elsewhere isn't brought back by this computer. Reconnects by itself.
+// The ship's save is its .nav.json there, or with a database (data/settings.json
+// "database"), its row in the ships table.
 //
 // Also a module: the supervisor (npm start) runs ship's computers in its own
 // process with createShipcore(opts), and reloads them when this file changes.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const CONFIG = require('./config'); // the designs and the star chart (config/)
+// (Loaded fresh with this file: the supervisor reloads only this file when it changes, in a process
+// that has had these since it started.)
+for (const m of ['./config', './store', './settings']) delete require.cache[require.resolve(m)];
+const CONFIG = require('./config'); // the designs and the star chart (config/, or the database)
+const STORE = require('./store'); // the database, when there is one: the ships' saves are kept there
 const WebSocket = require('ws');
 
 const TID_LEN = 12;
@@ -46,7 +52,30 @@ function parseArgs(argv) {
 
 // A ship's computer for opts.ships. log: where its messages go; onFail(reason):
 // the relay refused it. Returns { stop(), status() }.
-function createShipcore(opts, { log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a), onFail = () => {} } = {}) {
+// With a database, each ship's save is read from it first (a ship it hasn't seen brings its
+// .nav.json in); one that can't be reached is said, and tried again every 10 s.
+const timeLog = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+function createShipcore(opts, hooks = {}) {
+  if (!STORE.enabled() || opts.navs) return createCore(opts, hooks);
+  const log = hooks.log || timeLog;
+  try {
+    STORE.snapshot(); // (the star chart)
+    const navs = {};
+    for (const ship of opts.ships) {
+      const file = path.join(opts.data, ship, '.nav.json'), r = STORE.nav(ship, file);
+      navs[ship] = r.nav;
+      if (r.imported) log(`${ship}: its save brought in to the database from ${file} (the file stays as it was)`);
+    }
+    return createCore({ ...opts, navs }, hooks);
+  } catch (err) {
+    log(`${opts.ships.join(', ')}: can't start: ${err.message}. Trying again in 10 s.`);
+    let inner = null, stopped = false;
+    const retry = setTimeout(() => { if (!stopped) inner = createShipcore(opts, hooks); }, 10000);
+    return { stop: () => { stopped = true; clearTimeout(retry); inner?.stop(); },
+      status: () => (inner ? inner.status() : { ships: opts.ships, connected: false, primary: [], stopped, waiting: 'the database' }) };
+  }
+}
+function createCore(opts, { log = timeLog, onFail = () => {} } = {}) {
 let stopped = false;
 
 // --- storage: <data>/<ship>/<file> plus .index.json ------------------------------
@@ -102,7 +131,7 @@ const maxWarp = (power) => { const w = Math.min(100, power.engines, power.inject
 
 for (const store of stores.values()) {
   store.navFile = path.join(store.dir, '.nav.json');
-  try { store.nav = JSON.parse(fs.readFileSync(store.navFile, 'utf8')); } catch {}
+  if (opts.navs) store.nav = opts.navs[store.ship]; else try { store.nav = JSON.parse(fs.readFileSync(store.navFile, 'utf8')); } catch {}
   if (!store.nav || typeof store.nav.x !== 'number') {
     // New ships start near the middle of the sector, within comms range of each other.
     // A new ship: where --position says, or the relay docks it at a starbase.
@@ -115,7 +144,7 @@ for (const store of stores.values()) {
   store.nav.power = { ...DEFAULT_POWER, ...(was.lifeSupport != null ? { atmosphere: was.lifeSupport, thermal: was.lifeSupport, gravity: was.lifeSupport, lighting: was.lifeSupport } : {}), ...was };
   delete store.nav.power.lifeSupport;
   store.primary = false;
-  store.saveNav = () => fs.writeFileSync(store.navFile, JSON.stringify(store.nav));
+  store.saveNav = opts.navs ? () => STORE.write(`nav:${store.ship}`, { kind: 'nav', ship: store.ship, nav: store.nav }) : () => fs.writeFileSync(store.navFile, JSON.stringify(store.nav));
   store.saveNav();
 }
 
@@ -337,6 +366,7 @@ function stop() {
   stopped = true;
   clearInterval(flying);
   for (const st of stores.values()) st.saveNav();
+  if (opts.navs) { STORE.flushSync(log); STORE.close(); }
   try { ws?.close(); } catch {}
 }
 return {

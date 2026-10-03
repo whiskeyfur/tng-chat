@@ -42,6 +42,15 @@ const { WebSocketServer } = require('ws');
 
 // Where it listens: data/settings.json (the admin page's Settings), under PORT and HOST in the environment.
 const SETTINGS = require('./tools/settings');
+// The game's database, if data/settings.json has one (tools/store.js): the designs and the star chart
+// come from it, and the starbases and accounts are kept there. The relay waits for it, saying so.
+const STORE = require('./tools/store');
+if (STORE.enabled() && !process.env.SHIP_GRAPH_DUMP) {
+  STORE.snapshotWaiting((line) => console.error(line));
+  console.log(`database: the game is read from ${STORE.where()}`);
+  // (What's waiting is written before the relay stops.)
+  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { STORE.flushSync(); process.exit(0); });
+}
 const { port: PORT, host: HOST } = SETTINGS.effective();
 // Accounts (a username, not a character's name): once the first is registered, every
 // page, API and console connection needs a logged-in session (tools/accounts.js).
@@ -2561,9 +2570,14 @@ const engOf = (k) => {
 };
 // Starbases have no ship's computer to keep their settings: the relay keeps
 // them (remote control starts blocked at a starbase).
+// With a database (tools/store.js), they're kept there (the file brought in the first time).
 const BASE_SETTINGS_FILE = process.env.STARBASES_FILE || path.join(__dirname, 'data', 'starbases.json');
 let baseSettings = {};
-try { baseSettings = JSON.parse(fs.readFileSync(BASE_SETTINGS_FILE, 'utf8')); } catch {}
+if (STORE.enabled()) {
+  const st = STORE.relayState({ starbases: BASE_SETTINGS_FILE });
+  baseSettings = st.bases;
+  if (st.imported.length) console.log(`database: brought in ${st.imported.map((f) => path.relative(__dirname, f)).join(', ')} (the file stays as it was)`);
+} else try { baseSettings = JSON.parse(fs.readFileSync(BASE_SETTINGS_FILE, 'utf8')); } catch {}
 if (GAME_ID && baseSettings.__game !== GAME_ID) baseSettings = {}; // (the starbases as they were in another game: they start new)
 if (GAME_ID) baseSettings.__game = GAME_ID;
 // (A relay the admin page disabled stays disabled.)
@@ -2586,6 +2600,7 @@ function saveBaseSettings() {
   // Each relay: its grid (and whether it's off).
   for (const k of RELAY_KEYS) if (eng.has(k)) baseSettings[shipName(k)] = { ...baseSettings[shipName(k)], eng: savedEng(k), combat: savedCombat(k) };
   for (const k of BASE_KEYS) { const n = navState.get(k); baseSettings[shipName(k)] = { ...(STARBASES.find((b) => shipKey(b.name) === k)?.created ? { created: true } : {}), remoteBlock: !!engOf(k).remoteBlock, eng: savedEng(k), combat: savedCombat(k), nav: n ? { x: n.x, y: n.y, heading: n.heading } : undefined, power: n?.power }; }
+  if (STORE.enabled()) return STORE.write('bases', { kind: 'bases', bases: baseSettings, relays: [...RELAY_KEYS].map(shipName) });
   try { fs.mkdirSync(path.dirname(BASE_SETTINGS_FILE), { recursive: true }); fs.writeFileSync(BASE_SETTINGS_FILE, JSON.stringify(baseSettings, null, 2)); } catch (err) { console.warn(`could not save starbase settings: ${err.message}`); }
 }
 // A design without a warp core, or without fusion reactors (a pure-solar one): none aboard.
@@ -5753,7 +5768,9 @@ function adminRequest(ws, msg) {
 // admin page answers. Checked first (an address this machine has, a port that's free and not
 // 8080); saved, the supervisor restarts the relay on it (its watch on data/).
 async function adminSettings(ws, msg) {
-  const reply = (m) => send(ws, { type: 'admin-settings', ...m, settings: SETTINGS.read(), effective: SETTINGS.effective(), listening: { host: HOST || '', port: PORT }, supervised: !!process.send, accounts: ACCOUNTS.any() });
+  // (The database's password stays on this machine: the page is told where it is, not how to get in.)
+  const shown = (v) => (v.database ? { ...v, database: { ...v.database, password: undefined } } : v);
+  const reply = (m) => send(ws, { type: 'admin-settings', ...m, settings: shown(SETTINGS.read()), effective: shown(SETTINGS.effective()), listening: { host: HOST || '', port: PORT }, supervised: !!process.send, accounts: ACCOUNTS.any() });
   if (msg.action === 'settings') return reply({});
   const change = {};
   for (const k of ['host', 'port', 'registration', 'adminAccess']) if (msg.settings?.[k] !== undefined) change[k] = k === 'port' ? Number(msg.settings[k]) : String(msg.settings[k]).trim();

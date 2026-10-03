@@ -1,10 +1,15 @@
 // The designs, read from config/ (the live state stays in data/ and the ships' own folders):
 //   config/ships/<class>.json       one per ship class (and starbase.json for every starbase)
 //   config/starsystem/<system>.json one per star chart
+//   config/system-types.json        the kinds of system a ship graph is made of
 // A new class is a new file. Each file is checked as it's read: a bad one is
 // skipped, with a log line naming the file and the field, and the rest load.
+// With a database (tools/store.js: "database" in data/settings.json), they come from it instead,
+// checked the same; config/ is then what tools/db.js load brings in and export writes out.
 const fs = require('fs');
 const path = require('path');
+
+const STORE = require('./store');
 
 const DIR = process.env.CONFIG_DIR || path.join(__dirname, '..', 'config');
 
@@ -67,26 +72,40 @@ function checkFields(v, fields) {
   return bad ? { field: bad[0], message: `${v[bad[0]] === undefined ? 'is missing' : 'is wrong'}: it must be ${bad[1][1]}` } : null;
 }
 const checkShip = (v) => checkFields(v, SHIP_FIELDS);
-// Every <name>.json in a folder of config/, checked: { id: content }.
-function loadFolder(sub, fields, log) {
+// Every <name>.json in a folder of config/: { id: { v, where } } (one that isn't JSON is skipped, said).
+function readFolder(sub, log) {
   const dir = path.join(DIR, sub), out = {};
   let files = [];
-  try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort(); } catch (err) { log(`config: can't read ${path.join('config', sub)}: ${err.message}`); return out; }
+  try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.startsWith('.')).sort(); } catch (err) { log(`config: can't read ${path.join('config', sub)}: ${err.message}`); return out; }
   for (const f of files) {
     const where = path.join('config', sub, f);
-    let v;
-    try { v = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (err) { log(`config: skipping ${where}: not valid JSON (${err.message})`); continue; }
-    const bad = checkFields(v, fields);
-    if (bad) { log(`config: skipping ${where}: ${bad.field ? `field "${bad.field}" ${bad.message}` : bad.message}`); continue; }
-    out[f.slice(0, -5).toLowerCase()] = v;
+    try { out[f.slice(0, -5).toLowerCase()] = { v: JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')), where }; } catch (err) { log(`config: skipping ${where}: not valid JSON (${err.message})`); }
   }
   return out;
 }
+// The same from the database: its designs, or its star charts.
+function fromDb(what, log) {
+  const s = STORE.snapshotWaiting();
+  if (what === 'ships' && s.differs?.length && !fromDb.said) { fromDb.said = true; log(`config: the database's design of ${s.differs.join(', ')} isn't what config/ships says: the database's is used (node tools/db.js export writes it to config/; load takes config/'s)`); }
+  return Object.fromEntries(Object.entries(what === 'ships' ? s.designs : s.charts).map(([id, v]) => [id, { v, where: `the database's ${what === 'ships' ? 'design' : 'star chart'} "${id}"` }]));
+}
+const source = (sub, log) => (STORE.enabled() ? fromDb(sub === 'ships' ? 'ships' : 'charts', log) : readFolder(sub, log));
+// Each checked: { id: content } (a bad one is skipped, said).
+function checkAll(all, fields, log) {
+  const out = {};
+  for (const [id, { v, where }] of Object.entries(all)) {
+    const bad = checkFields(v, fields);
+    if (bad) { log(`config: skipping ${where}: ${bad.field ? `field "${bad.field}" ${bad.message}` : bad.message}`); continue; }
+    out[id] = v;
+  }
+  return out;
+}
+const loadFolder = (sub, fields, log, src = source) => checkAll(src(sub, log), fields, log);
 
 // The designs by kind: the ship classes, the starbases' (starbase.json), the subspace relays'
 // (the first file of kind "relay"); probes and planets will be kinds too.
-function loadShips(log = console.warn) {
-  const all = loadFolder('ships', SHIP_FIELDS, log);
+function loadShips(log = console.warn, src = source) {
+  const all = loadFolder('ships', SHIP_FIELDS, log, src);
   const classes = {}, starbase = all.starbase || null;
   const relayId = Object.keys(all).find((id) => all[id].kind === 'relay') || null;
   for (const [id, c] of Object.entries(all)) if (id !== 'starbase' && c.kind !== 'starbase' && c.kind !== 'relay') classes[id] = { kind: 'ship', refit: true, spore: false, torpedoes: 10, stations: null, ties: {}, places: [], seats: {}, ...c };
@@ -95,27 +114,38 @@ function loadShips(log = console.warn) {
 }
 
 // The star charts.
-function loadSystems(log = console.warn) {
-  const all = loadFolder('starsystem', SYSTEM_FIELDS, log);
+function loadSystems(log = console.warn, src = source) {
+  const all = loadFolder('starsystem', SYSTEM_FIELDS, log, src);
   for (const s of Object.values(all)) { s.bodies ||= []; s.waypoints ||= []; }
   return all;
 }
 
 // A design written back (the admin page's editor): checked first, pretty-printed in a stable
-// key order, the old file kept in config/ships/.backup/<class>.<time>.json. Returns null or an error.
+// key order, the old file kept in config/ships/.backup/<class>.<time>.json; with a database, saved
+// there too (the file is then its copy for git, and what tells the supervisor). Returns null or an error.
 const KEY_ORDER = ['about', 'kind', 'name', ...Object.keys(SHIP_FIELDS)];
+const ordered = (design) => Object.fromEntries([...KEY_ORDER.filter((k) => k in design), ...Object.keys(design).filter((k) => !KEY_ORDER.includes(k)).sort()].map((k) => [k, design[k]]));
+// (A file written, if it says something new, the old one kept: true if it was.)
+function writeFile(sub, id, v) {
+  const dir = path.join(DIR, sub), file = path.join(dir, `${id}.json`), text = JSON.stringify(v, null, 2) + '\n';
+  if (fs.existsSync(file)) {
+    if (fs.readFileSync(file, 'utf8') === text) return false;
+    fs.mkdirSync(path.join(dir, '.backup'), { recursive: true });
+    fs.copyFileSync(file, path.join(dir, '.backup', `${id}.${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `.${id}.json.tmp`), text);
+  fs.renameSync(path.join(dir, `.${id}.json.tmp`), file);
+  return true;
+}
+const writeShip = (id, design) => writeFile('ships', id, ordered(design));
+const writeSystem = (id, chart) => writeFile('starsystem', id, chart);
 function saveShip(id, design) {
   if (!/^[a-z][a-z0-9-]{0,31}$/.test(id)) return { field: 'id', message: 'a class id: lower-case letters, digits and -, starting with a letter' };
   const bad = checkShip(design);
   if (bad) return bad;
-  const dir = path.join(DIR, 'ships'), file = path.join(dir, `${id}.json`);
-  if (fs.existsSync(file)) {
-    fs.mkdirSync(path.join(dir, '.backup'), { recursive: true });
-    fs.copyFileSync(file, path.join(dir, '.backup', `${id}.${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
-  }
-  const ordered = Object.fromEntries([...KEY_ORDER.filter((k) => k in design), ...Object.keys(design).filter((k) => !KEY_ORDER.includes(k)).sort()].map((k) => [k, design[k]]));
-  fs.writeFileSync(`${file}.tmp`, JSON.stringify(ordered, null, 2) + '\n');
-  fs.renameSync(`${file}.tmp`, file);
+  writeShip(id, design);
+  if (STORE.enabled()) { try { STORE.saveDesign(id, ordered(design)); } catch (err) { return { field: '', message: `config/ships/${id}.json is saved, but not the database: ${err.message}` }; } }
   return null;
 }
 // The ship graphs (config/ships-graph/<class>.json: tools/ship-graph.js, step 1; the game doesn't
@@ -136,7 +166,19 @@ function loadGraphs(log = console.warn) {
   }
   return out;
 }
-// The designs as files say (for the editor): { id: content }.
+// The designs as saved (for the editor): { id: content }.
 const readShips = () => loadFolder('ships', {}, () => {});
+// The system library: { about, types, heat }.
+const systemTypes = () => (STORE.enabled() ? STORE.snapshotWaiting().types : files.types());
 
-module.exports = { DIR, loadShips, loadSystems, loadGraphs, checkShip, saveShip, readShips };
+// config/ itself, whatever the game reads from (tools/db.js load and export).
+const fileSource = (sub, log) => readFolder(sub, log);
+const files = {
+  ships: () => Object.fromEntries(Object.entries(readFolder('ships', () => {})).map(([id, { v }]) => [id, v])),
+  systems: () => loadSystems(() => {}, fileSource),
+  loadShips: (log) => loadShips(log, fileSource),
+  types: () => JSON.parse(fs.readFileSync(path.join(DIR, 'system-types.json'), 'utf8')),
+  writeShip, writeSystem,
+};
+
+module.exports = { DIR, loadShips, loadSystems, loadGraphs, checkShip, saveShip, readShips, systemTypes, files };
