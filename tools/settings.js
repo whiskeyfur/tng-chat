@@ -9,8 +9,9 @@ const path = require('path');
 
 const DIR = process.env.RELAY_DATA || path.join(__dirname, '..', 'data');
 const FILE = path.join(DIR, 'settings.json');
-const DEFAULTS = { host: '', port: 8085, registration: 'approval', adminAccess: 'localhost', engine: 'relay', game: '', database: null };
+const DEFAULTS = { host: '', port: 8085, registration: 'approval', adminAccess: 'localhost', engine: 'relay', game: '', database: null, solver: 'graph' };
 const ENGINES = ['relay', 'graph']; // (what plays the power grid: the relay's own solver, or the ship graphs')
+const SOLVERS = ['graph', 'path']; // (with the graph engine: the graph solver, or the path tracer)
 const REGISTRATION = ['open', 'approval', 'closed'];
 const ADMIN_ACCESS = ['localhost', 'lan'];
 const RESERVED = { 8080: 'kept for coturn' };
@@ -30,6 +31,7 @@ function check(v) {
   if (v.adminAccess !== undefined && !ADMIN_ACCESS.includes(v.adminAccess)) return { field: 'adminAccess', message: `one of ${ADMIN_ACCESS.join(', ')}` };
   if (v.game !== undefined && typeof v.game !== 'string') return { field: 'game', message: 'a game id (text)' };
   if (v.engine !== undefined && !ENGINES.includes(v.engine)) return { field: 'engine', message: `one of ${ENGINES.join(', ')}` };
+  if (v.solver !== undefined && !SOLVERS.includes(v.solver)) return { field: 'solver', message: `one of ${SOLVERS.join(', ')}` };
   return null;
 }
 // Is a port free on this host? (true, or the error's code)

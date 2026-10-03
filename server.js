@@ -78,6 +78,10 @@ const GRAPHS = {}, GRAPH_REV = {};
 // What plays: the relay's own power solver, or the graph solver ("engine" in data/settings.json; the
 // new game after the cutover, tools/cutover.js). ENGINE in the environment wins.
 const GRAPH_PLAY = (process.env.ENGINE || SETTINGS.read().engine) === 'graph';
+// Which solver shares out the power on the graph engine: the graph solver, or the path tracer
+// ("solver": "path" in data/settings.json; tools/path-solver.js). SOLVER in the environment wins.
+const PATH_PLAY = (process.env.SOLVER || SETTINGS.read().solver) === 'path';
+const PATH_SOLVER = require('./tools/path-solver');
 // Which game this is (set by the cutover): a ship or a starbase saved in another game starts new.
 const GAME_ID = SETTINGS.read().game || '';
 const { classes: CLASSES, starbase: BASE_DESIGN, relay: RELAY_FILE } = CONFIG.loadShips((line) => console.warn(line));
@@ -2928,7 +2932,7 @@ function flow(k) {
   const graphG = GRAPH_PLAY && GRAPHS[graphIdOf(k)];
   if (graphG) {
     const st = { ties: e.ties, taps: e.taps, coresUp, epsLive: !!e.epsLive, breakers: e.breakers, xlBlock: e.xlBlock || [], stores: e.stores, busMax: Object.fromEntries(NODES.map((n) => [n, maxOf(n)])), srcCap: cap, wants: { ...wants, ...Object.fromEntries(loads) } };
-    const r = GRAPH_SOLVER.solve(graphG, GRAPH_SOLVER.fromRelay(graphG, st, { STORES, EPS_CHARGE_GEN }));
+    const r = (PATH_PLAY ? PATH_SOLVER : GRAPH_SOLVER).solve(graphG, GRAPH_SOLVER.fromRelay(graphG, st, { STORES, EPS_CHARGE_GEN }));
     const { all } = SHIP_GRAPH.nodes(graphG), BUS = { A: 'bus-a', B: 'bus-b', C: 'bus-c', EPS: 'eps' };
     for (const key of Object.keys(cells)) cells[key] = blank();
     for (const [id, row] of Object.entries(r.cells)) if (all[id]?.key) cells[all[id].key] = Object.fromEntries(NODES.map((n) => [n, row[BUS[n]] || 0]));
@@ -5660,6 +5664,22 @@ function graphDump(scenarios = false) {
         };
         eng.delete(k); flowCache.delete(k); navState.delete(k); combat.delete(k); shields.delete(k); shipClasses.delete(k);
       }
+    }
+    // (A starbase too, warm, its port's export tied to Bus B and its dock feed from a ship: for the
+    // path-tracing solver's docked groups.)
+    out.baseScenarios = {};
+    for (const [name, set] of Object.entries({ warm: () => {}, exporting: (e) => { for (const x of ['feed:port', 'feedEps:port', 'ship', 'shipEps']) if (x in e.ties || aboardKey('__graph__starbase', x)) e.ties[x] = x.includes('Eps') ? ['EPS'] : ['B']; } })) {
+      const k = '__graph__starbase';
+      BASE_KEYS.add(k);
+      navState.set(k, { x: 0, y: 0, heading: 0, warp: 0, dest: null });
+      const e = freshEng(undefined, { k });
+      Object.assign(e.ties, designOf(k).ties || {});
+      eng.set(k, e); deriveConduits(k); designReactors(k, true); pruneLoads(k);
+      set(e);
+      flowCache.delete(k);
+      const f = flow(k);
+      out.baseScenarios[name] = { state: { ties: e.ties, taps: e.taps, coresUp: e.computers.some((x) => x.state === 'online'), epsLive: !!e.epsLive, breakers: e.breakers, xlBlock: e.xlBlock || [], stores: e.stores, antimatter: e.antimatter, busMax: busMaxOf(k), srcCap: f.srcCap, wants: f.wants } };
+      eng.delete(k); flowCache.delete(k); navState.delete(k); combat.delete(k); BASE_KEYS.delete(k);
     }
   }
   return out;

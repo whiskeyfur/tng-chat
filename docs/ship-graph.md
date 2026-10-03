@@ -197,6 +197,20 @@ What `min` changes against today, from the starved state: the subspace relay get
 - The runabout at full stretch (warp 5, armed, shields up) makes 77/s. Its radiators dump that with room to spare: they're sized for every system's full draw at once, which is 300.
 - With the pumps off, the sink fills and then the systems warm and overheat (the test times it).
 
+## The path tracer (tools/path-solver.js)
+
+John's solver, beside the graph solver; it plays with `"solver": "path"` in `data/settings.json` (the graph engine on; `"graph"`, the default, for the graph solver; `SOLVER` in the environment wins): each consumer, in pri order (containment first), traced along a path from a source to it.
+
+- **Sources:** its own vessel's live generators, then its stores (batteries, the EPS's pressure, emergency batteries), then across a dock the same. Within each, the nearest first (the fewest links: what's on a load's own bus before what comes through the EPS's taps), and the most power on hand of those. A creative source never runs short; its link's rate still limits it.
+- **Paths:** through the buses, the EPS and its taps, the crosslink (each way it allows) and the conduits on the load's own path. Every link has what's left of its rate, every bus what's left of its limit; the source gives what the path can carry, and every node on the way records it passing through (+x in, −x out). A consumer may draw on several sources and paths.
+- **Minimums:** a consumer that can't reach its minimum is rolled back (sources, links and pass-through as they were), and the power goes on to the next. Containment is never rolled back.
+- **Charging:** what's left charges the batteries, then the EPS's pressure, each up to its push rate.
+- **Docked:** a docked group is one graph (`solveGroup`): each vessel's export joined to the other's dock feed, at the dock's rate, only the ways the exports allow. Containment on either vessel comes first; a vessel's consumers use their own sources before crossing the dock.
+
+`test/path-solver.js` runs it on every class in the graph solver's grid states. No source gives more than it has, no bus carries more than its limit, what's given is what's taken and charged, a load gets its minimum or nothing, containment gets at least what the graph solver gives, and it never delivers less in total. It lists where the two differ: it follows pri strictly (the graph solver serves single-bus loads bus by bus), and it reaches power the graph solver leaves (phasers on the crossfield and the Intrepid at full stretch, the shuttle's inertial dampers).
+
+`db/path-solver.sql` is the same in SQL (a stored procedure, a recursive query for each path), for `tools/bench.js`'s comparison; it gives every load the same answer.
+
 ## Step 3: the graph in play
 
 - **The relay builds every vessel kind's graph at start** (the ship classes, the starbase, the subspace relay), from its designs as they are. A design saved from the admin page (the supervisor restarts the relay) is in it. Consoles fetch their vessel's graph from `/api/ships-graph/<id>`; the grid says which one (`graphId`) and which version (`graphRev`).

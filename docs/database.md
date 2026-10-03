@@ -54,6 +54,8 @@ node tools/db.js show runabout    # a class's systems, merged (or: show runabout
 
 `load` replaces the designs in the database with `config/`'s: a design saved from the admin page since is in `config/` too, so nothing's lost. `migrate` refuses to drop a table from the first draft (`systems`, `system_properties`, `default_properties`) if it holds rows.
 
+`node tools/bench.js` times the files against the database (the game's start, a ship's save written and read), the graph solver against the path tracer, and the path tracer in JavaScript against SQL, in `startrek_test`.
+
 The tests use the database `startrek_test` (`DB_TEST_NAME`), never the game's: `test/db.js` (the schema, the round trip, the transactions, bringing the files in) and `test/db-game.js` (the relay and a ship's computer on the database, through restarts). They're skipped without a database.
 
 ## Layers, merged with JSON_MERGE_PATCH
