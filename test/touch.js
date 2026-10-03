@@ -86,6 +86,26 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     await drag(gridBody);
     await page.waitForFunction((s) => document.querySelector(s).scrollTop > 100, gridBody);
     step(`a touch drag scrolled the power grid (${await scrolled(gridBody)} px)`);
+    // Frames: the grid scrolls, so its panel is open at the end (no bottom arm); a panel showing
+    // all it holds is a closed C (a bottom arm), and opens as soon as it has more than shows.
+    await page.waitForFunction((s) => document.querySelector(s).closest('.lcars-panel').dataset.frame === 'open', gridBody);
+    const arm = (sel) => page.$eval(sel, (b) => getComputedStyle(b).boxShadow);
+    assert.equal(await arm(gridBody), 'none', 'the open grid panel: no bottom arm');
+    await page.evaluate(() => {
+      const p = Object.assign(document.createElement('section'), { className: 'lcars-panel', id: 'frame-probe', innerHTML: '<h2 class="lcars-panel__title"><span>Probe</span></h2><div class="lcars-panel__body" style="height: 120px; overflow: auto"><p>one line</p></div>' });
+      document.querySelector('.screen:not([hidden])').prepend(p);
+    });
+    await page.waitForFunction(() => document.getElementById('frame-probe').dataset.frame === 'closed');
+    assert.match(await arm('#frame-probe > .lcars-panel__body'), /inset/, 'closed: a bottom arm');
+    await page.evaluate(() => { const b = document.querySelector('#frame-probe > .lcars-panel__body'); for (let i = 0; i < 30; i++) b.append(Object.assign(document.createElement('p'), { textContent: `line ${i}` })); });
+    await page.waitForFunction(() => document.getElementById('frame-probe').dataset.frame === 'open');
+    await page.evaluate(() => { const b = document.querySelector('#frame-probe > .lcars-panel__body'); while (b.children.length > 1) b.lastChild.remove(); });
+    await page.waitForFunction(() => document.getElementById('frame-probe').dataset.frame === 'closed');
+    // (Cut off by the screen it's on, it's open too.)
+    await page.evaluate(() => { const b = document.querySelector('#frame-probe > .lcars-panel__body'); b.style.height = 'auto'; b.style.overflow = 'visible'; const w = Object.assign(document.createElement('div'), { id: 'frame-wrap', style: 'height: 80px; overflow-y: auto' }); document.getElementById('frame-probe').before(w); w.append(document.getElementById('frame-probe')); });
+    await page.waitForFunction(() => document.getElementById('frame-probe').dataset.frame === 'open');
+    await page.evaluate(() => document.getElementById('frame-wrap').remove());
+    step('frames: the scrolling power grid is open at its end (no bottom arm); a panel showing all it holds is a closed C, opening when it overflows (or the screen cuts it off) and closing again when it fits');
     // Every row of the grid has a name (both orders).
     for (const order of ['startup', 'operations']) {
       await page.evaluate((o) => document.getElementById(`grid-order-${o}`).click(), order);

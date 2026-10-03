@@ -107,3 +107,45 @@ window.capsule = function capsule(body, { id } = {}) {
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
+
+// Frames say whether you're seeing everything: a panel whose body scrolls (there's more than
+// shows) is open at its end (its spine runs off the bottom, no bottom arm), and a panel that
+// shows all it holds is a closed C (title bar, spine, bottom arm). Kept up as panels fill,
+// empty, resize and show: data-frame="open" | "closed" on each .lcars-panel.
+(function () {
+  const scroller = (el) => {
+    for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+      const o = getComputedStyle(a).overflowY;
+      if ((o === 'auto' || o === 'scroll') && a.scrollHeight > a.clientHeight + 2) return a;
+    }
+    return null;
+  };
+  const check = () => {
+    for (const p of document.querySelectorAll('.lcars-panel')) {
+      const b = p.querySelector(':scope > .lcars-panel__body');
+      if (!b || !b.offsetParent) continue;
+      // (More than shows: its own body scrolls, or the screen it's on cuts it off.)
+      const sc = scroller(p), pr = sc && p.getBoundingClientRect(), sr = sc && sc.getBoundingClientRect();
+      const open = b.scrollHeight > b.clientHeight + 2 || (sc && (pr.bottom > sr.bottom + 2 || pr.top < sr.top - 2));
+      const want = open ? 'open' : 'closed';
+      if (p.dataset.frame !== want) p.dataset.frame = want;
+    }
+  };
+  let timer = null, last = 0;
+  const later = () => {
+    if (timer) return;
+    timer = setTimeout(() => { timer = null; last = Date.now(); requestAnimationFrame(check); }, Math.max(0, 200 - (Date.now() - last)));
+  };
+  const start = () => {
+    check();
+    const ro = new ResizeObserver(later);
+    const watch = () => { for (const b of document.querySelectorAll('.lcars-panel > .lcars-panel__body')) if (!b.dataset.frameWatched) { b.dataset.frameWatched = '1'; ro.observe(b); } };
+    watch();
+    new MutationObserver(() => { watch(); later(); }).observe(document.body, { childList: true, subtree: true, characterData: true, attributeFilter: ['hidden', 'class'] });
+    window.addEventListener('resize', later);
+    window.addEventListener('screenchange', later);
+    document.addEventListener('scroll', later, true);
+    document.fonts?.ready.then(later);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();

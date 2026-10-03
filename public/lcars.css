@@ -187,6 +187,12 @@ body { font-family: var(--font); font-size: 18px; letter-spacing: 0.04em; min-he
   border-left: 12px solid var(--accent);
   border-bottom-left-radius: 18px;
 }
+/* Open at the end (more below: it scrolls): the spine runs off the bottom, square. Closed C (all
+   of it shown): a bottom arm under it, curving up into the spine. (screens.js sets data-frame.
+   The arm is drawn, not a border: it takes no room, so opening and closing never changes what
+   fits, and a finger on it still scrolls.) */
+.lcars-panel[data-frame='open'] > .lcars-panel__body { border-bottom-left-radius: 0; }
+.lcars-panel[data-frame='closed'] > .lcars-panel__body { box-shadow: inset 0 -10px 0 var(--accent); border-bottom-left-radius: 22px; }
 
 .lcars-row { display: flex; flex-wrap: wrap; gap: 8px; }
 
