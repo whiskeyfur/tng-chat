@@ -85,6 +85,9 @@ const PATH_SOLVER = require('./tools/path-solver');
 // Life support (tools/life-support.js): each place's air, run each second after the power; "lifeSpeed"
 // in data/settings.json runs it faster (1: real time).
 const LIFE = require('./tools/life-support');
+// Signals (tools/signals.js): the channels hails, calls and data links are carried on, and what a
+// receiver makes of them.
+const SIGNALS = require('./tools/signals');
 const LIFE_SPEED = Number(SETTINGS.read().lifeSpeed) || 1;
 // Which game this is (set by the cutover): a ship or a starbase saved in another game starts new.
 const GAME_ID = SETTINGS.read().game || '';
@@ -161,12 +164,15 @@ const server = http.createServer((req, res) => {
     return;
   }
   // d3 for the network map, served from node_modules (no CDN: it works offline and on the LAN).
-  const VENDOR = { 'd3-dispatch.js': 'd3-dispatch', 'd3-quadtree.js': 'd3-quadtree', 'd3-timer.js': 'd3-timer', 'd3-force.js': 'd3-force', 'd3-selection.js': 'd3-selection', 'd3-drag.js': 'd3-drag' };
+  // (The signal reckoning, shared with the comms stage in the browser.)
+  if (urlPath === '/shared/signals.js') { fs.readFile(path.join(__dirname, 'tools', 'signals.js'), (err, data) => (err ? res.writeHead(404).end('Not found') : res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-cache' }).end(data))); return; }
+  // (And Drawflow, pinned, for the comms stage.)
+  const VENDOR = { 'd3-dispatch.js': 'd3-dispatch', 'd3-quadtree.js': 'd3-quadtree', 'd3-timer.js': 'd3-timer', 'd3-force.js': 'd3-force', 'd3-selection.js': 'd3-selection', 'd3-drag.js': 'd3-drag', 'drawflow.js': 'drawflow', 'drawflow.css': 'drawflow' };
   if (urlPath.startsWith('/vendor/') && VENDOR[urlPath.slice(8)]) {
-    const mod = VENDOR[urlPath.slice(8)];
-    fs.readFile(path.join(__dirname, 'node_modules', mod, 'dist', `${mod}.min.js`), (err, data) => {
+    const mod = VENDOR[urlPath.slice(8)], css = urlPath.endsWith('.css');
+    fs.readFile(path.join(__dirname, 'node_modules', mod, 'dist', `${mod}.min.${css ? 'css' : 'js'}`), (err, data) => {
       if (err) return res.writeHead(404).end('Not found');
-      res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-cache' }).end(data);
+      res.writeHead(200, { 'Content-Type': css ? 'text/css' : 'text/javascript', 'Cache-Control': 'no-cache' }).end(data);
     });
     return;
   }
@@ -544,16 +550,68 @@ const coreLogView = (k) => { const e = engOf(k); return { type: 'core-log', full
 // radio (other ships' Communications in range can see it's on). Calls within
 // one ship are local (local RF).
 const carriers = new Map(); // cid -> 'link' | 'radio'
+// The channel a vessel transmits on (its own, until Communications retunes it); a radio call's (its
+// caller's, when it was put through); a data link's (the first of its two, by name).
+const channelOf = (k) => engOf(k)?.comm?.channel ?? SIGNALS.homeChannel(shipName(k));
+const callChannel = new Map(); // cid -> channel
+// Everything on the air between vessels now: { id, kind: 'hail' | 'call' | 'link', channel, tx (the
+// vessel transmitting), ships, parties (names), since }.
+function transmissions() {
+  const out = [];
+  for (const h of hails.values()) { const c = users.get(h.caller); out.push({ id: h.id, kind: 'hail', channel: h.channel ?? channelOf(h.fromShip), tx: h.fromShip, to: h.toShip, ships: [h.fromShip, h.toShip], parties: c ? [`${c.name} (${c.station}, ${shipName(h.fromShip)})`] : [], since: h.since, cipher: h.cipher || null }); }
+  const calls = new Map();
+  for (const u of users.values()) if (u.cid && u.state === 'in-call') { const c = calls.get(u.cid) || { ships: new Set(), parties: [], since: u.callSince || Date.now() }; c.ships.add(u.shipKey); c.parties.push(`${u.name} (${u.station}, ${shipName(u.shipKey)})`); calls.set(u.cid, c); }
+  for (const [cid, c] of calls) if (c.ships.size > 1 && carriers.get(cid) === 'radio') { const ships = [...c.ships]; out.push({ id: cid, kind: 'call', channel: callChannel.get(cid) ?? channelOf(ships[0]), tx: ships[0], ships, parties: c.parties, since: c.since }); }
+  for (const l of links) { const ships = l.split('|'); if (ships.every((x) => navState.has(x))) out.push({ id: `link:${l}`, kind: 'link', channel: channelOf(ships[0]), tx: ships[0], ships, parties: ships.map(shipName), since: linkSince.get(l) || Date.now() }); }
+  return out.filter((t) => !(t.ships.length === 2 && quantumPair(t.ships[0], t.ships[1])));
+}
+// What a vessel's receivers make of them: each one it hears (in radio range of where it's sent from,
+// its radio working), with its bearing, strength, phase offset and the interference on its channel.
+// Its own and those addressed to it are named; the rest only once it's listening on their channel.
+const velocityOf = (k) => { const n = navState.get(k) || {}, w = n.warp || 0, v = w <= 0 ? 0 : w < 1 ? 2 * w : 2 * w ** 1.8, a = ((n.heading || 0) * Math.PI) / 180; return { x: n.x, y: n.y, vx: Math.sin(a) * v, vy: -Math.cos(a) * v }; };
+function signalsFor(k) {
+  if (!navState.has(k) || !commsUp(k, 'radio')) return [];
+  const e = engOf(k), rx = velocityOf(k), heard = [];
+  for (const t of transmissions()) {
+    const mine = t.ships.includes(k) && t.tx === k;
+    if (mine || !navState.has(t.tx) || !commsOk(k, t.tx)) continue;
+    const s = SIGNALS.seen(rx, velocityOf(t.tx), { range: Math.min(rangesOf(k).comms, rangesOf(t.tx).comms), power: commsUp(t.tx, 'radio') ? 1 : 0.2 });
+    heard.push({ ...t, ...s });
+  }
+  return heard.map((t) => {
+    const addressed = t.ships.includes(k), listened = e.comm?.listen === t.channel;
+    const signal = { id: t.id, kind: t.kind, channel: t.channel, bearing: t.bearing, distance: t.distance, strength: t.strength, phase: t.phase, interference: SIGNALS.interference(t.channel, heard.filter((o) => o.id !== t.id)), since: t.since, addressed, listened };
+    return { ...signal, wave: SIGNALS.waveOf(signal), ...(addressed || listened ? { from: shipName(t.tx), to: t.to ? shipName(t.to) : t.ships.filter((x) => x !== t.tx).map(shipName).join(', '), parties: t.parties } : {}) };
+  });
+}
 const carrierFor = (a, b, want) => (a.shipKey === b.shipKey ? 'local' : want === 'radio' || !sameNetwork(a.shipKey, b.shipKey) ? 'radio' : 'link');
 
 function forceConnect(a, b, carrier) {
   const cid = newId('op-');
   carriers.set(cid, carrierFor(a, b, carrier));
+  if (carriers.get(cid) === 'radio') callChannel.set(cid, channelOf(a.shipKey));
   send(b, { type: 'connect', peers: [info(a)], role: 'callee', cid });
   send(a, { type: 'connect', peers: [info(b)], role: 'caller', cid });
 }
 
 const inCallTogether = (x, y) => x.state === 'in-call' && x.peers.includes(y.id);
+
+// A hail answered: its caller connected to someone aboard, by radio, or a data link when there's a
+// link path between the ships. { error } or { text }.
+function routeHail(k, id, callee, wantVia) {
+  const h = hails.get(id);
+  if (!h || h.toShip !== k) return { error: 'that hail is no longer open' };
+  const caller = users.get(h.caller);
+  if (!callee || callee.shipKey !== k) return { error: 'pick a crew member to route the hail to' };
+  hails.delete(h.id);
+  if (!caller) { broadcastOps(k); scheduleTraffic(); return { error: 'the hailing party is no longer on the line' }; }
+  const via = wantVia === 'link' && sameNetwork(caller.shipKey, callee.shipKey) ? 'link' : 'radio';
+  if (via === 'link' && (!commsUp(caller.shipKey, 'subspace') || !commsUp(callee.shipKey, 'subspace'))) { hails.set(h.id, h); return { error: 'a subspace relay is down: route it by radio' }; }
+  forceConnect(caller, callee, via);
+  opLog(h.fromShip, `the ${shipName(k)} answered: ${caller.name} is connected to ${callee.name}, ${callee.station} (${via === 'link' ? 'data link' : 'radio'})`);
+  broadcastOps(h.fromShip); broadcastOps(k); scheduleTraffic();
+  return { text: `routed the hail from the ${shipName(h.fromShip)} (${caller.name}) to ${callee.name} by ${via === 'link' ? 'data link' : 'radio'}` };
+}
 
 function operatorMessage(op, msg) {
   const ok = (text) => { send(op, { type: 'op-ok', text }); console.log(`[${op.ship} ops] ${text}`); };
@@ -609,7 +667,7 @@ function operatorMessage(op, msg) {
         if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship)}: no operator on duty`);
         if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of radio range (${rangeText(op.shipKey, target)})`);
         if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
-        const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now() };
+        const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now(), channel: channelOf(op.shipKey) };
         hails.set(h.id, h);
         send(op, { type: 'force-hangup', reason: `transferred ${caller.name} to the ${shipName(target)}` });
         send(caller, { type: 'notice', text: `Ops is transferring you to the ${shipName(target)}: hailing now` });
@@ -640,12 +698,12 @@ function operatorMessage(op, msg) {
       if (target === op.shipKey) return fail('that is this ship');
       const automated = isBase(target) && !opsOf(target).length;
       if (automated && !crewOf(target).length) return fail(`${shipName(target)} (automated): nobody aboard to take the call. Docking is open, and data links are accepted automatically`);
-      if (!automated && !opsOf(target).length) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator on duty`);
+      if (!automated && !opsOf(target).length && !crewOf(target).some((u) => u.station === 'Communications')) return fail(`no response from ${clean(msg.ship) || 'that ship'}: no operator or Communications on duty`);
       if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of radio range (${rangeText(op.shipKey, target)})`);
       if (!commsUp(op.shipKey, 'radio')) return fail('our radio has no power: hails go out by radio');
       if (!commsUp(target, 'radio')) return fail(`no answer: the ${shipName(target)}'s radio is down`);
       if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
-      const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now() };
+      const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now(), channel: channelOf(op.shipKey) };
       hails.set(h.id, h);
       send(caller, { type: 'notice', text: `Ops is hailing the ${shipName(target)} for you` });
       opLog(target, `incoming hail from the ${shipName(op.shipKey)}: ${caller.name}, ${caller.station}`);
@@ -655,21 +713,9 @@ function operatorMessage(op, msg) {
       return ok(`hailing the ${shipName(target)} for ${caller.name}`);
     }
     case 'route': {
-      // Answer an incoming hail by connecting it to someone aboard.
-      const h = hails.get(msg.hail);
-      if (!h || h.toShip !== op.shipKey) return fail('that hail is no longer open');
-      const callee = mine(msg.to), caller = users.get(h.caller);
-      if (!callee) return fail('pick a crew member to route the hail to');
-      hails.delete(h.id);
-      if (!caller) { broadcastOps(op.shipKey); return fail('the hailing party is no longer on the line'); }
-      // Radio, or a data link when there's a link path between the ships.
-      const via = msg.via === 'link' && sameNetwork(caller.shipKey, callee.shipKey) ? 'link' : 'radio';
-      if (via === 'link' && (!commsUp(caller.shipKey, 'subspace') || !commsUp(callee.shipKey, 'subspace'))) return fail('a subspace relay is down: route it by radio');
-      forceConnect(caller, callee, via);
-      opLog(h.fromShip, `the ${shipName(op.shipKey)} answered: ${caller.name} is connected to ${callee.name}, ${callee.station} (${via === 'link' ? 'data link' : 'radio'})`);
-      broadcastOps(h.fromShip);
-      broadcastOps(op.shipKey);
-      return ok(`routed the hail from the ${shipName(h.fromShip)} (${caller.name}) to ${callee.name} by ${via === 'link' ? 'data link' : 'radio'}`);
+      // Answer an incoming hail by connecting it to someone aboard (Ops: the computer cleans the signal up).
+      const r = routeHail(op.shipKey, msg.hail, mine(msg.to), msg.via);
+      return r.error ? fail(r.error) : ok(r.text);
     }
     case 'all-hands': {
       // Open an all-hands broadcast for someone aboard (yourself included).
@@ -1204,7 +1250,10 @@ const impulseRate = (k) => Math.max(0, ...DRIVES.filter((d) => engOf(k).drives[d
 // Is this speed within what the ship has? (impulse and warp are separate)
 const speedOk = (k, w) => { const l = speedLimits(k); return w <= 0 || (w < 1 ? w <= l.impulse + 1e-9 : w <= l.warp); };
 // Both ships' sensors have to reach for radio (hails, calls between ships).
-const commsOk = (a, b) => a === b || distance(a, b) <= Math.min(rangesOf(a).comms, rangesOf(b).comms);
+// (A quantum link, far-future hardware: two vessels paired for good by their designs, one of them
+// naming the other; they reach each other at any range, and nothing between them is on the air.)
+const quantumPair = (a, b) => { const qa = designOf(a)?.quantumLink, qb = designOf(b)?.quantumLink; return (!!qa && shipKey(qa) === b) || (!!qb && shipKey(qb) === a); };
+const commsOk = (a, b) => a === b || quantumPair(a, b) || distance(a, b) <= Math.min(rangesOf(a).comms, rangesOf(b).comms);
 // Subspace (data links) reaches the whole star system while both ends' subspace
 // relays work (checked with commsUp). The map is one star system for now:
 // vessels carry a system id so more can come later.
@@ -1244,6 +1293,7 @@ function navMessage(key) {
       automation: Object.fromEntries(AUTO_PANELS.filter((p) => engOf(key).auto?.[p]).map((p) => [p, { mode: engOf(key).auto[p], station: AUTO_STATION[p], name: AUTO_NAMES[p], status: engOf(key).autoStatus?.[p] || '' }])),
       // (Every panel, for each station's own toggles; and what Ops has asked a crewed station to confirm.)
       autoPanels: AUTO_PANELS.map((p) => ({ panel: p, name: AUTO_NAMES[p], station: AUTO_STATION[p], mode: engOf(key).auto?.[p] || null })),
+      comm: { channel: channelOf(key), listen: engOf(key).comm?.listen ?? null, routeAt: SIGNALS.QUALITY_TO_ROUTE }, signals: signalsFor(key),
       postureOffers: Object.entries(engOf(key).postureOffers || {}).map(([st, o]) => ({ station: st, level: o.level, items: st === 'Engineering' ? Object.entries(o.power).map(([x, v]) => `${x} ${v}%`) : o.tac })),
       autoRequests: Object.entries(engOf(key).autoReq || {}).map(([p, r]) => ({ panel: p, name: AUTO_NAMES[p], station: AUTO_STATION[p], mode: r.v, by: r.by, lead: r.lead, leadId: r.leadId })), orders: engOf(key).orderLog,
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
@@ -1786,6 +1836,28 @@ function crewCommand(ws, msg) {
       const v = msg.panel === 'engineering' ? (['startup', 'shutdown'].includes(msg.mode) ? msg.mode : null) : !!msg.on;
       setAuto(key, msg.panel, v, null, `${titled(ws)}, ${ws.station}`);
       return note(`${AUTO_NAMES[msg.panel]} automation ${autoWord(msg.panel, v)}`);
+    }
+    case 'comms': {
+      // Communications: its transmit channel { tune }, the channel it listens to { listen } (null: none),
+      // and a hail routed through the stage { route: { hail, to, chain } }: the chain's modules clean the
+      // signal up, and it goes through only clean enough.
+      if (ws.station !== 'Communications') return note('Only Communications works the comms stage');
+      const e = engOf(key);
+      if (msg.tune !== undefined) { e.comm.channel = SIGNALS.clampChannel(msg.tune); e.dirty = true; coreLog(key, 'Communications', `transmitting on channel ${e.comm.channel} (${titled(ws)})`); scheduleNav(); return note(`transmitting on channel ${e.comm.channel}`); }
+      if (msg.listen !== undefined) { e.comm.listen = msg.listen === null ? null : SIGNALS.clampChannel(msg.listen); e.heardIds = new Set(); e.dirty = true; scheduleNav(); return note(e.comm.listen === null ? 'listening: off' : `listening on channel ${e.comm.listen}`); }
+      if (msg.route) {
+        const sig = signalsFor(key).find((x) => x.id === msg.route.hail && x.kind === 'hail' && x.addressed);
+        if (!sig) return note('that hail is no longer on the air');
+        const chain = Array.isArray(msg.route.chain) ? msg.route.chain.slice(0, 8).map((m) => ({ type: m?.type, channel: Number(m?.channel), shift: Number(m?.shift), frequency: Number(m?.frequency), amplitude: Number(m?.amplitude), phase: Number(m?.phase) })) : [];
+        const q = SIGNALS.quality(sig, chain);
+        if (q.quality < SIGNALS.QUALITY_TO_ROUTE) return note(`too noisy to put through: ${Math.round(q.quality * 100)}% (needs ${SIGNALS.QUALITY_TO_ROUTE * 100}%): ${q.parts.interference > 0 ? 'interference on its channel, ' : ''}${q.parts.phaseError > 15 ? `phase off by ${Math.round(q.parts.phaseError)}°, ` : ''}noise ${Math.round(q.parts.noise * 100)}%`);
+        const callee = typeof msg.route.to === 'string' && users.get(msg.route.to);
+        const r = routeHail(key, sig.id, callee && callee.shipKey === key ? callee : null, msg.route.via);
+        if (r.error) return note(r.error);
+        coreLog(key, 'Communications', `${r.text} (${titled(ws)}, signal ${Math.round(q.quality * 100)}%)`);
+        return note(`${r.text} (signal ${Math.round(q.quality * 100)}%)`);
+      }
+      return note('tune, listen or route');
     }
     case 'posture': {
       // A station takes (or sets aside) the alert posture it was offered.
@@ -2668,6 +2740,8 @@ function freshEng(saved, { cold = false, k = null } = {}) {
     orderLog: Array.isArray(s.orderLog) ? s.orderLog.slice(0, ORDER_LOG).filter((o) => o && typeof o.text === 'string') : [],
     // Life support's air and tanks (brought back against the vessel's graph on its first tick).
     life: s.life && typeof s.life === 'object' ? s.life : null, lifeReady: false,
+    // Communications: the channel it transmits and answers on, and the one it's listening to (or none).
+    comm: { channel: Number.isFinite(s.comm?.channel) ? SIGNALS.clampChannel(s.comm.channel) : null, listen: Number.isFinite(s.comm?.listen) ? SIGNALS.clampChannel(s.comm.listen) : null },
     coreLog: Array.isArray(s.coreLog) ? s.coreLog.filter((x) => x && typeof x.text === 'string' && Number.isFinite(x.at)).slice(-CORE_LOG.keep) : [], coreLost: Number.isFinite(s.coreLost) ? s.coreLost : 0,
     // The corridors: each link's ties as Engineering set them ({ A, B, C, EPS }: closed or open), and its damage.
     corridorTies: s.corridorTies && typeof s.corridorTies === 'object' && !Array.isArray(s.corridorTies) ? Object.fromEntries(Object.entries(s.corridorTies).filter(([, v]) => v && typeof v === 'object').map(([id, v]) => [id, Object.fromEntries(['A', 'B', 'C', 'EPS'].filter((n) => typeof v[n] === 'boolean').map((n) => [n, v[n]]))])) : {},
@@ -2806,7 +2880,7 @@ const savedEng = (k) => {
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, xlBlock: e.xlBlock || [], computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     // (Each load's power path, as the design had it: a design change is noticed on the next load.)
     paths: Object.fromEntries(Object.keys(e.ties).filter((x) => /^(console|system|sub):/.test(x) && !CONDUITS.includes(x)).map((x) => [x, conduitsOf(k, x).join('>')])),
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores * 100) / 100, sporeLoaded: e.spore?.loaded || 0, brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog, coreLog: (e.coreLog || []).slice(-CORE_LOG.keep), coreLost: e.coreLost || 0, corridorTies: e.corridorTies, corridorDamage: Object.fromEntries(Object.entries(e.linkDamage || {}).map(([id, v]) => [id, Math.round(v)])),
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores * 100) / 100, sporeLoaded: e.spore?.loaded || 0, brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog, comm: e.comm, coreLog: (e.coreLog || []).slice(-CORE_LOG.keep), coreLost: e.coreLost || 0, corridorTies: e.corridorTies, corridorDamage: Object.fromEntries(Object.entries(e.linkDamage || {}).map(([id, v]) => [id, Math.round(v)])),
     life: e.lifeReady && e.life ? { air: Object.fromEntries(Object.entries(e.life.air).map(([a, x]) => [a, Object.fromEntries(Object.entries(x).map(([gas, v]) => [gas, Math.round(v * 1000) / 1000]))])), tanks: Object.fromEntries(Object.entries(e.life.tanks).map(([t, v]) => [t, Math.round(v * 1000) / 1000])), waste: Math.round(e.life.waste * 1000) / 1000 } : e.life,
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
@@ -4442,6 +4516,8 @@ setInterval(() => {
     const f = flow(k);
     { const was = JSON.stringify(lifeSig(k)); lifeTick(k, f); if (JSON.stringify(lifeSig(k)) !== was) e.dirty = true; } // (saved when the air changes)
     reportSystems(k, f);
+    // (Listening: each signal heard on the channel that isn't ours or for us goes in the core log, once.)
+    if (e.comm?.listen != null) for (const x of signalsFor(k)) if (x.listened && !x.addressed && !(e.heardIds ||= new Set()).has(x.id)) { e.heardIds.add(x.id); coreLog(k, 'Communications', `intercepted on channel ${x.channel}, bearing ${x.bearing}: ${x.kind === 'link' ? 'a data link' : x.kind === 'hail' ? 'a hail' : 'a call'}, ${x.from} to ${x.to}${x.parties?.length ? ` (${x.parties.join(', ')})` : ''}`); }
 
     // Self-destruct: containment off, and the core goes.
     if (e.selfDestruct && now >= e.selfDestruct.at) { destroy(k, `self-destruct, by order of ${e.selfDestruct.by}`); changed = true; continue; }
@@ -4674,7 +4750,7 @@ function panelOfCommand(station, msg) {
   if (station === 'Tactical' && ['shields', 'lock', 'aim', 'yield', 'frequency', 'fire', 'arm', 'tractor'].includes(t)) return 'tactical';
   if (station === 'Science' && ['scan', 'sci-lock', 'plot-course'].includes(t)) return 'science';
   if (station === 'Transporter' && ['transporter-lock', 'beam', 'transporter-diagnostic'].includes(t)) return 'transporter';
-  if (station === 'Communications' && /^link-/.test(t)) return 'comms';
+  if (station === 'Communications' && (/^link-/.test(t) || t === 'comms')) return 'comms';
   if (station === 'Shuttle Bay' && t === 'bay-doors') return 'hangar';
   return null;
 }
@@ -4852,6 +4928,13 @@ function panelRoutine(k, p) {
     return 'running the level-3 diagnostic';
   }
   if (p === 'comms') {
+    // A hail for us: put through to the senior officer aboard (Captain, First Officer, else whoever's
+    // most senior), the computer cleaning the signal up.
+    const hail = signalsFor(k).find((x) => x.kind === 'hail' && x.addressed);
+    if (hail) {
+      const who = leadOf(k, 'Captain') || leadOf(k, 'First Officer') || crewOf(k).filter((u) => !u.automaton).sort((a, b) => (SENIORITY.indexOf(a.rank) + 1 || 99) - (SENIORITY.indexOf(b.rank) + 1 || 99))[0];
+      if (who) { const r = routeHail(k, hail.id, who); if (!r.error) { coreLog(k, 'Communications', `automation: ${r.text}`); return r.text; } }
+    }
     // Data link requests from ships already on our network: accepted.
     const net = network(k);
     const req = [...linkRequests.values()].find((r) => r.toShip === k && net.has(r.fromShip));
@@ -4978,6 +5061,7 @@ function stationCommand(ws, msg) {
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
   if (t === 'automation' || t === 'automation-answer' || t === 'posture') return crewCommand(ws, msg), true;
+  if (t === 'comms') return gate(crewCommand);
   if (t === 'core-log-get') return send(ws, coreLogView(ws.shipKey)), true; // (the computer core's log, from the start) // (nor setting, or answering about, a station's automation)
   if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'emh', 'forcefield', 'brig-field', 'person-field', 'bay-doors', 'readiness'].includes(t)) return gate(crewCommand);
   if (['lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);

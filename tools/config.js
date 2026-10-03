@@ -54,6 +54,7 @@ const SHIP_FIELDS = {
   emergency: [(v) => Array.isArray(v) && v.every((b) => ['A', 'B', 'C'].includes(b)), 'a list of the low buses with an emergency battery ([] for none; left out: all three)', false],
   fusion: [isBool, 'true or false (impulse and auxiliary fusion reactors aboard)', false],
   postures: [(v) => isObj(v) && Object.entries(v).every(([lvl, x]) => ['green', 'yellow', 'red', 'blue', 'black'].includes(lvl) && isObj(x)), 'its alert postures, over the library\'s: { red: { power: { shields: 100 }, shields: "up", phasers: "armed" }, ... }', false],
+  quantumLink: [isStr, 'the vessel its quantum link is paired with (far-future hardware: its twin there, at any range, never overheard), or left out', false],
   hydroponics: [isBool, 'true or false (hydroponics aboard: plants turning carbon dioxide and water into oxygen and food)', false],
   org: [(v) => isObj(v) && Array.isArray(v.command) && v.command.every(isPosition) && (v.departments === undefined || (Array.isArray(v.departments) && v.departments.every((d) => isStr(d?.name) && Array.isArray(d.positions) && d.positions.every(isPosition)))),
     'its org chart: { command: [positions], departments: [{ name, positions }] }, a position { id, title, rank, station, n? }', false],

@@ -419,9 +419,8 @@
       // Subspace bands follow the ship's subspace relay (powered and undamaged): dead flat without it.
       panel('st-bands', 'Subspace bands', 'peach', true, spectrum(140, ['peach', 'orange', 'gold'], 48, 'Subspace band activity', () => (window.__subspace?.up === false ? 0 : 1)),
         live(readout('Subspace relay', 'gold'), () => (window.__subspace ? (window.__subspace.up ? 'Online: the whole system' : `OFFLINE: ${window.__subspace.why}`) : '---'))),
-      panel('st-signal', 'Carrier signal', 'sky', false, trace(110, 'sky', (t) => 0.7 * Math.sin(t * 14) * (0.7 + 0.3 * Math.sin(t * 0.7)) + rand(-0.04, 0.04), 160, 'Carrier signal'),
-        live(gauge('Signal strength', 'sky'), drift(0.86, 0.7, 0.98, 0.03)),
-        live(readout('Relay', 'gold'), () => 'Starbase relay 4')),
+      // The comms stage: signals in on the left, the crew on the right, modules between (stage.js).
+      panel('st-stage', 'Signal routing', 'sky', true, h('div', { class: 'comm-stage', 'data-stage': '' })),
       panel('st-log', 'Message traffic', 'lilac', false, h('div', { 'data-corelog': 'Communications' })),
     ] }),
     Transporter: (ship) => ({ code: 'TRN 11', color: 'blue', panels: [

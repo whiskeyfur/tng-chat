@@ -247,6 +247,7 @@ document.getElementById('link')?.addEventListener('click', (ev) => {
 // The computer core's log (the relay pushes each entry; the whole of it on asking): every view of
 // it, each panel's own (its station's entries, or all), newest first. Taps: All or Warnings.
 let coreEntries = [], coreLost = 0, coreAsked = false;
+let stage = null; // (the comms stage, on Communications: stage.js)
 const coreFilter = {};
 function renderCoreLog() {
   for (const box of document.querySelectorAll('[data-corelog]')) {
@@ -2729,6 +2730,9 @@ async function onMessage(msg) {
       break;
     case 'nav':
       lastNav = msg;
+      // (Communications: the comms stage.)
+      { const root = document.querySelector('[data-stage]');
+        if (root && me?.station === 'Communications' && msg.own?.signals) { stage ||= window.createStage(root, { send }); stage.update(msg.own, comms.users.filter((u) => u.ship?.toLowerCase() === me.ship.toLowerCase())).catch((err) => console.warn('comms stage:', err.message)); } }
       if (!coreAsked) { coreAsked = true; send({ type: 'core-log-get' }); }
       renderStationAutomation();
       renderCoreLog();

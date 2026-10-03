@@ -124,6 +124,20 @@
     /* Command, security, medical */
     .alert-yellow { --accent: var(--lcars-gold); }
     .alert-blue { --accent: var(--lcars-sky); }
+    /* The comms stage (stage.js, Drawflow): LCARS nodes on black. */
+    .stage-canvas { position: relative; height: 560px; background: #000; border: 1px solid #333; border-radius: 12px; overflow: hidden; }
+    .stage-canvas .drawflow-node.stage-node { width: 250px; background: #000; color: var(--lcars-text); border: 2px solid var(--lcars-tan); border-radius: 14px; padding: 6px 10px; font-size: 13px; box-shadow: none; }
+    .stage-canvas .drawflow-node.stage-signal { border-color: var(--lcars-gold); }
+    .stage-canvas .drawflow-node.stage-ours { border-color: var(--lcars-orange); }
+    .stage-canvas .drawflow-node.stage-crew { width: 200px; border-color: var(--lcars-blue); }
+    .stage-canvas .drawflow-node.stage-filter, .stage-canvas .drawflow-node.stage-phase, .stage-canvas .drawflow-node.stage-wave { border-color: var(--lcars-sky); }
+    .stage-canvas .drawflow-node.selected { border-color: #fff; background: #000; color: var(--lcars-text); }
+    .stage-canvas .drawflow .connection .main-path { stroke: var(--lcars-sky); stroke-width: 4px; }
+    .stage-canvas .drawflow-node .input, .stage-canvas .drawflow-node .output { background: var(--lcars-gold); border: 0; width: 16px; height: 16px; }
+    .stage-title { color: var(--lcars-orange); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; }
+    .stage-node .tr-tap { padding: 2px 8px; margin: 2px 2px 0 0; font-size: 12px; }
+    .stage-wave { display: block; background: #050505; border-radius: 6px; margin: 4px 0; }
+    .stage-head { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
     #alert-state { margin: 0; font-size: 28px; text-transform: uppercase; color: #66cc66; }
     #alert-state[data-level='yellow'] { color: var(--lcars-gold); }
     #alert-state[data-level='red'] { color: var(--lcars-red); animation: lcars-blink 1.2s steps(2) infinite; }
@@ -743,6 +757,7 @@
   <script src="room.js"></script>
   <script src="radio.js"></script>
   <script src="comms.js"></script>
+  <script src="stage.js"></script>
   <script src="stations.js"></script>
   <script src="nav.js"></script>
   <script src="ops.js"></script>
