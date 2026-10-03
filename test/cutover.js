@@ -59,9 +59,9 @@ const stop = (p) => new Promise((r) => { if (!p || p.exitCode !== null) return r
     await wait(1500);
     let core = run(['tools/shipcore.js', '--relay', `ws://localhost:${PORT}`, '--data', CORES, '--warm', 'Graphship']);
     const navFile = path.join(CORES, 'Graphship', '.nav.json');
-    const saved = await until(() => { try { const v = JSON.parse(fs.readFileSync(navFile, 'utf8')); return v.eng?.tiesById ? v : null; } catch { return null; } }, 20000, 'a save by system id');
+    const saved = await until(() => { try { const v = JSON.parse(fs.readFileSync(navFile, 'utf8')); return v.eng?.linksOn ? v : null; } catch { return null; } }, 20000, 'a save by link');
     assert.ok(!saved.eng.ties, 'no ties by the relay\'s names');
-    assert.deepEqual(saved.eng.tiesById['console-helm'], ['bus-a'], `the Helm console on Bus A, by id: ${JSON.stringify(saved.eng.tiesById['console-helm'])}`);
+    assert.deepEqual(saved.eng.linksOn.power['console-helm'], { 'bus-a': true, 'bus-b': false, 'bus-c': false }, `the Helm console on Bus A, by link: ${JSON.stringify(saved.eng.linksOn.power['console-helm'])}`);
     const tiesNow = async () => {
       const ws = new WebSocket(`ws://localhost:${PORT}`), msgs = [];
       ws.on('message', (m) => msgs.push(JSON.parse(m)));
@@ -79,7 +79,7 @@ const stop = (p) => new Promise((r) => { if (!p || p.exitCode !== null) return r
     ws.send(JSON.stringify({ type: 'register', name: 'chief2', ship: 'Graphship', station: 'Engineering' }));
     await wait(500);
     ws.send(JSON.stringify({ type: 'grid', ties: { 'console:Helm': ['B'] } }));
-    await until(() => { try { return JSON.parse(fs.readFileSync(navFile, 'utf8')).eng.tiesById['console-helm']?.[0] === 'bus-b'; } catch { return false; } }, 20000, 'Helm on Bus B, saved');
+    await until(() => { try { return JSON.parse(fs.readFileSync(navFile, 'utf8')).eng.linksOn.power['console-helm']['bus-b'] === true; } catch { return false; } }, 20000, 'Helm on Bus B, saved');
     ws.close();
     await stop(core); await stop(relay);
     relay = run(['server.js']);
@@ -89,7 +89,7 @@ const stop = (p) => new Promise((r) => { if (!p || p.exitCode !== null) return r
     const after = await tiesNow();
     assert.deepEqual(after.ties['console:Helm'], ['B'], 'the Helm console still on Bus B');
     for (const k of Object.keys(before.ties)) if (k !== 'console:Helm') assert.deepEqual(after.ties[k], before.ties[k], `${k} the same`);
-    step('on the graph engine a ship\'s computer saves its ties by system id (console-helm: bus-b), and after the relay and the computer restart they\'re all the same');
+    step('on the graph engine a ship\'s computer saves its ties by link (power, console-helm → bus-b: on), and after the relay and the computer restart they\'re all the same');
     ok = true;
   } catch (err) {
     console.error('FAIL:', err.message);

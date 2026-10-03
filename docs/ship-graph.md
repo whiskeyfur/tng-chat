@@ -1,4 +1,4 @@
-# Ship graphs (draft, step 1)
+# Ship graphs
 
 A vessel's design as a **graph of systems**. Every system a class has gets one entry: buses, places, consoles, systems, subsystems, sources, batteries, tanks and docking. Each entry lists what that system draws from (its **upstream**), per resource, and what's allowed on each link.
 
@@ -20,38 +20,40 @@ The relay prints its power tables and what each class has aboard when it's run w
 
 ```json
 {
-  "schema": "tng-ship-graph/1",
+  "schema": "tng-ship-graph/2",
   "type": "ship",
   "class": "runabout",
   "name": "Runabout",
   "places": [{ "id": "place-cockpit", "name": "Cockpit", "deck": 1 }],
   "systems": {
-    "bus-b": {
-      "type": "bus", "name": "Bus B", "capacity": { "power": 100 },
-      "upstream": {
-        "bus-a": { "power": { "pull": true, "push": true } },
-        "eps": { "eps": { "pull": "auto", "push": false, "rate": 100 } },
-        "solar": { "power": { "pull": "auto", "push": false } },
-        "battery-b": { "power": { "pull": "auto", "push": "auto", "rate": 50 } }
-      }
-    },
+    "bus-b": { "type": "bus", "name": "Bus B", "capacity": { "power": 100 } },
     "warp-core": {
       "key": "core", "type": "warp-core", "name": "Warp core", "produces": { "eps": 300 },
-      "upstream": { "tank-deu-core": { "deu": { "pull": "auto", "push": false } } },
       "systems": {
-        "subsystem-injector": { "key": "sub:injector", "type": "subsystem", "name": "Antimatter injector", "place": "place-aft-compartment", "upstream": { "bus-a": { "power": { "pull": "auto", "push": false } } } }
+        "subsystem-injector": { "key": "sub:injector", "type": "subsystem", "name": "Antimatter injector", "place": "place-aft-compartment", "consumes": { "power": 10 } }
       }
     },
     "system-engines": {
       "key": "system:engines", "type": "system", "name": "Warp drive", "place": "place-warp-nacelles-port-and-starboard",
-      "consumes": { "eps": 100 }, "effects": { "ftl": { "maxWarp": 5 } },
-      "upstream": { "eps": { "eps": { "pull": "auto", "push": false } } }
+      "consumes": { "eps": 100 }, "effects": { "ftl": { "maxWarp": 5 } }
     },
-    "console-helm": {
-      "key": "console:Helm", "type": "console", "name": "Helm console", "place": "place-cockpit",
-      "consumes": { "power": 2 },
-      "upstream": { "bus-a": { "power": { "pull": "auto", "push": false } }, "bus-b": { "power": { "pull": true, "push": false } } }
-    }
+    "console-helm": { "key": "console:Helm", "type": "console", "name": "Helm console", "place": "place-cockpit", "consumes": { "power": 2 }, "effects": { "seat": { "station": "Helm" } } }
+  },
+  "links": {
+    "power": {
+      "bus-b": {
+        "bus-a": { "pull": true, "push": true },
+        "solar": { "pull": "auto", "push": false },
+        "battery-b": { "pull": "auto", "push": "auto", "rate": 100, "pushRate": 50 }
+      },
+      "subsystem-injector": { "bus-a": { "pull": "auto", "push": false, "pri": 1003, "min": "all" } },
+      "console-helm": { "bus-a": { "pull": "auto", "push": false, "pri": 1012, "min": 2 }, "bus-b": { "pull": true, "push": false } }
+    },
+    "eps": {
+      "bus-b": { "eps": { "pull": "auto", "push": false, "rate": 100 } },
+      "system-engines": { "eps": { "pull": "auto", "push": false } }
+    },
+    "deu": { "warp-core": { "tank-deu-core": { "pull": "auto", "push": false } } }
   }
 }
 ```
@@ -68,24 +70,29 @@ The relay prints its power tables and what each class has aboard when it's run w
 | `place` | The place it's in (its power runs through that place's conduit). |
 | `systems` | Its parts, nested: each the same shape as any system. A subsystem is in its system, station or source; a thruster in its drive; a containment in its tank; a life-support system in life support's conduit. Ids are unique across the whole tree, so a link can point anywhere. `parentName` names a parent this class doesn't have (a station it lacks). |
 | `via` | A conduit below its place that its power also runs through (life support's, the engines'). |
-| `upstream` | `{ upstream system id: { resource: link } }`: what it draws from. |
 | `effects` | What it lets the vessel do beyond converting resources, with its parameters: `{ "ftl": { "maxWarp": 5 } }`, `{ "shields": { "strength": 0.4 } }`, `{ "phasers": { "array": 1 } }`, `{ "comms": { "range": "subspace" } }`. The names: `ftl`, `jump`, `impulse`, `maneuver`, `shields`, `phasers`, `torpedoes`, `tractor`, `transport`, `sensors`, `comms`, `life-support`, `gravity`, `dampers`, `sif`, `deflector`, `holo`, `force-fields`, `brig`, `shuttle-bay`, `docking`, `computing`, `replication`, `seat`… A console's `seat` (`{ "seat": { "station": "Helm" } }`) is the one place someone sits at it; more seats are more consoles. A vessel's stations are its seats (John, 2026-10-03). (and `cloak` when a design has one). In play, an effect's strength is how well its system is fed (supplied over required) times its health. Play will ask for an effect ("the best FTL aboard") rather than a system's id, so a new kind of drive or weapon is a design change, not code (John, 2026-10-03). |
 | `creative` | `{ resource: true }`: it never runs short of that resource (John, 2026-10-03). As a source it gives whatever's asked of it while it's there, with its links' `rate` still the limit. As a store or tank it never runs dry or fills. A starbase, a shipyard or a GM object: a design lists `"creative": ["power", "eps", "deu", "am"]` and its sources, stores and tanks get it. A ship's dock feeds are creative (the starbase on the other side), at the dock's rate. |
 | `count` | On a docking port: `null` for as many as needed (a starbase). |
 
-`type`, `name`, `consumes`, `produces`, `capacity`, `effects`, `upstream` and `systems` sit together on each system: a system is a resource converter (what it consumes, what it produces) with effects (John). The vessel itself (the root) carries only who it is (`type`, `class`, `name`, its `places`) and its `systems`: what it consumes and produces as a whole is worked out from them, never stored, so it can't disagree with them.
+`type`, `name`, `consumes`, `produces`, `capacity`, `effects` and `systems` sit together on each system (its links are in the vessel's `links`): a system is a resource converter (what it consumes, what it produces) with effects (John). The vessel itself (the root) carries only who it is (`type`, `class`, `name`, its `places`) and its `systems`: what it consumes and produces as a whole is worked out from them, never stored, so it can't disagree with them.
 
 ### A link
 
-A link is stored on the system downstream, under the upstream system's id, for each resource it carries:
+Links are one map at the vessel's root, `links`, beside `systems` (not inside it, so a link can't be mistaken for a system), resource first (John, 2026-10-03; format version 2):
+
+`links[resource][system][other] = { pull, push, connect, rate, pushRate, pri, min, why }`
+
+Each resource between a pair of systems is its own link, and both directions are on that one entry. `system` draws (`pull`) from `other`, and sends back (`push`). "Upstream" is only the direction a link was written in, since power can flow either way. To chart around any system: on its left, what it draws from (`links[r][system]`); on its right, what draws from it (every `links[r][x][system]`). `index()` and `upstreams()` in `tools/ship-graph.js` give both. A version-1 file (each system's links in its own `upstream`) is read as version 2, and `node tools/ship-graph.js --convert` rewrites it.
+
+The settings on a link:
 
 | Setting | |
 |---|---|
-| `pull` | May the downstream system draw from the upstream one? |
+| `pull` | May `system` draw from `other`? |
 | `push` | May it send back the other way? (a battery charging; a crosslink carrying the other way; a docked ship's export) |
 | `connect` | For a resource that's connected rather than moved (the ODN). |
 | `rate` | Its limit on a pull: what the upstream system gives down this link at most (an EPS tap's, a battery's output, the dock's, a radiator's). |
-| `pushRate` | Its limit the other way (a battery's charge rate). |
+| `pushRate` | Its limit the other way (a battery's charge rate). Missing: `rate`. |
 | `pri` | On a pull: who's served first when the supply is short (lower first). The converter writes today's rule as numbers: containment 0; loads tied to one bus 100+, to two 200+, to three 300+, each tier in the systems' priority order. |
 | `min` | On a pull: the least the system must get to work at all. Below it, it gets nothing, reads NO OUTPUT, and the supply goes on to the next link. A number, or `"all"` (all it draws: a subsystem, a containment). A console's is 2; a system works on what it gets, so it has none. |
 | `why` | Optional: why it's `false` or `"warn"`, shown to the crew. |
@@ -208,7 +215,7 @@ What `min` changes against today, from the starved state: the subspace relay get
 - **Seats:** a vessel's stations are its consoles' `seat` effects, and a seat whose console has no power reads standby on the sign-in and Station screens.
 - **The graph engine** (`"engine": "graph"` in `data/settings.json`; `ENGINE` in the environment wins):
   - The relay shares out power with the graph solver, so minimums and `creative` take effect.
-  - Ships save their ties by system id (`tiesById`: `{ "console-helm": ["bus-a"] }`).
+  - Ships save their ties as their links, on or off, keyed as the graph keys them: `linksOn[resource][system][other] = true | false` (an earlier save's `tiesById` still loads).
   - The relay's own solver still works out what each load wants and the breakers' loads.
   - Off by default: the game plays as before until the cutover.
 - **The cutover** (`node tools/cutover.js`; asked for first):

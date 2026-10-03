@@ -2264,19 +2264,19 @@ function graphInfo(k) {
   if (!g) return null;
   const hit = graphInfoCache.get(gid);
   if (hit?.g === g) return hit;
-  const { all } = SHIP_GRAPH.nodes(g), L = { 'bus-a': 'A', 'bus-b': 'B', 'bus-c': 'C', eps: 'EPS' };
+  const { all } = SHIP_GRAPH.nodes(g), U = SHIP_GRAPH.upstreams(g), L = { 'bus-a': 'A', 'bus-b': 'B', 'bus-c': 'C', eps: 'EPS' };
   const byKey = {}, nodes = {}, auto = {}, path = {};
   const isAuto = (res) => Object.values(res || {}).some((p) => p.pull === 'auto');
   for (const [id, s] of Object.entries(all)) {
     if (!s.key) continue;
     byKey[s.key] = id;
     const n = new Set(), a = new Set();
-    for (const [up, res] of Object.entries(s.upstream || {})) if (L[up]) { n.add(L[up]); if (isAuto(res)) a.add(L[up]); }
-    for (const b of Object.keys(L)) { const res = all[b]?.upstream?.[id]; if (res) { n.add(L[b]); if (isAuto(res)) a.add(L[b]); } }
+    for (const [up, res] of Object.entries(U[id] || {})) if (L[up]) { n.add(L[up]); if (isAuto(res)) a.add(L[up]); }
+    for (const b of Object.keys(L)) { const res = U[b]?.[id]; if (res) { n.add(L[b]); if (isAuto(res)) a.add(L[b]); } }
     nodes[s.key] = NODES.filter((x) => n.has(x)); auto[s.key] = NODES.filter((x) => a.has(x));
   }
   // (The crosslink: the buses its closed links join.)
-  auto.crosslink = [...new Set([...(isAuto(all['bus-b']?.upstream?.['bus-a']) ? ['A', 'B'] : []), ...(isAuto(all['bus-c']?.upstream?.['bus-b']) ? ['B', 'C'] : [])])].sort();
+  auto.crosslink = [...new Set([...(isAuto(U['bus-b']?.['bus-a']) ? ['A', 'B'] : []), ...(isAuto(U['bus-c']?.['bus-b']) ? ['B', 'C'] : [])])].sort();
   nodes.crosslink = ['A', 'B', 'C'];
   // (A power path: its place, the places that one's reached through, then a conduit below its place.)
   const placeByName = Object.fromEntries((g.places || []).map((p) => [p.name, p])), placeById = Object.fromEntries((g.places || []).map((p) => [p.id, p]));
@@ -2468,7 +2468,8 @@ function freshEng(saved, { cold = false, k = null } = {}) {
   // (A new one's ties: its graph's "auto" links; without a graph yet, its design's.)
   const vk = k, designTies = k ? graphInfo(k)?.auto || designOf(k).ties || {} : {}, tapMax = k ? busMaxOf(k) : BUS_MAX;
   let s = saved && typeof saved === 'object' ? saved : cold ? COLD : {};
-  if (s.tiesById && k) s = { ...s, ties: tiesFromIds(k, s.tiesById) }; // (a graph-engine save: ties by system id)
+  if (s.linksOn && k) s = { ...s, ties: tiesFromLinks(k, s.linksOn) }; // (a graph-engine save: each link on or off)
+  else if (s.tiesById && k) s = { ...s, ties: tiesFromIds(k, s.tiesById) }; // (an earlier one: ties by system id)
   // Ties: a list of nodes (older saves had one bus, or null for off), only those allowed.
   // A saved tie that's no longer allowed (an EPS tie on an A/B load, say) moves to the default bus.
   const tiesOf = (k, v, d) => {
@@ -2671,7 +2672,7 @@ const savedEng = (k) => {
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
     // (The graph engine: ties saved by system id, its buses by theirs.)
-    ...(GRAPH_PLAY && GRAPHS[graphIdOf(k)] ? { ties: undefined, tiesById: tiesToIds(k, e.ties) } : {}),
+    ...(GRAPH_PLAY && GRAPHS[graphIdOf(k)] ? { ties: undefined, linksOn: tiesToLinks(k, e.ties) } : {}),
   };
 };
 // A vessel's ties by system id ({ 'console-helm': ['bus-a'], ... }; the crosslink as "crosslink"),
@@ -2688,6 +2689,35 @@ function tiesFromIds(k, byId) {
   for (const [id, list] of Object.entries(byId || {})) { const key = id === 'crosslink' ? 'crosslink' : all[id]?.key; if (key && Array.isArray(list)) out[key] = list.map((b) => L[b]).filter(Boolean); }
   return out;
 }
+// A vessel's ties as its links, on or off, keyed as the graph keys them (resource first:
+// linksOn[resource][system][other] = true or false; the crosslink, the buses' links to each other), and back.
+function tiesToLinks(k, ties) {
+  const g = GRAPHS[graphIdOf(k)], all = SHIP_GRAPH.nodes(g).all, U = SHIP_GRAPH.upstreams(g), on = {};
+  const idOf = Object.fromEntries(Object.entries(all).filter(([, s]) => s.key).map(([id, s]) => [s.key, id]));
+  const put = (r, d, u, v) => { ((on[r] ||= {})[d] ||= {})[u] = v; };
+  for (const [key, list] of Object.entries(ties)) {
+    if (key === 'crosslink') { for (const [d, u] of [['bus-b', 'bus-a'], ['bus-c', 'bus-b']]) if (U[d]?.[u]?.power) put('power', d, u, list.includes(GRAPH_BUS_IDS_L[d]) && list.includes(GRAPH_BUS_IDS_L[u])); continue; }
+    const id = idOf[key];
+    if (!id) continue;
+    for (const [n, b] of Object.entries(GRAPH_BUS_IDS)) {
+      const r = n === 'EPS' ? 'eps' : 'power';
+      if (U[id]?.[b]?.[r]) put(r, id, b, list.includes(n)); else if (U[b]?.[id]?.[r]) put(r, b, id, list.includes(n));
+    }
+  }
+  return on;
+}
+function tiesFromLinks(k, on) {
+  const g = GRAPHS[graphIdOf(k)], all = g ? SHIP_GRAPH.nodes(g).all : {}, out = {};
+  const add = (key, n, v) => { out[key] ||= []; if (v && !out[key].includes(n)) out[key].push(n); };
+  for (const downs of Object.values(on || {})) for (const [d, ups] of Object.entries(downs || {})) for (const [u, v] of Object.entries(ups || {})) {
+    const bd = GRAPH_BUS_IDS_L[d], bu = GRAPH_BUS_IDS_L[u];
+    if (bd && bu) { out.crosslink ||= []; if (v) for (const n of [bd, bu]) if (!out.crosslink.includes(n)) out.crosslink.push(n); continue; }
+    if (bd && all[u]?.key) add(all[u].key, bd, v); else if (bu && all[d]?.key) add(all[d].key, bu, v);
+  }
+  for (const key of Object.keys(out)) out[key] = NODES.filter((n) => out[key].includes(n));
+  return out;
+}
+const GRAPH_BUS_IDS_L = { 'bus-a': 'A', 'bus-b': 'B', 'bus-c': 'C', eps: 'EPS' };
 const towedBy = (k) => [...eng].find(([, e]) => e.towing === k)?.[0] || null;
 // A subsystem works when it has its power and isn't badly damaged.
 const SUB_FAIL_DAMAGE = 50;
@@ -5722,7 +5752,7 @@ try {
   const files = CONFIG.readShipFiles();
   for (const id of Object.keys(d.classes)) {
     // (A design file that's a graph is the graph; an older one is converted.)
-    GRAPHS[id] = SHIP_GRAPH.isGraphFile(files[id]) ? (({ about, refit, indestructible, lands, wiring, org, seats, ...g }) => g)(files[id]) : SHIP_GRAPH.convert(id, designById(id), d);
+    GRAPHS[id] = SHIP_GRAPH.isGraphFile(files[id]) ? (({ about, refit, indestructible, lands, wiring, org, seats, ...g }) => g)(SHIP_GRAPH.migrate(files[id])) : SHIP_GRAPH.convert(id, designById(id), d);
     GRAPH_REV[id] = crypto.createHash('sha256').update(JSON.stringify(GRAPHS[id])).digest('hex').slice(0, 12);
   }
 } catch (err) { console.error(`ship graphs: not built (${err.message})`); }

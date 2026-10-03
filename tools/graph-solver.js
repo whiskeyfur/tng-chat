@@ -35,7 +35,7 @@ function solve(g, rt, { enforceMin = true } = {}) {
 }
 
 function once(g, rt, off) {
-  const { all } = GRAPH.nodes(g);
+  const { all } = GRAPH.nodes(g), U = GRAPH.upstreams(g);
   const lib = GRAPH.types();
   const ids = Object.keys(all);
   const typeOf = (id) => lib[all[id].type] || {};
@@ -47,13 +47,13 @@ function once(g, rt, off) {
   const resOf = (n) => (n === eps ? 'eps' : 'power');
 
   // Sources (and stores): what each could give, where it's tied, an even share each when it's several.
-  const srcIds = ids.filter((id) => ['source', 'store'].includes(typeOf(id).role) && NODES.some((n) => all[n].upstream?.[id]));
+  const srcIds = ids.filter((id) => ['source', 'store'].includes(typeOf(id).role) && NODES.some((n) => U[n]?.[id]));
   const srcs = srcIds.map((id) => {
-    const ties = NODES.filter((n) => all[n].upstream?.[id] && rt.on(n, id));
+    const ties = NODES.filter((n) => U[n]?.[id] && rt.on(n, id));
     // (Creative on what it gives (a starbase, a GM object): never runs dry while it's there; each
     // link's rate still limits it.)
     const creative = ties.some((n) => all[id].creative?.[resOf(n)]);
-    const rate = ties.reduce((m, n) => m + (all[n].upstream[id][resOf(n)]?.rate ?? Infinity), 0);
+    const rate = ties.reduce((m, n) => m + (U[n][id][resOf(n)]?.rate ?? Infinity), 0);
     const avail = ties.length ? rt.supply(id) : 0;
     // (There to give: a feed while its connection is (a starbase while docked); a store or a tank always.)
     const there = avail > 0 || typeOf(id).role === 'store';
@@ -68,7 +68,7 @@ function once(g, rt, off) {
   let viaEps = 0;
 
   // The crosslink: pools of buses whose links are closed, and which ways power may cross them.
-  const pair = (a, b) => (all[b].upstream?.[a] ? [b, a] : all[a].upstream?.[b] ? [a, b] : null); // [down, up]
+  const pair = (a, b) => (U[b]?.[a] ? [b, a] : U[a]?.[b] ? [a, b] : null); // [down, up]
   const joined = (a, b) => { const p = pair(a, b); return !!p && rt.on(p[0], p[1]); };
   const poolOf = {};
   for (const n of lows) {
@@ -95,7 +95,7 @@ function once(g, rt, off) {
     if (!p) return;
     for (let i = 1; i < p.length; i++) { const [a, b] = [p[i - 1], p[i]], key = [a, b].sort().join('|'); crossflow[key] = (crossflow[key] || 0) + (a < b ? t : -t); }
   };
-  const taps = Object.fromEntries(lows.map((n) => [n, all[n].upstream?.[eps] ? rt.tap(n) : 0]));
+  const taps = Object.fromEntries(lows.map((n) => [n, U[n]?.[eps] ? rt.tap(n) : 0]));
   const maxOf = (n) => rt.busMax(n);
   const busRoom = (n) => pool(n).reduce((m, x) => m + maxOf(x) - bus[x].have, 0);
   const tapRoom = (n) => pool(n).reduce((m, x) => m + Math.max(0, taps[x] - bus[x].tapUsed), 0);
@@ -127,12 +127,12 @@ function once(g, rt, off) {
   };
 
   // The loads: what each wants, where it's tied (and every conduit on its path too), its pri and min.
-  const consumers = ids.filter((id) => typeOf(id).role === 'load' && NODES.some((n) => all[id].upstream?.[n]));
+  const consumers = ids.filter((id) => typeOf(id).role === 'load' && NODES.some((n) => U[id]?.[n]));
   const path = (id) => [all[id].place, all[id].via].filter((x) => x && all[x]);
-  const tiesFor = (id) => NODES.filter((n) => all[id].upstream?.[n] && rt.on(id, n) && path(id).every((c) => all[c].upstream?.[n] && rt.on(c, n)));
-  const priOf = (id) => Math.min(...NODES.map((n) => all[id].upstream?.[n]?.[resOf(n)]?.pri).filter((x) => x !== undefined), Infinity);
+  const tiesFor = (id) => NODES.filter((n) => U[id]?.[n] && rt.on(id, n) && path(id).every((c) => U[c]?.[n] && rt.on(c, n)));
+  const priOf = (id) => Math.min(...NODES.map((n) => U[id]?.[n]?.[resOf(n)]?.pri).filter((x) => x !== undefined), Infinity);
   const want = Object.fromEntries(consumers.map((id) => [id, off.has(id) ? 0 : rt.want(id)]));
-  const min = Object.fromEntries(consumers.map((id) => { const m = NODES.map((n) => all[id].upstream?.[n]?.[resOf(n)]?.min).find((x) => x !== undefined); return [id, m === 'all' ? rt.want(id) : m || 0]; }));
+  const min = Object.fromEntries(consumers.map((id) => { const m = NODES.map((n) => U[id]?.[n]?.[resOf(n)]?.min).find((x) => x !== undefined); return [id, m === 'all' ? rt.want(id) : m || 0]; }));
   const got = Object.fromEntries(consumers.map((id) => [id, 0]));
   const byPri = [...consumers].sort((a, b) => priOf(a) - priOf(b));
   const serve = (id, amt, topUp = false) => {
@@ -154,12 +154,12 @@ function once(g, rt, off) {
   }
   // Charging a bus's battery from what's left: its breaker closed, and not covering a shortfall itself.
   const charging = blank();
-  const storeOf = (n) => srcs.find((s) => typeOf(s.id).role === 'store' && all[n].upstream?.[s.id]);
+  const storeOf = (n) => srcs.find((s) => typeOf(s.id).role === 'store' && U[n]?.[s.id]);
   const usedOf = (s) => (s ? s.given : 0);
   const chargeFrom = (n, split) => {
     const st = storeOf(n);
     if (!st || !rt.on(n, st.id) || usedOf(st) > 0) return;
-    const link = all[n].upstream[st.id][resOf(n)];
+    const link = U[n][st.id][resOf(n)];
     const room = Math.min(link.pushRate ?? link.rate ?? Infinity, all[st.id].creative?.[resOf(n)] ? Infinity : (all[st.id].capacity?.[resOf(n)] ?? Infinity) - rt.level(st.id));
     for (const x of srcs) {
       if (lastResort(x.id) || charging[n] >= room || (!split && x.ties.length > 1) || (!rt.epsLive && x.ties.includes(eps))) continue;
@@ -194,7 +194,7 @@ function once(g, rt, off) {
   const press = storeOf(eps);
   const epsGen = srcs.filter((x) => !lastResort(x.id) && x.ties.includes(eps)).reduce((m, x) => m + (Number.isFinite(x.full) ? x.full : rt.epsChargeGen), 0);
   if (press && usedOf(press) <= 0 && (rt.epsLive || epsGen >= rt.epsChargeGen)) {
-    const link = all[eps].upstream[press.id].eps;
+    const link = U[eps][press.id].eps;
     const room = Math.min(link.pushRate ?? link.rate ?? Infinity, all[press.id].creative?.eps ? Infinity : (all[press.id].capacity?.eps ?? Infinity) - rt.level(press.id), maxOf(eps) - viaEps);
     for (const x of srcs) {
       if (lastResort(x.id) || !x.ties.includes(eps) || charging[eps] >= room) continue;
@@ -253,8 +253,8 @@ function heatStep(g, r, state, { dt = 1, pumps = true } = {}) {
   const lib = JSON.parse(require('fs').readFileSync(require('path').join(require('./config').DIR, 'system-types.json'), 'utf8'));
   const { warm, hot } = lib.heat.temperature;
   state.temp ||= {}; state.sink ||= 0;
-  const loop = Object.keys(all).find((id) => all[id].type === 'coolant-loop');
-  const makers = loop ? Object.keys(all[loop].upstream).filter((id) => all[id].type !== 'heat-sink' && all[id].produces?.heat) : [];
+  const U = GRAPH.upstreams(g), loop = Object.keys(all).find((id) => all[id].type === 'coolant-loop');
+  const makers = loop ? Object.keys(U[loop] || {}).filter((id) => all[id].type !== 'heat-sink' && all[id].produces?.heat) : [];
   // (What each made: its full-power heat, scaled by what it handled of its full draw or output.)
   const made = {};
   for (const id of makers) {
@@ -264,7 +264,7 @@ function heatStep(g, r, state, { dt = 1, pumps = true } = {}) {
   }
   const total = Object.values(made).reduce((a, b) => a + b, 0);
   const radiators = Object.keys(all).filter((id) => all[id].type === 'radiator');
-  const dumpCap = pumps ? radiators.reduce((n, id) => n + (all[id].upstream[loop]?.heat?.rate || 0), 0) * dt : 0;
+  const dumpCap = pumps ? radiators.reduce((n, id) => n + (U[id][loop]?.heat?.rate || 0), 0) * dt : 0;
   const sinkId = Object.keys(all).find((id) => all[id].type === 'heat-sink'), sinkCap = sinkId ? all[sinkId].capacity.heat : 0;
   // (The radiators first, from the sink too; then the sink fills; then the systems keep the rest.)
   let dumped = Math.min(dumpCap, total + state.sink);

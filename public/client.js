@@ -793,8 +793,11 @@ function ensureShipGraph(grid) {
     const walk = (sys, p) => { for (const [id, s] of Object.entries(sys || {})) { all[id] = s; parent[id] = p; if (s.key) byKey[s.key] = id; walk(s.systems, id); } };
     walk(v.graph.systems, null);
     for (const id of Object.keys(all)) { up[id] = []; down[id] = []; }
-    for (const [id, s] of Object.entries(all)) for (const [u, res] of Object.entries(s.upstream || {})) if (all[u] && Object.keys(res).some((r) => r !== 'heat')) { up[id].push(u); down[u].push(id); }
-    shipGraph = { want, g: v.graph, all, parent, up, down, byKey, types: v.types || {} };
+    // (Links, resource first: links[resource][system][other]; each system's, by the other system.)
+    const U = {};
+    for (const [r, downs] of Object.entries(v.graph.links || {})) for (const [d, ups] of Object.entries(downs)) for (const [u, perm] of Object.entries(ups)) ((U[d] ||= {})[u] ||= {})[r] = perm;
+    for (const [id, ups] of Object.entries(U)) for (const [u, res] of Object.entries(ups)) if (all[id] && all[u] && Object.keys(res).some((r) => r !== 'heat')) { up[id].push(u); down[u].push(id); }
+    shipGraph = { want, g: v.graph, all, parent, up, down, byKey, U, types: v.types || {} };
     const box = document.querySelector('[data-distribution]');
     if (box) box.dataset.sig = '';
     renderDistribution(lastNav?.own?.grid);
@@ -1131,7 +1134,7 @@ function renderDistGraph(grid, box) {
     const [down, up] = ci < 2 ? [n.via, n.id] : ci > 2 ? (n.part ? [n.id, null] : [n.id, n.via]) : [null, null];
     const tied = down && up ? on(down, up) : null, mw = down && up ? flow(down, up) : null;
     const st = ci === 2 ? 'root' : tied === false ? 'open' : mw > 0.5 ? 'live' : tied ? 'idle' : 'struct';
-    const word = ci === 2 ? (all[R].type || '') : n.part ? 'part' : tied === false ? 'standby' : mw > 0.5 ? 'live' : tied ? 'idle' : Object.keys(all[down]?.upstream?.[up] || {}).join(', ') || 'link';
+    const word = ci === 2 ? (all[R].type || '') : n.part ? 'part' : tied === false ? 'standby' : mw > 0.5 ? 'live' : tied ? 'idle' : Object.keys(G.U[down]?.[up] || {}).join(', ') || 'link';
     const g = svgEl('g', { class: `dist-node dist-node--${st}`, transform: `translate(${x} ${y})`, role: 'button', tabindex: 0, 'data-graph': n.id, ...(key(n.id) ? { 'data-key': key(n.id) } : {}) });
     g.append(svgEl('rect', { width: CW, height: PH, rx: PH / 2, fill: COLOR[st] }),
       svgEl('text', { x: 16, y: 17, 'font-size': 13, fill: st === 'open' ? 'var(--lcars-text)' : '#000' }, nameOf(n.id).toUpperCase().slice(0, 26)),

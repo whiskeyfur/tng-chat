@@ -48,7 +48,8 @@ try {
   assert.ok(down.eps.eps.includes('bus-a') && down.eps.eps.includes('system-weapons'), 'the EPS feeds Bus A (its tap) and the weapons');
   assert.ok(up['bus-b'].power.includes('solar') && up['bus-b'].power.includes('dock-power'), 'Bus B draws from solar and dock power');
   const all = GRAPH.nodes(g).all;
-  assert.equal(all['bus-c'].upstream['bus-a'].power.pull, false, 'A and C never link directly');
+  const U = GRAPH.upstreams(g);
+  assert.equal(g.links.power['bus-c']['bus-a'].pull, false, 'A and C never link directly');
   // (Nested: a system's parts are in it; consumes and produces are each system's, never the vessel's.)
   assert.ok(g.systems['warp-core'].systems['subsystem-injector'] && g.systems['impulse-port'].systems['impulse-port-thrusters'], 'the warp core holds its injector; a drive its thrusters');
   assert.ok(!('consumes' in g) && !('produces' in g), 'consumes and produces are on the systems');
@@ -65,10 +66,11 @@ try {
   const dumped = Object.entries(all).filter(([id]) => id.startsWith('radiator')).reduce((n, [, s]) => n + s.consumes.heat, 0);
   assert.ok(made > 0 && dumped >= made && dumped < made * 1.2, `the radiators just balance the heat (${made} made, ${dumped} dumped)`);
   assert.ok(Object.keys(GRAPH.index(g).up['coolant-loop'].heat).length > 10, 'the coolant loop takes heat from the systems');
-  assert.equal(all['containment-am-pods'].upstream['bus-a'].power.pri, 0, 'containment is served first');
-  assert.ok(all['console-helm'].upstream['bus-a'].power.pri < all['system-shields'].upstream.eps.eps.pri + 100, 'pri set');
-  assert.equal(all['console-helm'].upstream['bus-a'].power.min, 2, 'a console works on its 2 MW or not at all');
-  assert.equal(all['subsystem-injector'].upstream['bus-a'].power.min, 'all', 'a subsystem needs all it draws');
+  assert.equal(U['containment-am-pods']['bus-a'].power.pri, 0, 'containment is served first');
+  assert.ok(U['console-helm']['bus-a'].power.pri < U['system-shields'].eps.eps.pri + 100, 'pri set');
+  assert.equal(U['console-helm']['bus-a'].power.min, 2, 'a console works on its 2 MW or not at all');
+  assert.equal(U['subsystem-injector']['bus-a'].power.min, 'all', 'a subsystem needs all it draws');
+  assert.ok(Object.values(all).every((s) => s.upstream === undefined), 'no links on the systems: all in "links"');
   // (The starbase's design is creative in power, EPS, deuterium and antimatter: its core and tanks never run dry.)
   const sb = GRAPH.nodes(GRAPH.convert('starbase', designs.starbase, d)).all;
   assert.ok(sb['warp-core']?.creative?.eps && sb['tank-deu-main']?.creative?.deu && sb['tank-am-main']?.creative?.am, 'a starbase: creative core and tanks');
@@ -78,12 +80,12 @@ try {
   // Something wrong: refused, saying what.
   const broken = JSON.parse(JSON.stringify(g)), b = GRAPH.nodes(broken).all;
   b['system-shields'].type = 'deflector-dish';
-  b['console-helm'].upstream['bus-z'] = { power: { pull: true } };
-  b['solar'].upstream['bus-b'] = { power: { pull: 'maybe' } };
+  broken.links.power['console-helm']['bus-z'] = { pull: true };
+  broken.links.power['bus-b'].solar.pull = 'maybe';
   b['subsystem-patternbuffers'].place = 'nowhere';
-  b['console-helm'].upstream['bus-a'].power.min = 'some';
+  broken.links.power['console-helm']['bus-a'].min = 'some';
   broken.produces = { power: 5 };
-  broken.systems['warp-core'].systems['bus-a'] = { type: 'bus', name: 'Bus A again', upstream: {} };
+  broken.systems['warp-core'].systems['bus-a'] = { type: 'bus', name: 'Bus A again' };
   const bad = GRAPH.check(broken);
   for (const want of ['no system type "deflector-dish"', 'no system "bus-z"', 'false, "warn", true or "auto"', 'place: no place "nowhere"', 'produces: belongs on a system', '"bus-a" is used twice', 'min: a number, or "all"']) assert.ok(bad.some((b) => b.includes(want)), `refused for: ${want} (${bad})`);
   step('a graph with an unknown type, a missing upstream, a bad permission, a missing place, production on the vessel or an id used twice is refused, each named');

@@ -79,6 +79,7 @@ function loadFolder(sub, fields, log) {
     let v;
     try { v = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (err) { log(`config: skipping ${where}: not valid JSON (${err.message})`); continue; }
     if (sub === 'ships' && GRAPH().isGraphFile(v)) {
+      v = GRAPH().migrate(v); // (an older graph: its links into "links")
       const wrong = GRAPH().check(v);
       if (wrong.length) { log(`config: skipping ${where}: ${wrong.slice(0, 3).join('; ')}${wrong.length > 3 ? ` (and ${wrong.length - 3} more)` : ''}`); continue; }
       v = GRAPH().toDesign(v);
@@ -142,6 +143,7 @@ function loadGraphs(log = console.warn) {
     let g;
     try { g = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (err) { log(`config: skipping config/ships/${f}: not valid JSON (${err.message})`); continue; }
     if (!GRAPH.isGraphFile(g)) continue;
+    g = GRAPH.migrate(g);
     const bad = GRAPH.check(g, lib);
     if (bad.length) { log(`config: skipping config/ships/${f}: ${bad.slice(0, 3).join('; ')}${bad.length > 3 ? ` (and ${bad.length - 3} more)` : ''}`); continue; }
     out[f.slice(0, -5)] = g;

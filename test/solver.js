@@ -82,10 +82,10 @@ try {
   {
     const design = CONFIG.readShips().runabout;
     const g = GRAPH.convert('runabout', design, d), all = GRAPH.nodes(g).all;
-    assert.ok(all['dock-power'].creative?.power && all['bus-b'].upstream['dock-power'].power.rate === t.GRID.dock, 'dock power: creative, at the dock\'s rate');
+    assert.ok(all['dock-power'].creative?.power && g.links.power['bus-b']['dock-power'].rate === t.GRID.dock, 'dock power: creative, at the dock\'s rate');
     const docked = d.scenarios.runabout['all-on'], st = JSON.parse(JSON.stringify(docked.state));
     st.srcCap.dock = 5; // (there, but saying it has only 5: creative, it gives what the bus needs, to the rate)
-    all['bus-b'].upstream['dock-power'].power.rate = 40;
+    g.links.power['bus-b']['dock-power'].rate = 40;
     const r = SOLVER.solve(g, SOLVER.fromRelay(g, st, t));
     const fromDock = r.cells['dock-power']?.['bus-b'] || 0;
     assert.ok(fromDock > 5 && fromDock <= 40 + 1e-9, `the dock gave ${fromDock}: more than its 5, no more than the link's 40`);
