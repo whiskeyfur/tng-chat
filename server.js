@@ -62,6 +62,7 @@ const NAME_RE = /^[\w][\w .'-]{0,31}$/;  // names and ships: K'Vatch, Jean-Luc, 
 // The designs (config/ships/<class>.json; see tools/config.js).
 const CONFIG = require('./tools/config');
 const LAYOUTS = require('./tools/layouts');
+const SHIP_DESIGNER = require('./tools/ship-designer');
 const SHIP_GRAPH = require('./tools/ship-graph');
 const GRAPH_SOLVER = require('./tools/graph-solver');
 // The vessel kinds' graphs (filled at start: see graphDump below), and which version each is.
@@ -111,14 +112,15 @@ const server = http.createServer((req, res) => {
   if (urlPath.startsWith('/api/poll/')) return pollRequest(req, res, urlPath.slice(10));
   const account = needLogin() ? ACCOUNTS.session(sessionToken(req)) : null;
   if (urlPath === '/api/layouts' || urlPath.startsWith('/api/layouts/') || urlPath.startsWith('/layouts/assets/')) return layoutRequest(req, res, urlPath, account);
+  if (urlPath === '/api/ship-designs' || urlPath.startsWith('/api/ship-designs/')) return SHIP_DESIGNER.request(req, res, urlPath, { admin: adminReach(req.socket.remoteAddress) && (!needLogin() || account?.role === 'admin') });
   if (urlPath.startsWith('/api/ships-graph/')) {
     const id = decodeURIComponent(urlPath.slice(17)), g = GRAPHS[id];
     if (needLogin() && !account) { res.writeHead(401).end(); return; }
     res.writeHead(g ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }).end(JSON.stringify(g ? { graph: g, rev: GRAPH_REV[id], types: SHIP_GRAPH.types() } : { error: 'no such graph' }));
     return;
   }
-  // The admin pages: the admin page and the layout designer.
-  const adminPage = urlPath.match(/^\/(admin|designer)(\.html|\.js|\/)?$/);
+  // The admin pages: the admin page, the layout designer and the ship designer.
+  const adminPage = urlPath.match(/^\/(admin|designer|shipdesigner)(\.html|\.js|\/)?$/);
   if (adminPage) {
     if (!adminReach(req.socket.remoteAddress)) { res.writeHead(403, { 'Content-Type': 'text/plain' }).end(`Admin: ${SETTINGS.read().adminAccess === 'lan' ? 'this network' : 'this machine'} only (Settings, Admin reachable from)`); return; }
     if (needLogin() && account?.role !== 'admin') {
@@ -151,6 +153,13 @@ const server = http.createServer((req, res) => {
       if (err) return res.writeHead(404).end('Not found');
       res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-cache' }).end(data);
     });
+    return;
+  }
+  // litegraph for the ship designer (the ComfyUI fork, 0.17.2), the same way.
+  const LITEGRAPH = { 'litegraph.js': ['dist/litegraph.umd.js', 'text/javascript'], 'litegraph.css': ['dist/css/litegraph.css', 'text/css'] };
+  if (urlPath.startsWith('/vendor/') && LITEGRAPH[urlPath.slice(8)]) {
+    const [f, type] = LITEGRAPH[urlPath.slice(8)];
+    fs.readFile(path.join(__dirname, 'node_modules', '@comfyorg', 'litegraph', f), (err, data) => (err ? res.writeHead(404).end('Not found') : res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' }).end(data)));
     return;
   }
   const file = path.normalize(path.join(PUBLIC_DIR, urlPath === '/' ? 'index.html' : urlPath));
