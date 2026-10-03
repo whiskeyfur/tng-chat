@@ -116,6 +116,36 @@ const step = (s) => console.log(`ok - ${s}`);
       await page.waitForFunction(() => [...document.querySelectorAll('#lyt-canvas img')].every((i) => i.complete && i.naturalWidth > 0), null, { timeout: 5000 });
     }
     step('the sample layouts (the Vico MSD, LCARS Access 813) open and draw, their images too');
+    // Every size: the page fits the window and every control of the properties can be scrolled to
+    // (by a scroller the user can scroll: overflow auto), and the parts too.
+    for (const [w, h, what] of [[1500, 1000, 'desktop'], [1024, 768, 'iPad across'], [768, 1024, 'iPad upright'], [390, 844, 'phone']]) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.click('#lyt-saved-list button[data-value="access-813"]').catch(() => {});
+      await page.waitForFunction(() => window.__designer.layout.name === 'access-813');
+      // (The header + body pair picked: its spine below the menu blocks.)
+      await page.locator('#lyt-canvas').scrollIntoViewIfNeeded();
+      const at = await cell(5, 84);
+      await page.mouse.click(at.x, at.y);
+      await page.waitForSelector('#lyt-prop-end');
+      assert.ok(await page.evaluate(() => document.querySelector('.lcars-app').getBoundingClientRect().bottom <= innerHeight + 1), `${what}: the page fits the window`);
+      const ctrls = ['#lyt-prop-color', '#lyt-prop-end', '#lyt-prop-radius-up', '#lyt-prop-h', '#lyt-palette button[data-add="callout"]', '#lyt-save'];
+      for (const c of ctrls) {
+        const reach = await page.evaluate((sel) => {
+          const e = document.querySelector(sel);
+          if (!e) return 'missing';
+          e.scrollIntoView({ block: 'center', inline: 'nearest' });
+          const r = e.getBoundingClientRect(), x = r.left + Math.min(r.width / 2, 10), y = r.top + Math.min(r.height / 2, 10);
+          if (r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) return `off screen (${Math.round(r.top)}, ${Math.round(r.left)})`;
+          const hit = document.elementFromPoint(x, y);
+          if (!hit || !(e === hit || e.contains(hit) || hit.contains(e))) return `covered by ${hit?.className || hit?.tagName}`;
+          for (let a = e.parentElement; a; a = a.parentElement) if (a.scrollTop > 0 && !/auto|scroll/.test(getComputedStyle(a).overflowY)) return `scrolled inside ${a.className || a.tagName}, which the user can't scroll`;
+          return 'ok';
+        }, c);
+        assert.equal(reach, 'ok', `${what} (${w}×${h}): ${c}: ${reach}`);
+      }
+    }
+    await page.setViewportSize({ width: 1500, height: 1000 });
+    step('at desktop, iPad (both ways) and phone sizes the page fits the window, and every control (the properties, the parts, Save) can be scrolled to');
     assert.deepEqual(errors, [], `no page errors: ${errors}`);
     if (process.env.LAYOUT_SHOTS) {
       for (const name of ['vico-msd', 'access-813']) {

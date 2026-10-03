@@ -13,9 +13,22 @@
 .lyt-callouts { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .lyt-callout-label { position: absolute; transform: translateY(-50%); white-space: nowrap; line-height: 1; }
 
-/* the designer */
-.designer .lcars-content { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-#lyt-palette .lcars-nav-button { touch-action: none; user-select: none; cursor: grab; min-height: 40px; font-size: 15px; }
+/* the designer: the page is the window. Wide and tall enough, the canvas fills what's left and
+   shows whole, and the properties scroll by themselves; narrower, the content scrolls as one.
+   (The parts spine scrolls with a vertical drag; a part is dragged out sideways, onto the canvas.) */
+.designer .lcars-content { display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+.designer .lcars-content > * { flex: 0 0 auto; }
+#lyt-palette .lcars-nav-button { touch-action: pan-y; user-select: none; cursor: grab; min-height: 40px; font-size: 15px; }
+.lyt-field { min-width: 0; max-width: 100%; }
+.lyt-field input { width: min(220px, 52vw); }
+.lyt-props .lcars-panel__body { overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+@media (min-width: 1101px) and (min-height: 600px) {
+  .designer .lcars-content { overflow: hidden; }
+  .designer .lcars-content > .lyt-work { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .designer .lyt-canvas-wrap, .designer .lyt-canvas { height: 100%; min-height: 0; }
+  .designer .lyt-props { display: flex; flex-direction: column; min-height: 0; }
+  .designer .lyt-props .lcars-panel__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+}
 .lyt-file { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
 .lyt-field { display: flex; align-items: center; gap: 8px; }
 .lyt-field input, .lyt-prop input { background: #111; color: var(--lcars-text); border: 2px solid var(--lcars-tan); border-radius: 14px; padding: 4px 10px; font: inherit; font-size: 15px; min-width: 0; }

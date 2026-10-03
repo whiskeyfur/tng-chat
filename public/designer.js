@@ -93,9 +93,14 @@
 
   // --- drawing -----------------------------------------------------------------------------
   let stage = null;
+  // Wide and tall enough, the canvas shows whole in what's left of the window; otherwise it's
+  // as wide as its column, and the page scrolls (lcars-layout.css says which, by the same sizes).
+  const WHOLE = matchMedia('(min-width: 1101px) and (min-height: 600px)');
+  const whole = () => WHOLE.matches;
+  function fitCanvas() { if (whole()) canvas.style.height = ''; L.fit(stage, canvas, whole()); }
   const scale = () => Number(stage?.dataset.scale || 1);
   function draw() {
-    stage = L.render(st.layout, canvas, { editor: true });
+    stage = L.render(st.layout, canvas, { editor: true, contain: whole() });
     stage.classList.toggle('lyt-grid', st.grid);
     stage.style.backgroundSize = `${CELL * 2}px ${CELL * 2}px`;
     drawOverlay();
@@ -560,7 +565,8 @@
   $('lyt-preview').addEventListener('click', closePreview);
   document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && !$('lyt-preview').hidden) $('lyt-preview').hidden = true; });
 
-  new ResizeObserver(() => { if (stage) { L.fit(stage, canvas); drawOverlay(); } }).observe(canvas.parentElement);
+  new ResizeObserver(() => { if (stage) { fitCanvas(); drawOverlay(); } }).observe(canvas.parentElement);
+  window.addEventListener('resize', () => { if (stage) { fitCanvas(); drawOverlay(); } });
   drawPalette();
   draw();
   refresh().then(() => { const q = new URLSearchParams(location.search).get('layout'); if (q) load(q); });
