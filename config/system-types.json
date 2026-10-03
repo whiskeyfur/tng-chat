@@ -1,5 +1,5 @@
 {
-  "about": "The kinds of system a ship graph is made of (docs/ship-graph.md). A system names its type; what's here is what every system of that type is, so a design only says what's different. role: bus (carries a resource between systems), source (puts a resource in), store (takes and gives back), conduit (a path power runs through), load (uses it), group (holds others: no flow of its own). Resources: power, eps, odn, deu, am, heat. lastResort: a source drawn on only when nothing else will do (batteries, the EPS's pressure).",
+  "about": "The kinds of system a ship graph is made of (docs/ship-graph.md). A system names its type; what's here is what every system of that type is, so a design only says what's different. role: bus (carries a resource between systems), source (puts a resource in), store (takes and gives back), conduit (a path power runs through), load (uses it), converter (turns some resources into others), group (holds others: no flow of its own). Resources: power, eps, odn, deu, am, heat; and life support's o2, n2, co2, h2o and c (carbon: biomass, food), in kg. lastResort: a source drawn on only when nothing else will do (batteries, the EPS's pressure).",
   "types": {
     "bus": {
       "role": "bus",
@@ -87,7 +87,12 @@
         "eps",
         "odn",
         "deu",
-        "am"
+        "am",
+        "o2",
+        "n2",
+        "co2",
+        "h2o",
+        "c"
       ],
       "about": "A docking port: everything a connection carries. count: null on a starbase, as many as are needed."
     },
@@ -98,7 +103,12 @@
         "eps",
         "odn",
         "deu",
-        "am"
+        "am",
+        "o2",
+        "n2",
+        "co2",
+        "h2o",
+        "c"
       ],
       "about": "The connectors behind the ports, where a connection's resources come aboard."
     },
@@ -114,9 +124,13 @@
       "role": "store",
       "resources": [
         "deu",
-        "am"
+        "am",
+        "o2",
+        "n2",
+        "h2o",
+        "c"
       ],
-      "about": "Fuel storage: the main tanks or pods, or a system's own tank."
+      "about": "Storage: fuel (the main tanks or pods, or a system's own tank), or life support's oxygen, nitrogen, water and carbon."
     },
     "place": {
       "role": "conduit",
@@ -197,6 +211,55 @@
         "eps"
       ],
       "about": "Power sent out through the docking connectors: to the starbase, or to a ship docked at a port."
+    },
+    "air-handler": {
+      "role": "bus",
+      "resources": [
+        "o2",
+        "n2",
+        "co2",
+        "h2o"
+      ],
+      "about": "Life support's ventilation: carries air between the places, the tanks and the processors; mixes each place's air toward the others' while it has power (its system: atmosphere)."
+    },
+    "atmosphere": {
+      "role": "store",
+      "resources": [
+        "o2",
+        "n2",
+        "co2",
+        "h2o"
+      ],
+      "about": "A place's air: so many kg of oxygen, nitrogen, carbon dioxide and water vapour in its volume (m\u00b3); its pressures follow from them. The crew there breathe it."
+    },
+    "co2-scrubber": {
+      "role": "converter",
+      "resources": [
+        "co2",
+        "o2",
+        "c",
+        "power"
+      ],
+      "about": "Takes carbon dioxide out of the air and splits it (a Bosch reactor and electrolysis): each kg of CO2 gives 0.727 kg of oxygen back to the tanks and 0.273 kg of carbon. Runs on the atmosphere system's power."
+    },
+    "water-reclaimer": {
+      "role": "converter",
+      "resources": [
+        "h2o",
+        "power"
+      ],
+      "about": "Recovers water from the air's humidity and the crew's waste into the water tank (93% of it). Runs on the atmosphere system's power."
+    },
+    "hydroponics": {
+      "role": "converter",
+      "resources": [
+        "co2",
+        "h2o",
+        "o2",
+        "c",
+        "power"
+      ],
+      "about": "Plants under grow lights: carbon dioxide and water into oxygen and biomass (carbon, food). Runs on the lighting system's power."
     }
   },
   "heat": {
@@ -249,5 +312,37 @@
       "hot": 0.9,
       "about": "Of a system's heat limit (step 2): above warm it works less well, above hot it's damaged."
     }
+  },
+  "lifeSupport": {
+    "about": "Life support (wish list 1): per person per day, what the crew breathe and drink; the air the regulator keeps; how big a place is unless its design says (places[].volume, m\u00b3: placeVolume, or more on a big crew: perPersonVolume each, shared across the places); how much each tank holds, in days of the crew's needs.",
+    "perPersonPerDay": {
+      "o2": 0.84,
+      "co2": 1.0,
+      "h2oVapour": 1.0,
+      "h2oDrink": 2.5
+    },
+    "air": {
+      "tempK": 295,
+      "o2kPa": 21.2,
+      "n2kPa": 79.0,
+      "co2WarnKPa": 1.0,
+      "co2DangerKPa": 4.0,
+      "o2WarnKPa": 16.0,
+      "o2DangerKPa": 12.0,
+      "humidityKPa": 1.3,
+      "saturationKPa": 2.64
+    },
+    "placeVolume": 120,
+    "tankDays": {
+      "o2": 30,
+      "n2": 0,
+      "h2o": 30,
+      "c": 90
+    },
+    "n2Repressurise": 2,
+    "scrubberPerPerson": 1.5,
+    "reclaimEfficiency": 0.93,
+    "hydroponicsPerPerson": 0.25,
+    "perPersonVolume": 40
   }
 }

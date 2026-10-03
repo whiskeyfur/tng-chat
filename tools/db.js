@@ -102,8 +102,11 @@ async function loadTypes(db, all) {
   const fx = Object.entries(lib.heat?.byEffect || {});
   if (fx.length) await db.query('insert into effects (effect_name, heat_share) values ?', [fx]);
   const { byType: _t, byEffect: _e, ...heatRules } = lib.heat || {};
-  const rules = [['system-types.about', lib.about], ...Object.entries(heatRules).map(([k, v]) => [`heat.${k}`, v])].filter(([, v]) => v !== undefined);
-  await db.query("delete from game_rules where rule_name like 'heat.%' or rule_name = 'system-types.about'");
+  // (The rest of the library's sections, life support's say, a rule each of their settings.)
+  const sections = Object.entries(lib).filter(([k]) => !['about', 'types', 'heat'].includes(k));
+  const rules = [['system-types.about', lib.about], ...Object.entries(heatRules).map(([k, v]) => [`heat.${k}`, v]),
+    ...sections.flatMap(([sec, v]) => Object.entries(v).map(([k, x]) => [`${sec}.${k}`, x]))].filter(([, v]) => v !== undefined);
+  await db.query("delete from game_rules where rule_name like '%.%'");
   if (rules.length) await db.query('insert into game_rules (rule_name, value) values ?', [rules.map(([k, v]) => [k, JSON.stringify(v)])]);
 }
 // A vessel kind: its design (every field, as its file has it), its systems (what each changes from
@@ -193,8 +196,10 @@ async function readTypes(db) {
   const [rules] = await db.query('select rule_name, cast(value as char) value from game_rules'); // (as text: a JSON string could come back either way)
   const rule = Object.fromEntries(rules.map((r) => [r.rule_name, J(r.value)]));
   const heatRules = Object.fromEntries(Object.entries(rule).filter(([k]) => k.startsWith('heat.')).map(([k, v]) => [k.slice(5), v]));
+  const sections = {};
+  for (const [k, v] of Object.entries(rule)) { const [sec, ...rest] = k.split('.'); if (!['heat', 'system-types'].includes(sec)) (sections[sec] ||= {})[rest.join('.')] = v; }
   return { ...(rule['system-types.about'] === undefined ? {} : { about: rule['system-types.about'] }), types: Object.fromEntries(types.map((r) => [r.base_system_name, J(r.info)])),
-    heat: { ...heatRules, byType: Object.fromEntries(types.filter((r) => r.heat !== null).map((r) => [r.base_system_name, J(r.heat)])), byEffect: Object.fromEntries(fx.map((r) => [r.effect_name, r.heat_share])) } };
+    heat: { ...heatRules, byType: Object.fromEntries(types.filter((r) => r.heat !== null).map((r) => [r.base_system_name, J(r.heat)])), byEffect: Object.fromEntries(fx.map((r) => [r.effect_name, r.heat_share])) }, ...sections };
 }
 // What the game starts from: { designs, charts, types, differs }. An empty database is loaded from
 // config/ first; differs: the designs whose file in config/ says something else (the database's is used).

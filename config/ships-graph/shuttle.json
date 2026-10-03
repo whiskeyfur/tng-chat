@@ -970,6 +970,26 @@
           "heat": {
             "pull": true,
             "push": true
+          },
+          "o2": {
+            "pull": true,
+            "push": true
+          },
+          "n2": {
+            "pull": true,
+            "push": true
+          },
+          "co2": {
+            "pull": true,
+            "push": true
+          },
+          "h2o": {
+            "pull": true,
+            "push": true
+          },
+          "c": {
+            "pull": true,
+            "push": true
           }
         }
       },
@@ -1279,6 +1299,21 @@
         }
       }
     },
+    "tank-carbon": {
+      "type": "tank",
+      "name": "Carbon store",
+      "capacity": {
+        "c": 49.1
+      },
+      "upstream": {
+        "co2-scrubber": {
+          "c": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
     "tank-deu-aux1": {
       "type": "tank",
       "name": "Aux fusion reactor 1",
@@ -1327,6 +1362,44 @@
       },
       "upstream": {}
     },
+    "tank-h2o": {
+      "type": "tank",
+      "name": "Water tank",
+      "capacity": {
+        "h2o": 150
+      },
+      "upstream": {
+        "water-reclaimer": {
+          "h2o": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "tank-n2": {
+      "type": "tank",
+      "name": "Nitrogen tank",
+      "capacity": {
+        "n2": 432.9
+      },
+      "upstream": {}
+    },
+    "tank-o2": {
+      "type": "tank",
+      "name": "Oxygen tank",
+      "capacity": {
+        "o2": 50.4
+      },
+      "upstream": {
+        "co2-scrubber": {
+          "o2": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
     "place-aft-compartment": {
       "key": "place:Aft Compartment",
       "type": "place",
@@ -1355,6 +1428,33 @@
           "eps": {
             "pull": "auto",
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-aft-compartment": {
+          "type": "atmosphere",
+          "name": "Aft Compartment air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -1387,6 +1487,33 @@
           "eps": {
             "pull": "auto",
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-cockpit": {
+          "type": "atmosphere",
+          "name": "Cockpit air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -1455,7 +1582,48 @@
           "produces": {
             "heat": 1
           },
-          "via": "life-support"
+          "via": "life-support",
+          "systems": {
+            "co2-scrubber": {
+              "type": "co2-scrubber",
+              "name": "CO2 scrubber",
+              "consumes": {
+                "co2": 3
+              },
+              "produces": {
+                "o2": 2.18,
+                "c": 0.82
+              },
+              "poweredBy": "system-atmosphere",
+              "upstream": {
+                "air-handler": {
+                  "co2": {
+                    "pull": "auto",
+                    "push": false
+                  }
+                }
+              }
+            },
+            "water-reclaimer": {
+              "type": "water-reclaimer",
+              "name": "Water reclaimer",
+              "consumes": {
+                "h2o": 7
+              },
+              "produces": {
+                "h2o": 6.51
+              },
+              "poweredBy": "system-atmosphere",
+              "upstream": {
+                "air-handler": {
+                  "h2o": {
+                    "pull": "auto",
+                    "push": false
+                  }
+                }
+              }
+            }
+          }
         },
         "system-gravity": {
           "key": "system:gravity",
@@ -1616,6 +1784,32 @@
             "heat": 0.8
           },
           "via": "life-support"
+        },
+        "air-handler": {
+          "type": "air-handler",
+          "name": "Air handling",
+          "crew": 2,
+          "poweredBy": "system-atmosphere",
+          "upstream": {
+            "tank-o2": {
+              "o2": {
+                "pull": "auto",
+                "push": false
+              }
+            },
+            "tank-n2": {
+              "n2": {
+                "pull": "auto",
+                "push": false
+              }
+            },
+            "tank-h2o": {
+              "h2o": {
+                "pull": true,
+                "push": false
+              }
+            }
+          }
         }
       }
     },

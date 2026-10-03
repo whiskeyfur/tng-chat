@@ -146,13 +146,16 @@ create table if not exists class_links (
   class_id   int not null,
   system_key varchar(64) not null,
   other_key  varchar(64) not null,
-  resource   enum('power', 'eps', 'odn', 'deu', 'am', 'heat') not null,
+  resource   enum('power', 'eps', 'odn', 'deu', 'am', 'heat', 'o2', 'n2', 'co2', 'h2o', 'c') not null,
   link       json not null,
   sort_order int not null default 0,
   primary key (class_id, system_key, other_key, resource),
   foreign key (class_id, system_key) references class_systems (class_id, system_key) on delete cascade,
   foreign key (class_id, other_key) references class_systems (class_id, system_key) on delete cascade
 );
+
+-- (Life support's resources, added to the links: o2, n2, co2, h2o, c.)
+alter table class_links modify resource enum('power', 'eps', 'odn', 'deu', 'am', 'heat', 'o2', 'n2', 'co2', 'h2o', 'c') not null;
 
 -- (One row a type: duplicates from before the name was unique go, and the class systems that pointed
 -- at them, which tools/db.js load puts back.)
@@ -179,11 +182,12 @@ create table if not exists ship_links (
   ship_id    int not null,
   system_key varchar(64) not null,
   other_key  varchar(64) not null,
-  resource   enum('power', 'eps', 'odn', 'deu', 'am', 'heat') not null,
+  resource   enum('power', 'eps', 'odn', 'deu', 'am', 'heat', 'o2', 'n2', 'co2', 'h2o', 'c') not null,
   link       json not null,
   primary key (ship_id, system_key, other_key, resource),
   foreign key (ship_id) references ships (ship_id) on delete cascade
 );
+alter table ship_links modify resource enum('power', 'eps', 'odn', 'deu', 'am', 'heat', 'o2', 'n2', 'co2', 'h2o', 'c') not null;
 
 -- World state the database can move on its own (MariaDB events, the slow world ticks: orbits, starbase
 -- restock, timers, history; the relay keeps the fast ship ticks). Rows here, no events yet.

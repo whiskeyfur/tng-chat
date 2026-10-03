@@ -19,7 +19,8 @@ const TYPES_FILE = path.join(CONFIG, 'system-types.json');
 // it may send back): false, never; "warn", allowed but not advised; true, allowed; "auto", allowed
 // and on when the vessel first loads.
 const PERMS = [false, 'warn', true, 'auto'];
-const RESOURCES = ['power', 'eps', 'odn', 'deu', 'am', 'heat'];
+// (o2, n2, co2, h2o, c: life support's gases, water and carbon (biomass, food), in kg.)
+const RESOURCES = ['power', 'eps', 'odn', 'deu', 'am', 'heat', 'o2', 'n2', 'co2', 'h2o', 'c'];
 
 // What a system lets the vessel do, beyond moving a resource: what play asks for ("the best FTL
 // aboard", "its shields") rather than a system's id. Each effect has its parameters, from the design;
@@ -231,6 +232,50 @@ function convert(id, design, d) {
   for (let i = 1; i <= radiators; i++) {
     const rid = `radiator-${i}`;
     add(rid, { type: 'radiator', name: `Radiator ${i}`, consumes: { heat: each, power: heatLib.pumpPower }, upstream: { 'coolant-loop': { heat: { pull: 'auto', push: false, rate: each } }, 'bus-b': { power: { pull: 'auto', push: false, pri: 100, min: heatLib.pumpPower } } } });
+  }
+  // Life support (wish list 1; simulated by tools/life-support.js): each place's own air, the
+  // ventilation between them (the air handler), the tanks of oxygen, nitrogen and water and the carbon
+  // store, and what turns the crew's carbon dioxide and water back into air: the CO2 scrubber and the
+  // water reclaimer (on the atmosphere system's power) and, where the design has it, hydroponics (on
+  // the lighting's). Rates are kg a day, sized for the crew (the org chart's positions).
+  const ls = require('./config').systemTypes().lifeSupport;
+  const placeIds = Object.keys(systems).filter((id) => systems[id].type === 'place');
+  if (ls && placeIds.length) {
+    const crew = Math.max(1, (design.org?.command || []).concat(...(design.org?.departments || []).map((x) => x.positions)).reduce((n, p) => n + (p.n || 1), 0));
+    const day = ls.perPersonPerDay, atmo = systems['system-atmosphere'] ? 'system-atmosphere' : null, light = systems['system-lighting'] ? 'system-lighting' : null;
+    const air = ['o2', 'n2', 'co2', 'h2o'], auto = { pull: 'auto', push: 'auto' };
+    add('air-handler', { type: 'air-handler', name: 'Air handling', crew, ...(atmo ? { poweredBy: atmo } : {}) });
+    let volume = 0;
+    for (const pid of placeIds) {
+      const v = (design.places || []).find((x) => x.name === systems[pid].name)?.volume ?? Math.max(ls.placeVolume, Math.round(crew * (ls.perPersonVolume || 0) / placeIds.length));
+      volume += v;
+      const aid = `air-${pid.replace(/^place-/, '')}`;
+      add(aid, { type: 'atmosphere', name: `${systems[pid].name} air`, volume: v, parent: pid });
+      for (const r of air) link(aid, 'air-handler', r, auto);
+    }
+    const tank = (tid, name, r, kg) => { add(tid, { type: 'tank', name, capacity: { [r]: Math.round(kg * 10) / 10 } }); };
+    tank('tank-o2', 'Oxygen tank', 'o2', crew * day.o2 * ls.tankDays.o2);
+    tank('tank-n2', 'Nitrogen tank', 'n2', volume * (ls.air.n2kPa * 1000 * 0.028) / (8.314 * ls.air.tempK) * ls.n2Repressurise);
+    tank('tank-h2o', 'Water tank', 'h2o', crew * day.h2oDrink * ls.tankDays.h2o);
+    tank('tank-carbon', 'Carbon store', 'c', crew * day.co2 * (12 / 44) * ls.tankDays.c);
+    for (const r of ['o2', 'n2']) link('air-handler', `tank-${r}`, r, { pull: 'auto', push: false });
+    const scrub = crew * day.co2 * ls.scrubberPerPerson;
+    add('co2-scrubber', { type: 'co2-scrubber', name: 'CO2 scrubber', consumes: { co2: Math.round(scrub * 100) / 100 }, produces: { o2: Math.round(scrub * (32 / 44) * 100) / 100, c: Math.round(scrub * (12 / 44) * 100) / 100 }, ...(atmo ? { poweredBy: atmo, parent: atmo } : {}), upstream: { 'air-handler': { co2: { pull: 'auto', push: false } } } });
+    link('tank-o2', 'co2-scrubber', 'o2', { pull: 'auto', push: false });
+    link('tank-carbon', 'co2-scrubber', 'c', { pull: 'auto', push: false });
+    const reclaim = crew * (day.h2oDrink + day.h2oVapour);
+    add('water-reclaimer', { type: 'water-reclaimer', name: 'Water reclaimer', consumes: { h2o: Math.round(reclaim * 100) / 100 }, produces: { h2o: Math.round(reclaim * ls.reclaimEfficiency * 100) / 100 }, ...(atmo ? { poweredBy: atmo, parent: atmo } : {}), upstream: { 'air-handler': { h2o: { pull: 'auto', push: false } } } });
+    link('tank-h2o', 'water-reclaimer', 'h2o', { pull: 'auto', push: false });
+    link('air-handler', 'tank-h2o', 'h2o', { pull: true, push: false });
+    if (design.hydroponics) {
+      const co2 = crew * day.co2 * ls.hydroponicsPerPerson;
+      add('hydroponics', { type: 'hydroponics', name: 'Hydroponics', consumes: { co2: Math.round(co2 * 100) / 100, h2o: Math.round(co2 * (18 / 44) * 100) / 100 }, produces: { o2: Math.round(co2 * (32 / 44) * 100) / 100, c: Math.round(co2 * (12 / 44) * 100) / 100 }, ...(light ? { poweredBy: light } : {}),
+        upstream: { 'air-handler': { co2: { pull: 'auto', push: false } }, 'tank-h2o': { h2o: { pull: 'auto', push: false } } } });
+      link('air-handler', 'hydroponics', 'o2', { pull: 'auto', push: false });
+      link('tank-carbon', 'hydroponics', 'c', { pull: 'auto', push: false });
+    }
+    if (atmo) systems['air-handler'].parent = 'life-support' in systems ? 'life-support' : undefined;
+    for (const r of design.creative || []) for (const tid of ['tank-o2', 'tank-n2', 'tank-h2o', 'tank-carbon']) if (systems[tid]?.capacity?.[r] !== undefined) systems[tid].creative = { [r]: true };
   }
   // Nested: a system's parts are in its own "systems" (a subsystem in its system, station or source;
   // a thruster in its drive; a containment in its tank; a life-support system in life support's

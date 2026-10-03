@@ -40,9 +40,9 @@ const SHIP_FIELDS = {
   torpedoes: [isNum, 'a number (torpedoes carried)', false],
   stations: [(v) => v === null || (Array.isArray(v) && v.every(isStr)), 'a list of station names, or null for all of them', false],
   ties: [(v) => isObj(v) && Object.values(v).every((x) => Array.isArray(x) && x.every(isStr)), 'an object of tie lists', false],
-  places: [(v) => Array.isArray(v) && v.every((p) => isStr(p?.name) && isNum(p?.deck) && Array.isArray(p?.stations) && p.stations.every(isStr) && (p.via === undefined || isStr(p.via))), 'a list of { name, deck, stations, rows?, via?, default? }', false],
+  places: [(v) => Array.isArray(v) && v.every((p) => isStr(p?.name) && isNum(p?.deck) && Array.isArray(p?.stations) && p.stations.every(isStr) && (p.via === undefined || isStr(p.via)) && (p.volume === undefined || (isNum(p.volume) && p.volume > 0))), 'a list of { name, deck, stations, rows?, via?, default?, volume? (m³, its air) }', false],
   // (Never short of these: a starbase, a shipyard, a GM object; the graph engine honours it.)
-  creative: [(v) => Array.isArray(v) && v.every((r) => ['power', 'eps', 'odn', 'deu', 'am', 'heat'].includes(r)), 'a list of resources it never runs short of (power, eps, deu, am...)', false],
+  creative: [(v) => Array.isArray(v) && v.every((r) => ['power', 'eps', 'odn', 'deu', 'am', 'heat', 'o2', 'n2', 'co2', 'h2o', 'c'].includes(r)), 'a list of resources it never runs short of (power, eps, deu, am, o2...)', false],
   seats: [(v) => isObj(v) && Object.values(v).every((s) => Array.isArray(s) && s.length === 2 && s.every(isNum)), 'an object of [x, y] seats', false],
   solar: [(v) => isObj(v) && isNum(v.output) && v.output >= 0, 'its solar arrays: { output } (power, 0 for none)', false],
   antimatter: [isBool, 'true or false (antimatter carried: false for none, no tanks to fill or contain)', false],
@@ -53,6 +53,7 @@ const SHIP_FIELDS = {
   lands: [(v) => v === 'any' || v === 'starbase', '"any" (any shuttle bay) or "starbase" (a starbase\'s), or left out (it doesn\'t land)', false],
   emergency: [(v) => Array.isArray(v) && v.every((b) => ['A', 'B', 'C'].includes(b)), 'a list of the low buses with an emergency battery ([] for none; left out: all three)', false],
   fusion: [isBool, 'true or false (impulse and auxiliary fusion reactors aboard)', false],
+  hydroponics: [isBool, 'true or false (hydroponics aboard: plants turning carbon dioxide and water into oxygen and food)', false],
   org: [(v) => isObj(v) && Array.isArray(v.command) && v.command.every(isPosition) && (v.departments === undefined || (Array.isArray(v.departments) && v.departments.every((d) => isStr(d?.name) && Array.isArray(d.positions) && d.positions.every(isPosition)))),
     'its org chart: { command: [positions], departments: [{ name, positions }] }, a position { id, title, rank, station, n? }', false],
 };

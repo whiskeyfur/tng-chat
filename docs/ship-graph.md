@@ -211,6 +211,19 @@ John's solver, beside the graph solver; it plays with `"solver": "path"` in `dat
 
 `db/path-solver.sql` is the same in SQL (a stored procedure, a recursive query for each path), for `tools/bench.js`'s comparison; it gives every load the same answer.
 
+## Life support (tools/life-support.js; wish list 1, not in play yet)
+
+Five more resources, in kg: o2, n2, co2, h2o and c (carbon: biomass, food). Every vessel's graph has:
+
+- **An air for each place** (`air-<place>`, type `atmosphere`, inside its place): so many kg of each gas in its volume (a design's `places[].volume`, m³; else `lifeSupport.placeVolume`, more on a big crew). Pressures follow from them.
+- **The air handler** (ventilation, on the atmosphere system's power): mixes each place's air toward the others' and tops oxygen and nitrogen up from their tanks to the air it keeps (21.2 kPa of oxygen, 79 of nitrogen).
+- **Tanks:** oxygen and water (30 days of the crew's needs), nitrogen (twice the air's), and the carbon store. A starbase's are creative.
+- **The CO2 scrubber** (atmosphere power): carbon dioxide out of the air; each kg gives 0.727 kg of oxygen to its tank and 0.273 kg of carbon to the store.
+- **The water reclaimer** (atmosphere power): humidity over the comfortable level, and the crew's waste, back to the water tank (93%). Vapour past saturation condenses to it.
+- **Hydroponics**, where the design says `"hydroponics": true` (the Galaxy, the Intrepid, starbases), on the lighting's power: carbon dioxide and water into oxygen for the air and biomass.
+
+The crew in each place breathe its oxygen and give off carbon dioxide and water vapour (per person per day: 0.84 kg O2, 1.0 kg CO2, 2.5 kg of water drunk, 1.0 breathed out). Everything runs at the share of its power the solve gave it. Each place's air says what's wrong: carbon dioxide over 1 kPa high, over 4 kPa danger; oxygen under 16 kPa low, under 12 danger. `speed` (the admin's setting, 1 for real time) runs it faster. The constants are `lifeSupport` in `config/system-types.json` (the database's `game_rules`). `test/life-support.js`: a runabout keeps its air for two days on power and loses it without (carbon dioxide high after 17 hours); hydroponics keeps a Galaxy's air breathable with its atmosphere system down.
+
 ## Step 3: the graph in play
 
 - **The relay builds every vessel kind's graph at start** (the ship classes, the starbase, the subspace relay), from its designs as they are. A design saved from the admin page (the supervisor restarts the relay) is in it. Consoles fetch their vessel's graph from `/api/ships-graph/<id>`; the grid says which one (`graphId`) and which version (`graphRev`).

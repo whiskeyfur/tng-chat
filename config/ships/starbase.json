@@ -11,6 +11,7 @@
   "warpCore": true,
   "refit": false,
   "transporter": true,
+  "hydroponics": true,
   "spore": false,
   "stations": null,
   "ports": null,
@@ -550,6 +551,9 @@
     "power",
     "eps",
     "deu",
-    "am"
+    "am",
+    "o2",
+    "n2",
+    "h2o"
   ]
 }

@@ -1486,6 +1486,26 @@
           "heat": {
             "pull": true,
             "push": true
+          },
+          "o2": {
+            "pull": true,
+            "push": true
+          },
+          "n2": {
+            "pull": true,
+            "push": true
+          },
+          "co2": {
+            "pull": true,
+            "push": true
+          },
+          "h2o": {
+            "pull": true,
+            "push": true
+          },
+          "c": {
+            "pull": true,
+            "push": true
           }
         },
         "docking-port-2": {
@@ -1510,6 +1530,26 @@
             "push": true
           },
           "heat": {
+            "pull": true,
+            "push": true
+          },
+          "o2": {
+            "pull": true,
+            "push": true
+          },
+          "n2": {
+            "pull": true,
+            "push": true
+          },
+          "co2": {
+            "pull": true,
+            "push": true
+          },
+          "h2o": {
+            "pull": true,
+            "push": true
+          },
+          "c": {
             "pull": true,
             "push": true
           }
@@ -1907,6 +1947,21 @@
         }
       }
     },
+    "tank-carbon": {
+      "type": "tank",
+      "name": "Carbon store",
+      "capacity": {
+        "c": 1153.6
+      },
+      "upstream": {
+        "co2-scrubber": {
+          "c": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
     "tank-deu-aux1": {
       "type": "tank",
       "name": "Aux fusion reactor 1",
@@ -1955,6 +2010,44 @@
       },
       "upstream": {}
     },
+    "tank-h2o": {
+      "type": "tank",
+      "name": "Water tank",
+      "capacity": {
+        "h2o": 3525
+      },
+      "upstream": {
+        "water-reclaimer": {
+          "h2o": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
+    "tank-n2": {
+      "type": "tank",
+      "name": "Nitrogen tank",
+      "capacity": {
+        "n2": 5411.3
+      },
+      "upstream": {}
+    },
+    "tank-o2": {
+      "type": "tank",
+      "name": "Oxygen tank",
+      "capacity": {
+        "o2": 1184.4
+      },
+      "upstream": {
+        "co2-scrubber": {
+          "o2": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      }
+    },
     "place-antimatter-storage": {
       "key": "place:Antimatter Storage",
       "type": "place",
@@ -1983,6 +2076,33 @@
           "eps": {
             "pull": "auto",
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-antimatter-storage": {
+          "type": "atmosphere",
+          "name": "Antimatter Storage air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2017,6 +2137,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-auxiliary-power": {
+          "type": "atmosphere",
+          "name": "Auxiliary Power air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-bridge": {
@@ -2047,6 +2194,33 @@
           "eps": {
             "pull": true,
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-bridge": {
+          "type": "atmosphere",
+          "name": "Bridge air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2081,6 +2255,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-brig": {
+          "type": "atmosphere",
+          "name": "Brig air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-communications-center": {
@@ -2111,6 +2312,33 @@
           "eps": {
             "pull": true,
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-communications-center": {
+          "type": "atmosphere",
+          "name": "Communications Center air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2145,6 +2373,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-computer-core": {
+          "type": "atmosphere",
+          "name": "Computer Core air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-crew-quarters": {
@@ -2175,6 +2430,33 @@
           "eps": {
             "pull": true,
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-crew-quarters": {
+          "type": "atmosphere",
+          "name": "Crew Quarters air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2209,6 +2491,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-deuterium-tankage": {
+          "type": "atmosphere",
+          "name": "Deuterium Tankage air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-environmental-control": {
@@ -2239,6 +2548,33 @@
           "eps": {
             "pull": true,
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-environmental-control": {
+          "type": "atmosphere",
+          "name": "Environmental Control air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2273,6 +2609,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-impulse-engine-room": {
+          "type": "atmosphere",
+          "name": "Impulse Engine Room air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-main-engineering": {
@@ -2303,6 +2666,33 @@
           "eps": {
             "pull": "auto",
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-main-engineering": {
+          "type": "atmosphere",
+          "name": "Main Engineering air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2337,6 +2727,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-main-shuttle-bay": {
+          "type": "atmosphere",
+          "name": "Main Shuttle Bay air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-navigational-deflector": {
@@ -2367,6 +2784,33 @@
           "eps": {
             "pull": "auto",
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-navigational-deflector": {
+          "type": "atmosphere",
+          "name": "Navigational Deflector air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2401,6 +2845,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-phaser-arrays": {
+          "type": "atmosphere",
+          "name": "Phaser Arrays air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-science-lab": {
@@ -2431,6 +2902,33 @@
           "eps": {
             "pull": true,
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-science-lab": {
+          "type": "atmosphere",
+          "name": "Science Lab air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2465,6 +2963,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-security-office": {
+          "type": "atmosphere",
+          "name": "Security Office air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-sensor-arrays": {
@@ -2495,6 +3020,33 @@
           "eps": {
             "pull": "auto",
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-sensor-arrays": {
+          "type": "atmosphere",
+          "name": "Sensor Arrays air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2529,6 +3081,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-shield-generators": {
+          "type": "atmosphere",
+          "name": "Shield Generators air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-sickbay": {
@@ -2559,6 +3138,33 @@
           "eps": {
             "pull": true,
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-sickbay": {
+          "type": "atmosphere",
+          "name": "Sickbay air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2593,6 +3199,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-structural-integrity": {
+          "type": "atmosphere",
+          "name": "Structural Integrity air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-subspace-communications": {
@@ -2623,6 +3256,33 @@
           "eps": {
             "pull": true,
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-subspace-communications": {
+          "type": "atmosphere",
+          "name": "Subspace Communications air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2657,6 +3317,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-torpedo-bay": {
+          "type": "atmosphere",
+          "name": "Torpedo Bay air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-tractor-beam-emitter": {
@@ -2687,6 +3374,33 @@
           "eps": {
             "pull": "auto",
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-tractor-beam-emitter": {
+          "type": "atmosphere",
+          "name": "Tractor Beam Emitter air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2721,6 +3435,33 @@
             "push": false
           }
         }
+      },
+      "systems": {
+        "air-transporter-room": {
+          "type": "atmosphere",
+          "name": "Transporter Room air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
+          }
+        }
       }
     },
     "place-warp-nacelles-port-and-starboard": {
@@ -2751,6 +3492,33 @@
           "eps": {
             "pull": "auto",
             "push": false
+          }
+        }
+      },
+      "systems": {
+        "air-warp-nacelles-port-and-starboard": {
+          "type": "atmosphere",
+          "name": "Warp Nacelles (port and starboard) air",
+          "volume": 120,
+          "upstream": {
+            "air-handler": {
+              "o2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "n2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "co2": {
+                "pull": "auto",
+                "push": "auto"
+              },
+              "h2o": {
+                "pull": "auto",
+                "push": "auto"
+              }
+            }
           }
         }
       }
@@ -2819,7 +3587,48 @@
           "produces": {
             "heat": 1
           },
-          "via": "life-support"
+          "via": "life-support",
+          "systems": {
+            "co2-scrubber": {
+              "type": "co2-scrubber",
+              "name": "CO2 scrubber",
+              "consumes": {
+                "co2": 70.5
+              },
+              "produces": {
+                "o2": 51.27,
+                "c": 19.23
+              },
+              "poweredBy": "system-atmosphere",
+              "upstream": {
+                "air-handler": {
+                  "co2": {
+                    "pull": "auto",
+                    "push": false
+                  }
+                }
+              }
+            },
+            "water-reclaimer": {
+              "type": "water-reclaimer",
+              "name": "Water reclaimer",
+              "consumes": {
+                "h2o": 164.5
+              },
+              "produces": {
+                "h2o": 152.99
+              },
+              "poweredBy": "system-atmosphere",
+              "upstream": {
+                "air-handler": {
+                  "h2o": {
+                    "pull": "auto",
+                    "push": false
+                  }
+                }
+              }
+            }
+          }
         },
         "system-gravity": {
           "key": "system:gravity",
@@ -2980,6 +3789,32 @@
             "heat": 0.8
           },
           "via": "life-support"
+        },
+        "air-handler": {
+          "type": "air-handler",
+          "name": "Air handling",
+          "crew": 47,
+          "poweredBy": "system-atmosphere",
+          "upstream": {
+            "tank-o2": {
+              "o2": {
+                "pull": "auto",
+                "push": false
+              }
+            },
+            "tank-n2": {
+              "n2": {
+                "pull": "auto",
+                "push": false
+              }
+            },
+            "tank-h2o": {
+              "h2o": {
+                "pull": true,
+                "push": false
+              }
+            }
+          }
         }
       }
     },

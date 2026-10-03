@@ -10,6 +10,7 @@
   "warpCore": true,
   "refit": true,
   "transporter": true,
+  "hydroponics": true,
   "spore": false,
   "stations": null,
   "ports": 2,
