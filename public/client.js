@@ -1388,7 +1388,7 @@ function renderCrewPanels() {
           if (lvl === 'green') b.style.setProperty('--accent', '#66cc66');
           return b;
         }), { groupId: 'alert-buttons' }),
-        el('p', { className: 'ops-hint', textContent: 'Each condition has its posture: yellow raises shields; red raises them and arms the phasers, comfort systems off; blue is minimal power. A station that\'s automated or empty takes it at once; a crewed one is offered it. Condition green puts the power back as it was.' }),
+        el('p', { className: 'ops-hint', textContent: 'Each condition has its posture: yellow raises shields; red raises them and arms the phasers, comfort systems off; blue is minimal power. Shields go up on yellow or red if they have power; the rest, a station that\'s automated or empty takes at once, and a crewed one is offered. Condition green puts the power back as it was.' }),
         form);
     }
     const level = lastNav?.own?.alert || 'green';

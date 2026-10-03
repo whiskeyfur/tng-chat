@@ -1698,7 +1698,12 @@ function applyPostures(k, level, was) {
   }
   if (tac.length) {
     if (autoOn(k, 'tactical') || !leadOf(k, 'Tactical')) applyTactical(k, ps, tac);
-    else e.postureOffers.Tactical = { level, tac, ps };
+    else {
+      // (Shields up comes on its own, as red alert always raised them; the rest is offered to Tactical.)
+      if (ps.shields === 'up' && !shields.has(k)) applyTactical(k, { shields: 'up' }, ['shields up']);
+      const rest = tac.filter((x) => x !== 'shields up');
+      if (rest.length) e.postureOffers.Tactical = { level, tac: rest, ps: { ...ps, shields: ps.shields === 'up' ? undefined : ps.shields } };
+    }
   }
   for (const [st, o] of Object.entries(e.postureOffers)) tellStations(k, [st], `${st}: ${level} alert posture offered: ${st === 'Engineering' ? Object.entries(o.power).map(([x, v]) => `${x} ${v}%`).join(', ') || 'power as it was' : o.tac.join(', ')} (Station screen: Apply)`);
   scheduleNav();
