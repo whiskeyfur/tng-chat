@@ -779,7 +779,7 @@ let distBus = 'EPS';
 function renderDistribution(grid) {
   const box = document.querySelector('[data-distribution]');
   if (!box || !grid) return;
-  const sig = JSON.stringify([distBus, grid.xlBlock, grid.ties, grid.cells, grid.cutOff, grid.totals, grid.stores, grid.fuel, grid.taps, grid.crossflow, grid.srcCap, grid.epsLive, grid.srcDamage]);
+  const sig = JSON.stringify([distBus, grid.xlBlock, grid.ties, grid.cells, grid.cutOff, grid.totals, grid.stores, grid.fuel, grid.taps, grid.crossflow, grid.srcCap, grid.epsLive, grid.srcDamage, grid.tapAvail]);
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig;
   const NS = 'http://www.w3.org/2000/svg';
@@ -817,25 +817,32 @@ function renderDistribution(grid) {
       const tapIn = Math.max(0, grid.cells?.taps?.[X] || 0), tapMax = grid.taps?.[X] || 0;
       // The EPS tap: closed (standby), open and carrying (live), open and not needed (ready), or
       // open with the EPS not energized (no output). A tap opens it to the bus's limit, or closes it.
-      const tapSt = tapIn > 0.5 ? 'live' : !tapMax ? 'open' : grid.epsLive ? 'idle' : 'dead';
-      left.push(hurt({ label: 'EPS tap', value: `${Math.round(tapIn)} of ${tapMax} MW`, st: tapSt, ...(tapSt === 'dead' ? { word: 'EPS not energized' } : tapSt === 'open' ? { word: 'closed · standby' } : {}), amount: tapIn, crosslink: true, tapBus: X }, `tap:${X}`));
+      // (Drawn now, and what it could give: its limit, or what the EPS can spare, whichever is less.)
+      const avail = grid.tapAvail?.[X] ?? tapMax, lvl = grid.stores?.EPS?.level;
+      const tapSt = tapIn > 0.5 ? 'live' : !tapMax ? 'open' : avail > 0.5 ? 'idle' : 'dead';
+      left.push(hurt({ label: 'EPS tap', value: `${Math.round(tapIn)} drawn · ${avail} avail${avail < tapMax ? ` of ${tapMax}` : ''}`, st: tapSt, word: tapSt === 'open' ? 'closed · standby' : tapSt === 'dead' ? (grid.epsLive ? 'no output' : 'EPS not energized') : `${tapSt === 'live' ? 'live' : 'ready'}${lvl != null ? ` · EPS ${lvl}%` : ''}`, amount: tapIn, crosslink: true, tapBus: X }, `tap:${X}`));
     }
     const t = grid.totals?.[X] || {};
-    mid = { label: busName, value: `${Math.round(t.used || 0)} of ${Math.round(t.available || 0)} MW`, st: (t.available || 0) > 0 ? 'live' : 'dead',
+    mid = { inOut: true, label: busName, value: `${Math.round(t.used || 0)} of ${Math.round(t.available || 0)} MW`, st: (t.available || 0) > 0 ? 'live' : 'dead',
       notes: X === 'EPS' ? [] : [`crosslink: TIE ${grid.ties.crosslink.includes(X) ? 'CLOSED' : 'OPEN'}`, `EPS tap: ${grid.taps?.[X] ? `up to ${grid.taps[X]}` : 'closed'}`] };
     // The places on it (the design's, by deck), and what's in each that can tie to this bus.
     const places = [...(window.PLACES || [])].sort((a, b) => a.deck - b.deck), fallback = places.find((p) => p.default) || places[places.length - 1];
     const parentOf = { injectors: 'system:engines', atmosphere: 'system:lifeSupport', thermal: 'system:lifeSupport', gravity: 'system:lifeSupport', lights: 'system:lifeSupport', lighting: 'system:lifeSupport' };
     const placeOf = (key) => key.startsWith('console:') ? places.find((p) => p.stations.includes(key.slice(8)))
       : places.find((p) => (p.rows || []).includes(parentOf[key.slice(7)] || key)) || fallback;
-    const loads = Object.keys(grid.ties).filter((k) => /^(console|system|sub):/.test(k) && !k.startsWith('place:') && grid.tieNodes[k]?.includes(X) && (grid.conduits || []).indexOf(k) < 0 || k === 'system:lifeSupport' && grid.tieNodes[k]?.includes(X));
+    const loads = Object.keys(grid.ties).filter((k) => /^(console|system|sub|contain):/.test(k) && !k.startsWith('place:') && grid.tieNodes[k]?.includes(X) && (grid.conduits || []).indexOf(k) < 0 || k === 'system:lifeSupport' && grid.tieNodes[k]?.includes(X));
+    // (Antimatter containment, and power exported through a docking port: loads that are in no place.)
+    if (grid.tieNodes.containment?.includes(X) && (grid.ties.containment || []).includes(X)) { const v = Math.abs(grid.cells.containment?.[X] || 0); right.push({ key: 'containment', label: 'Antimatter containment', value: `${Math.round(v)} MW`, st: state('containment', v), amount: v, kind: 'place' }); }
+    for (const [k, c] of Object.entries(grid.cells || {})) if (/^feed/.test(k) && Math.abs(c?.[X] || 0) > 0.5) { const v = Math.abs(c[X]); right.push({ label: `Export to ${k.endsWith(':station') ? grid.docked || 'the starbase' : k.split(':')[1] || 'a docked ship'}`, value: `${Math.round(v)} MW`, st: 'live', amount: v, kind: 'place' }); }
     if (X === 'EPS') for (const Y of LOW) { const v = Math.max(0, grid.cells?.taps?.[Y] || 0); if (v > 0.5) right.push({ label: `EPS tap to Bus ${Y}`, value: `${Math.round(v)} of ${grid.taps?.[Y] || 0} MW`, st: 'live', amount: v, kind: 'place' }); }
+    const busLive = left.some((n) => n.st === 'live') || (grid.totals?.[X]?.used || 0) > 0.5;
+    const loadSt = (k, v) => { const s = state(k, v); return s === 'dead' && busLive && !(k.startsWith('system:') && (grid.demand?.[k.slice(7)] || 0) > 0.5) ? 'idle' : s; };
     for (const p of places) {
       const pk = `place:${p.name}`, mine = loads.filter((k) => placeOf(k) === p);
       if (!grid.tieNodes[pk] || (!mine.length && !grid.ties[pk]?.includes(X))) continue;
-      const draws = mine.reduce((n, k) => n + Math.max(0, -(grid.cells[k]?.[X] || 0)), 0);
-      right.push({ key: pk, label: `Deck ${p.deck} · ${p.name}`, value: `${Math.round(draws)} MW`, st: state(pk, draws), kind: 'place', amount: draws });
-      for (const k of mine) { const v = Math.max(0, -(grid.cells[k]?.[X] || 0)); right.push({ key: k, label: cap(nameOf(k)), value: k === 'system:lifeSupport' ? 'conduit' : `${Math.round(v)} MW`, st: state(k, k === 'system:lifeSupport' ? draws : v), amount: v, kind: k.startsWith('sub:') || parentOf[k.slice(7)] ? 'sub' : 'load' }); }
+      const draws = mine.reduce((n, k) => n + Math.abs(grid.cells[k]?.[X] || 0), 0);
+      right.push({ key: pk, label: `Deck ${p.deck} · ${p.name}`, value: `${Math.round(draws)} MW`, st: loadSt(pk, draws), ...(loadSt(pk, draws) === 'idle' ? { word: 'idle' } : {}), kind: 'place', amount: draws });
+      for (const k of mine) { const v = Math.abs(grid.cells[k]?.[X] || 0); right.push({ key: k, label: cap(nameOf(k)), value: k === 'system:lifeSupport' ? 'conduit' : `${Math.round(v)} MW`, st: loadSt(k, k === 'system:lifeSupport' ? draws : v), ...(loadSt(k, k === 'system:lifeSupport' ? draws : v) === 'idle' ? { word: 'idle' } : {}), amount: v, kind: k.startsWith('sub:') || parentOf[k.slice(7)] ? 'sub' : 'load' }); }
     }
   } else {
     const fb = grid.fuel?.[X === 'Deu' ? 'deu' : 'am'];
@@ -893,6 +900,14 @@ function renderDistribution(grid) {
   const L = left.map((n, i) => ({ n, ...pill(cx.left, busC - half(left.length) - PH / 2 + rowsH(i), n) }));
   mid.xlKey = 'bus-here';
   const M = pill(cx.mid, midY, mid);
+  // (In and out: what comes onto this bus, what leaves it; anything not shown said so.)
+  if (mid.inOut) {
+    const flowIn = left.reduce((n, s) => n + (dirOf(s) > 0 ? s.amount || 0 : 0), 0) + NEAR.reduce((n, [Y]) => n + Math.max(0, across(Y)), 0);
+    const flowOut = right.reduce((n, r) => n + (r.kind === 'place' ? r.amount || 0 : 0), 0) + left.reduce((n, s) => n + (dirOf(s) < 0 ? s.amount || 0 : 0), 0) + NEAR.reduce((n, [Y]) => n + Math.max(0, -across(Y)), 0);
+    const gap = Math.round(flowIn - flowOut);
+    mid.notes.unshift(`in ${Math.round(flowIn)} MW · out ${Math.round(flowOut)} MW${Math.abs(gap) > Math.max(2, right.length / 2) ? ` · ${gap > 0 ? 'not shown' : 'from elsewhere'} ${Math.abs(gap)} MW` : ''}`);
+    svg.dataset.flowIn = Math.round(flowIn); svg.dataset.flowOut = Math.round(flowOut);
+  }
   mid.notes.forEach((t, i) => svg.append(svgEl('text', { x: cx.mid + 8, y: midY + PH + 18 + i * 16, 'font-size': 12, fill: 'var(--lcars-gold)' }, t)));
   for (const [Y, side] of NEAR) {
     const ny = midY + side * 160, tied = xlNow.includes(X) && xlNow.includes(Y), v = across(Y), t = grid.totals?.[Y] || {};
@@ -943,7 +958,7 @@ function renderDistribution(grid) {
     const bus = (Y) => {
       const tapIn = Math.round(Math.max(0, grid.cells?.taps?.[Y] || 0)), tapMax = grid.taps?.[Y] || 0;
       const b2 = el('button', { type: 'button', className: `dist-lbus${Y === X ? ' dist-lbus--here' : ''}`, id: `dist-lbus-${Y}` }, el('b', { textContent: `Bus ${Y}` }),
-        el('small', { className: tapIn ? 'dist-lbus__tap--live' : '', textContent: tapMax ? `EPS tap ↓ ${tapIn} of ${tapMax}` : 'EPS tap closed' }));
+        el('small', { className: tapIn ? 'dist-lbus__tap--live' : '', textContent: tapMax ? `EPS tap ↓ ${tapIn} · ${grid.tapAvail?.[Y] ?? tapMax} avail` : 'EPS tap closed' }));
       b2.setAttribute('aria-pressed', String(Y === X));
       b2.onclick = () => { distBus = Y; box.dataset.sig = ''; renderDistribution(lastNav?.own?.grid); };
       return b2;
@@ -1736,7 +1751,7 @@ function renderCombat() {
         const bar = lightBar(`EPS tap to Bus ${X}`, grid.busMax[X], (v) => send({ type: 'grid', tap: { bus: X, amount: v } }));
         bar.id = `tap-${X}`;
         bar.set(grid.taps[X]);
-        return spanRow(`tap-row-${X}`, `EPS → Bus ${X}`, 2, bar, `${grid.taps[X] ? `up to ${grid.taps[X]}` : 'closed'}`);
+        return spanRow(`tap-row-${X}`, `EPS → Bus ${X}`, 2, bar, `${grid.taps[X] ? `limit ${grid.taps[X]} · ${grid.cells.taps?.[X] || 0} drawn · ${grid.tapAvail?.[X] ?? grid.taps[X]} available now (the EPS can spare ${grid.epsSpare ?? '?'}, at ${grid.stores?.EPS?.level ?? '?'}%)` : 'closed'}`);
       }),
     ];
     const oneWay = () => (grid.xlBlock || []).map((d) => { const [f, t] = d.split('>'); return `Bus ${t} → ${f} only`; });

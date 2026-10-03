@@ -152,7 +152,7 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     // nothing to give), standby (untied, or a tap closed, or a breaker open). The EPS tap too.
     const words = await page.evaluate(() => {
       const base = window.__nav.last.own.grid, out = {};
-      const word = (label) => [...document.querySelectorAll('[data-distribution] .dist-node')].map((n) => n.textContent).find((t) => t.toLowerCase().startsWith(label.toLowerCase()))?.split(' · ').filter((x) => !/^\d+%$/.test(x)).pop();
+      const word = (label) => [...document.querySelectorAll('[data-distribution] .dist-node')].map((n) => n.textContent).find((t) => t.toLowerCase().startsWith(label.toLowerCase()))?.split(' · ').filter((x) => !/^(EPS )?\d+%$/.test(x)).pop();
       const show = (fn, label) => { const g = structuredClone(base); fn(g); distBus = 'B'; renderDistribution(g); return word(label); };
       const keys = ['solar', 'dock', 'ship', 'emergB', 'aux1', 'core'].filter((k) => base.tieNodes[k]?.includes('B'));
       const label = { solar: 'Solar', dock: 'Dock power', ship: 'Docked ship', emergB: 'Emergency battery B', aux1: 'Aux fusion 1', core: 'Warp core' };
@@ -161,7 +161,7 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
         const hit = (d) => (g) => { set(true, 40, 60)(g); g.srcDamage = { ...g.srcDamage, [k]: d }; };
         out[k] = [show(set(true, 40, 60), label[k]), show(set(true, 0, 60), label[k]), show(set(true, 0, 0), label[k]), show(set(false, 0, 60), label[k]), show(hit(60), label[k]), show((g) => { hit(60)(g); g.ties[k] = []; }, label[k]), show(hit(0), label[k])];
       }
-      const tap = (max, used, live) => (g) => { g.taps.B = max; g.cells.taps = { ...g.cells.taps, B: used }; g.epsLive = live; };
+      const tap = (max, used, live) => (g) => { g.taps.B = max; g.cells.taps = { ...g.cells.taps, B: used }; g.epsLive = live; g.tapAvail = { ...g.tapAvail, B: live ? max : 0 }; };
       out.tap = [show(tap(100, 40, true), 'EPS tap'), show(tap(100, 0, true), 'EPS tap'), show(tap(100, 0, false), 'EPS tap'), show(tap(0, 0, true), 'EPS tap'), show((g) => { tap(100, 40, true)(g); g.srcDamage = { 'tap:B': 25 }; }, 'EPS tap')];
       const bat = (s) => (g) => { g.stores.B = { ...g.stores.B, ...s }; };
       out.battery = [show(bat({ level: 60, supplying: 30, charging: 0, breaker: true }), 'Battery B').replace(/^\d+ out$/, 'live'), show(bat({ level: 60, supplying: 0, charging: 0, breaker: true }), 'Battery B'), show(bat({ level: 0, supplying: 0, charging: 0, breaker: true }), 'Battery B'), show(bat({ level: 60, supplying: 0, charging: 0, breaker: false }), 'Battery B')];
@@ -249,6 +249,33 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     await wait(300);
     assert.equal(await page.evaluate(() => { const b = document.querySelector('[data-distribution]'); let sc = b.parentElement; while (sc && !(sc.scrollHeight > sc.clientHeight + 2)) sc = sc.parentElement; return sc.scrollTop; }), keep[0], 'a live update kept the scroll');
     await page.click('[data-distribution] button[data-bus="A"]');
+    // Every view balances: what comes onto a bus is what leaves it (each load's draw shown, lit).
+    const balance = [];
+    for (const X of ['EPS', 'A', 'B', 'C']) {
+      await page.click(`[data-distribution] button[data-bus="${X}"]`);
+      await wait(300);
+      const b = await page.evaluate(() => { const s = document.querySelector('[data-distribution] .dist-map'); return { in: Number(s.dataset.flowIn), out: Number(s.dataset.flowOut), used: Math.round(window.__nav.last.own.grid.totals[distBus]?.used || 0), lit: document.querySelectorAll('[data-distribution] path.dist-flow').length, note: [...s.querySelectorAll('text')].map((t) => t.textContent).find((t) => /^in /.test(t)) }; });
+      balance.push(`${X} ${b.in}/${b.out}`);
+      // (Every load drawing from this bus on the grid is on Distribution, with its draw.)
+      const missing = await page.evaluate(() => Object.entries(window.__nav.last.own.grid.cells).filter(([k, c]) => /^(console|system|sub|contain):|^containment$/.test(k) && Math.abs(c[distBus] || 0) > 0.5)
+        .filter(([k, c]) => !new RegExp(`^${Math.round(Math.abs(c[distBus]))} MW`).test(document.querySelector(`[data-distribution] .dist-node[data-key="${CSS.escape(k)}"]`)?.querySelectorAll('text')[1]?.textContent || '')).map(([k, c]) => `${k} ${c[distBus]}`));
+      assert.deepEqual(missing, [], `${X}: loads drawing on the grid not shown with their draw: ${missing}`);
+      assert.ok(Math.abs(b.in - b.out) <= 3, `${X}: in ${b.in}, out ${b.out}: ${b.note}`);
+      assert.ok(!/not shown|from elsewhere/.test(b.note), `${X}: ${b.note}`);
+      if (b.out > 0.5) assert.ok(b.lit >= 2, `${X}: power moving, its lines lit (${b.lit})`);
+    }
+    await page.click('[data-distribution] button[data-bus="A"]');
+    // The EPS taps: what each could give now agrees with the grid (its limit, or what the EPS can
+    // spare, whichever is less), on Distribution, the ladder and the Power grid.
+    const tapNow = await page.evaluate(() => { const g = window.__nav.last.own.grid; distBus = 'A'; renderDistribution(g); return { g: { taps: g.taps.A, avail: g.tapAvail.A, spare: g.epsSpare, drawn: g.cells.taps?.A || 0, live: g.epsLive }, node: document.querySelector('[data-distribution] .dist-node[data-key="tap:A"]').textContent, ladder: document.querySelector('#dist-lbus-A small').textContent }; });
+    assert.equal(tapNow.g.avail, Math.min(tapNow.g.taps, Math.floor(tapNow.g.drawn + tapNow.g.spare)), JSON.stringify(tapNow));
+    assert.match(tapNow.node, new RegExp(`${Math.round(tapNow.g.drawn)} drawn · ${tapNow.g.avail} avail`), JSON.stringify(tapNow));
+    assert.match(tapNow.ladder, new RegExp(`${tapNow.g.avail} avail`), JSON.stringify(tapNow));
+    if (tapNow.g.taps && tapNow.g.avail > 0.5 && tapNow.g.drawn < 0.5) assert.match(tapNow.node, /ready · EPS \d+%/, tapNow.node);
+    const spared = await page.evaluate(() => { const g = structuredClone(window.__nav.last.own.grid); g.taps.A = 250; g.cells.taps = { ...g.cells.taps, A: 0 }; g.tapAvail = { ...g.tapAvail, A: 40 }; distBus = 'A'; renderDistribution(g); const t = document.querySelector('[data-distribution] .dist-node[data-key="tap:A"]').textContent; g.tapAvail.A = 0; g.epsLive = true; renderDistribution(g); const none = document.querySelector('[data-distribution] .dist-node[data-key="tap:A"]').textContent; renderDistribution(window.__nav.last.own.grid); return [t, none]; });
+    assert.match(spared[0], /0 drawn · 40 avail of 250 · ready/, spared[0]);
+    assert.match(spared[1], /no output$/, spared[1]);
+    step(`Distribution balances on every bus (in/out: ${balance.join(', ')}), each load's draw shown and lit`);
     // To the Power grid from Distribution: a shift-click on the Helm console opens the grid at its
     // row, flashed (not untying it); a 3 s hold on the EPS tap opens it at the EPS taps (not closing
     // it); a hold that drags is a scroll, and stays.

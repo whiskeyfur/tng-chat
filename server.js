@@ -2907,7 +2907,10 @@ function flow(k) {
     am: xt('amTransfer').length > 0 && subOk.amTransfer,
   };
   const emergUsed = Object.fromEntries(EMERG.names.map((n) => [n, usedOf(n)]));
+  const epsSpare = e.epsLive && coresUp ? Math.max(0, Math.min(srcs.filter((s) => s.ties.includes('EPS')).reduce((n, s) => n + Math.max(0, s.share ? Math.min(s.left, s.share.EPS) : s.left), 0), maxOf('EPS') - viaEps)) : 0;
+  const tapAvail = Object.fromEntries(['A', 'B', 'C'].map((X) => [X, Math.min(taps[X], buses[X].tapUsed + epsSpare)]));
   const f = {
+    epsSpare, tapAvail,
     cells, totals, buses, xferOk, emergUsed, consoleOk, demand, capacity, delivered, containmentOk, containFeed, tankFeed, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
     crossflow, storeUsed: used, coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps, epsGen, srcCap: cap,
   };
@@ -3040,6 +3043,8 @@ function gridView(k) {
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
     // What each source could give now (MW): tied and giving nothing, it's either not needed (ready) or has nothing to give.
     srcCap: Object.fromEntries(Object.entries(f.srcCap || {}).map(([x, v]) => [x, Math.round(v)])),
+    // What each EPS tap could give now (MW: its limit, or what the EPS can spare), and the EPS's spare.
+    epsSpare: Math.floor(f.epsSpare), tapAvail: Object.fromEntries(Object.entries(f.tapAvail).map(([x, v]) => [x, Math.floor(v)])),
     // Each source's damage (%: the worst of what it's made of), shown on Distribution even when it's off.
     srcDamage: (() => { const d = combatOf(k).damage || {}, worst = (xs) => Math.round(Math.max(0, ...xs.map((x) => d[x] || 0))); return Object.fromEntries(Object.entries(SRC_DAMAGE).map(([x, xs]) => [x, worst(xs)]).filter(([, v]) => v >= 1)); })(),
   };

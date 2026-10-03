@@ -191,6 +191,8 @@ Three low-power buses, **A**, **B** and **C** (300 each at most), and the high-p
 
 Tap a source to tie or untie it. Tapping the EPS tap closes it, or opens it to the bus's limit.
 
+Each bus's view balances. Every load shows what it draws, lit while it draws; a load that's tied but drawing nothing reads idle. Antimatter containment and power exported through a docking port are listed too. The bus reads **in N MW · out N MW**, and says so if anything isn't shown. An EPS tap shows what it draws now and what it could give ("0 drawn · 250 avail", or "40 avail of 250" when the EPS can spare less than the limit), with the EPS pressure. It reads ready while it could give something and no output while the EPS can spare nothing. The ladder and the Power grid's tap rows show the same numbers.
+
 **The crosslink on Distribution** sits in the middle of each low bus's view: Bus B has Bus A above it and Bus C below; Bus A and Bus C each have Bus B above them. A and C only link through B.
 
 - Each link between buses is lit the way power crosses it.
