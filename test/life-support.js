@@ -20,10 +20,10 @@ require('../tools/store').filesOnly();
 
 const step = (s) => console.log(`ok - ${s}`);
 let ok = false;
+const graphs = {};
 try {
   const d = GRAPH.dump(), { classes, starbase, relay } = CONFIG.files.loadShips(() => {});
   const designs = { ...classes, starbase, [relay.id || 'subspace-relay']: relay };
-  const graphs = {};
   for (const id of Object.keys(d.classes)) {
     const g = graphs[id] = GRAPH.convert(id, designs[id], d), { all } = GRAPH.nodes(g);
     assert.deepEqual(GRAPH.check(g), [], `${id}: valid`);
@@ -96,11 +96,16 @@ try {
     const a = co2At(await life(() => true, 'a reading')); await wait(2500);
     const b = co2At(await life(() => true, 'a later reading'));
     assert.ok(b > a, `carbon dioxide rising with the atmosphere off (${a} to ${b} kPa)`);
+    // (Saved as the air changes: the ship's save catches up with the stale air, with nothing else changing.)
+    const airId = Object.keys(JSON.parse(fs.readFileSync(path.join(DATA, 'Airship', '.nav.json'), 'utf8')).eng?.life?.air || {}).find((x) => x === `air-${where.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`);
+    let savedCo2 = 0;
+    for (let i = 0; i < 80 && savedCo2 < b + 0.04; i++) { await wait(500); const n = JSON.parse(fs.readFileSync(path.join(DATA, 'Airship', '.nav.json'), 'utf8')); savedCo2 = n.eng?.life?.air?.[airId]?.co2 ? LS.kPa('co2', n.eng.life.air[airId].co2, GRAPH.nodes(graphs.runabout).all[airId].volume, 295) : 0; }
+    assert.ok(airId && savedCo2 >= b + 0.04, `the stale air saved as it changes (${savedCo2.toFixed(2)} kPa in the save)`);
     ws.close();
     for (const p of procs.splice(1)) { p.kill(); await new Promise((r) => p.once('exit', r)); }
     const saved = JSON.parse(fs.readFileSync(path.join(DATA, 'Airship', '.nav.json'), 'utf8'));
     assert.ok(saved.eng?.life?.air && Object.keys(saved.eng.life.air).length === first.places.length && saved.eng.life.tanks['tank-o2'] > 0, 'the air and the tanks saved with the ship');
-    console.log(`ok - in play at 600×: Engineering's grid shows each place's air (${where.name}: O2 ${where.kPa.o2} kPa, CO2 ${where.kPa.co2}, the chief there); with the atmosphere off, its CO2 rose ${a} to ${b} kPa; the air and the tanks saved with the ship`);
+    console.log(`ok - in play at 600×: Engineering's grid shows each place's air (${where.name}: O2 ${where.kPa.o2} kPa, CO2 ${where.kPa.co2}, the chief there); with the atmosphere off, its CO2 rose ${a} to ${b} kPa, and the save kept up (${savedCo2.toFixed(2)} kPa); the air and the tanks saved with the ship`);
     ok = true;
   } catch (err) {
     console.error('FAIL:', err.stack || err.message);

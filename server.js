@@ -4211,6 +4211,8 @@ function lifeTick(k, f) {
   e.lifeLast = LIFE.step(g, e.life, { dt: 1, speed: LIFE_SPEED, crew, power, places });
   e.lifeCrew = crew;
 }
+// (A change worth saving: a place's oxygen or carbon dioxide by a tenth of a kPa, a tank by a kg.)
+const lifeSig = (k) => { const l = engOf(k)?.lifeLast; return l ? [Object.values(l.air).map((x) => [Math.round(x.kPa.o2 * 10), Math.round(x.kPa.co2 * 10)]), Object.values(l.tanks).map(Math.round)] : null; };
 // What the screens show: each place's air (its pressures, kPa, and what's wrong), who's there, and the tanks.
 function lifeView(k) {
   const e = engOf(k), g = GRAPHS[graphIdOf(k)];
@@ -4238,7 +4240,7 @@ setInterval(() => {
     const before = state();
     flowCache.delete(k);
     const f = flow(k);
-    lifeTick(k, f);
+    { const was = JSON.stringify(lifeSig(k)); lifeTick(k, f); if (JSON.stringify(lifeSig(k)) !== was) e.dirty = true; } // (saved when the air changes)
 
     // Self-destruct: containment off, and the core goes.
     if (e.selfDestruct && now >= e.selfDestruct.at) { destroy(k, `self-destruct, by order of ${e.selfDestruct.by}`); changed = true; continue; }
