@@ -10,6 +10,13 @@
 // the phase error, and the waveform matcher (its frequency, amplitude and phase matched to the
 // signal's) takes out the noise. Routing needs QUALITY_TO_ROUTE.
 const CHANNELS = { min: 100, max: 999 };
+// Encryption: what a transmission can be enciphered with, and how hard each is to break without its
+// key (a listener's computer cores at it: strength x a minute, a core). Every Federation vessel holds
+// the Starfleet key; a vessel's own (private:<its name>) only it, and whoever it shares it with over
+// a data link.
+const CIPHERS = { starfleet: { name: 'Starfleet standard', strength: 1 }, private: { name: 'Private', strength: 5 } };
+const cipherOf = (id) => (id ? CIPHERS[String(id).split(':')[0]] || null : null);
+const cipherName = (id) => (!id ? 'none' : id.startsWith('private:') ? `private (${id.slice(8)})` : cipherOf(id)?.name || id);
 const QUALITY_TO_ROUTE = 0.6;
 
 // A vessel's own channel to start with: from its name (the same every time; a ship's registry, if you
@@ -48,6 +55,8 @@ function interference(channel, others) {
 // offset by its shift; the waveform matcher removes the noise as closely as it matches.
 function quality(signal, chain = []) {
   let interf = signal.interference || 0, phaseErr = Math.abs(signal.phase || 0), noise = 1 - signal.strength;
+  // (Enciphered: nothing but noise until a decryptor with its key is in the chain.)
+  if (signal.cipher && !chain.some((m) => m.type === 'decrypt' && m.cipher === signal.cipher)) return { quality: 0, parts: { strength: signal.strength, interference: interf, phaseError: phaseErr, noise: 1, encrypted: signal.cipher } };
   for (const m of chain) {
     if (m.type === 'filter' && m.channel === signal.channel) interf = 0;
     if (m.type === 'phase') phaseErr = Math.abs(((((signal.phase || 0) - (m.shift || 0)) % 360) + 540) % 360 - 180);
@@ -66,8 +75,8 @@ function waveMatch(signal, m) {
   return Math.max(0, 1 - (df * 0.5 + da * 0.25 + dp * 0.25) * 2);
 }
 // The best chain for a signal (what the computer does when it's automated, or Ops routes it).
-const bestChain = (signal) => [{ type: 'filter', channel: signal.channel }, { type: 'phase', shift: signal.phase || 0 }, { type: 'wave', ...waveOf(signal) }];
+const bestChain = (signal) => [...(signal.cipher ? [{ type: 'decrypt', cipher: signal.cipher }] : []), { type: 'filter', channel: signal.channel }, { type: 'phase', shift: signal.phase || 0 }, { type: 'wave', ...waveOf(signal) }];
 
-const SIGNALS = { CHANNELS, QUALITY_TO_ROUTE, homeChannel, clampChannel, seen, interference, quality, waveOf, waveMatch, bestChain };
+const SIGNALS = { CHANNELS, CIPHERS, cipherOf, cipherName, QUALITY_TO_ROUTE, homeChannel, clampChannel, seen, interference, quality, waveOf, waveMatch, bestChain };
 // (The relay's, and the comms stage's in the browser: /shared/signals.js, the same reckoning both ends.)
 if (typeof module !== 'undefined' && module.exports) module.exports = SIGNALS; else window.SIGNALS = SIGNALS;

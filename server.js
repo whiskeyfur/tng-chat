@@ -512,7 +512,8 @@ function broadcastShips() {
   broadcastAllOps(); // the data link map shows every ship
 }
 
-const broadcastAllOps = () => new Set([...operators].map((op) => op.shipKey)).forEach(broadcastOps);
+// (Every vessel with ops on duty, or Communications: it runs data links too.)
+const broadcastAllOps = () => new Set([...[...operators].map((op) => op.shipKey), ...[...users.values()].filter((u) => u.station === 'Communications' && !u.operator).map((u) => u.shipKey)]).forEach(broadcastOps);
 
 function peerInfo(id) {
   const u = users.get(id);
@@ -554,15 +555,20 @@ const carriers = new Map(); // cid -> 'link' | 'radio'
 // caller's, when it was put through); a data link's (the first of its two, by name).
 const channelOf = (k) => engOf(k)?.comm?.channel ?? SIGNALS.homeChannel(shipName(k));
 const callChannel = new Map(); // cid -> channel
+const callCipher = new Map(); // cid -> cipher (the caller's, when it was put through)
+const cipherFrom = (k) => engOf(k)?.comm?.cipher || null;
+// The keys a vessel holds: Starfleet's, its own, and those shared with it.
+const keysOf = (k) => new Set(['starfleet', `private:${shipKey(shipName(k))}`, ...(engOf(k)?.comm?.keys || [])]);
+const myCipher = (k, which) => (which === 'private' ? `private:${shipKey(shipName(k))}` : which === 'starfleet' ? 'starfleet' : null);
 // Everything on the air between vessels now: { id, kind: 'hail' | 'call' | 'link', channel, tx (the
 // vessel transmitting), ships, parties (names), since }.
 function transmissions() {
   const out = [];
-  for (const h of hails.values()) { const c = users.get(h.caller); out.push({ id: h.id, kind: 'hail', channel: h.channel ?? channelOf(h.fromShip), tx: h.fromShip, to: h.toShip, ships: [h.fromShip, h.toShip], parties: c ? [`${c.name} (${c.station}, ${shipName(h.fromShip)})`] : [], since: h.since, cipher: h.cipher || null }); }
+  for (const h of hails.values()) { const c = users.get(h.caller); out.push({ id: h.id, kind: 'hail', channel: h.channel ?? channelOf(h.fromShip), tx: h.fromShip, to: h.toShip, ships: [h.fromShip, h.toShip], parties: c ? [`${c.name} (${c.station}, ${shipName(h.fromShip)})`] : [], since: h.since, cipher: h.cipher ?? cipherFrom(h.fromShip) }); }
   const calls = new Map();
   for (const u of users.values()) if (u.cid && u.state === 'in-call') { const c = calls.get(u.cid) || { ships: new Set(), parties: [], since: u.callSince || Date.now() }; c.ships.add(u.shipKey); c.parties.push(`${u.name} (${u.station}, ${shipName(u.shipKey)})`); calls.set(u.cid, c); }
-  for (const [cid, c] of calls) if (c.ships.size > 1 && carriers.get(cid) === 'radio') { const ships = [...c.ships]; out.push({ id: cid, kind: 'call', channel: callChannel.get(cid) ?? channelOf(ships[0]), tx: ships[0], ships, parties: c.parties, since: c.since }); }
-  for (const l of links) { const ships = l.split('|'); if (ships.every((x) => navState.has(x))) out.push({ id: `link:${l}`, kind: 'link', channel: channelOf(ships[0]), tx: ships[0], ships, parties: ships.map(shipName), since: linkSince.get(l) || Date.now() }); }
+  for (const [cid, c] of calls) if (c.ships.size > 1 && carriers.get(cid) === 'radio') { const ships = [...c.ships]; out.push({ id: cid, kind: 'call', channel: callChannel.get(cid) ?? channelOf(ships[0]), tx: ships[0], ships, parties: c.parties, since: c.since, cipher: callCipher.get(cid) ?? null }); }
+  for (const l of links) { const ships = l.split('|'); if (ships.every((x) => navState.has(x))) out.push({ id: `link:${l}`, kind: 'link', channel: channelOf(ships[0]), tx: ships[0], ships, parties: ships.map(shipName), since: linkSince.get(l) || Date.now(), cipher: cipherFrom(ships[0]) }); }
   return out.filter((t) => !(t.ships.length === 2 && quantumPair(t.ships[0], t.ships[1])));
 }
 // What a vessel's receivers make of them: each one it hears (in radio range of where it's sent from,
@@ -578,10 +584,14 @@ function signalsFor(k) {
     const s = SIGNALS.seen(rx, velocityOf(t.tx), { range: Math.min(rangesOf(k).comms, rangesOf(t.tx).comms), power: commsUp(t.tx, 'radio') ? 1 : 0.2 });
     heard.push({ ...t, ...s });
   }
+  const keys = keysOf(k);
   return heard.map((t) => {
     const addressed = t.ships.includes(k), listened = e.comm?.listen === t.channel;
-    const signal = { id: t.id, kind: t.kind, channel: t.channel, bearing: t.bearing, distance: t.distance, strength: t.strength, phase: t.phase, interference: SIGNALS.interference(t.channel, heard.filter((o) => o.id !== t.id)), since: t.since, addressed, listened };
-    return { ...signal, wave: SIGNALS.waveOf(signal), ...(addressed || listened ? { from: shipName(t.tx), to: t.to ? shipName(t.to) : t.ships.filter((x) => x !== t.tx).map(shipName).join(', '), parties: t.parties } : {}) };
+    // (Enciphered: who it's for is in the clear, what's said isn't, without the key, or until a
+    // listener's cores have broken it.)
+    const keyed = !t.cipher || keys.has(t.cipher), broken = (e.breaking?.[t.id] || 0) >= 1, clear = keyed || broken;
+    const signal = { id: t.id, kind: t.kind, channel: t.channel, bearing: t.bearing, distance: t.distance, strength: t.strength, phase: t.phase, interference: SIGNALS.interference(t.channel, heard.filter((o) => o.id !== t.id)), since: t.since, addressed, listened, cipher: t.cipher || null, cipherName: t.cipher?.startsWith('private:') ? `private (${shipName(t.cipher.slice(8))})` : SIGNALS.cipherName(t.cipher), keyed, ...(t.cipher && !keyed ? { breaking: Math.min(1, Math.round((e.breaking?.[t.id] || 0) * 100) / 100) } : {}) };
+    return { ...signal, wave: SIGNALS.waveOf(signal), ...(addressed || (listened && clear) ? { from: shipName(t.tx), to: t.to ? shipName(t.to) : t.ships.filter((x) => x !== t.tx).map(shipName).join(', '), ...(clear ? { parties: t.parties } : {}) } : {}) };
   });
 }
 const carrierFor = (a, b, want) => (a.shipKey === b.shipKey ? 'local' : want === 'radio' || !sameNetwork(a.shipKey, b.shipKey) ? 'radio' : 'link');
@@ -589,7 +599,7 @@ const carrierFor = (a, b, want) => (a.shipKey === b.shipKey ? 'local' : want ===
 function forceConnect(a, b, carrier) {
   const cid = newId('op-');
   carriers.set(cid, carrierFor(a, b, carrier));
-  if (carriers.get(cid) === 'radio') callChannel.set(cid, channelOf(a.shipKey));
+  if (carriers.get(cid) === 'radio') { callChannel.set(cid, channelOf(a.shipKey)); callCipher.set(cid, cipherFrom(a.shipKey)); }
   send(b, { type: 'connect', peers: [info(a)], role: 'callee', cid });
   send(a, { type: 'connect', peers: [info(b)], role: 'caller', cid });
 }
@@ -603,6 +613,7 @@ function routeHail(k, id, callee, wantVia) {
   if (!h || h.toShip !== k) return { error: 'that hail is no longer open' };
   const caller = users.get(h.caller);
   if (!callee || callee.shipKey !== k) return { error: 'pick a crew member to route the hail to' };
+  if (h.cipher && !keysOf(k).has(h.cipher)) return { error: `the hail is enciphered (${SIGNALS.cipherName(h.cipher)}): we haven't its key` };
   hails.delete(h.id);
   if (!caller) { broadcastOps(k); scheduleTraffic(); return { error: 'the hailing party is no longer on the line' }; }
   const via = wantVia === 'link' && sameNetwork(caller.shipKey, callee.shipKey) ? 'link' : 'radio';
@@ -667,7 +678,7 @@ function operatorMessage(op, msg) {
         if (!opsOf(target).length) return fail(`no response from ${clean(msg.ship)}: no operator on duty`);
         if (!commsOk(op.shipKey, target)) return fail(`the ${shipName(target)} is out of radio range (${rangeText(op.shipKey, target)})`);
         if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
-        const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now(), channel: channelOf(op.shipKey) };
+        const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now(), channel: channelOf(op.shipKey), cipher: cipherFrom(op.shipKey) };
         hails.set(h.id, h);
         send(op, { type: 'force-hangup', reason: `transferred ${caller.name} to the ${shipName(target)}` });
         send(caller, { type: 'notice', text: `Ops is transferring you to the ${shipName(target)}: hailing now` });
@@ -703,7 +714,7 @@ function operatorMessage(op, msg) {
       if (!commsUp(op.shipKey, 'radio')) return fail('our radio has no power: hails go out by radio');
       if (!commsUp(target, 'radio')) return fail(`no answer: the ${shipName(target)}'s radio is down`);
       if ([...hails.values()].some((h) => h.caller === caller.id)) return fail(`${caller.name} already has a hail pending`);
-      const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now(), channel: channelOf(op.shipKey) };
+      const h = { id: newId('h-'), fromShip: op.shipKey, toShip: target, caller: caller.id, since: Date.now(), channel: channelOf(op.shipKey), cipher: cipherFrom(op.shipKey) };
       hails.set(h.id, h);
       send(caller, { type: 'notice', text: `Ops is hailing the ${shipName(target)} for you` });
       opLog(target, `incoming hail from the ${shipName(op.shipKey)}: ${caller.name}, ${caller.station}`);
@@ -1293,7 +1304,7 @@ function navMessage(key) {
       automation: Object.fromEntries(AUTO_PANELS.filter((p) => engOf(key).auto?.[p]).map((p) => [p, { mode: engOf(key).auto[p], station: AUTO_STATION[p], name: AUTO_NAMES[p], status: engOf(key).autoStatus?.[p] || '' }])),
       // (Every panel, for each station's own toggles; and what Ops has asked a crewed station to confirm.)
       autoPanels: AUTO_PANELS.map((p) => ({ panel: p, name: AUTO_NAMES[p], station: AUTO_STATION[p], mode: engOf(key).auto?.[p] || null })),
-      comm: { channel: channelOf(key), listen: engOf(key).comm?.listen ?? null, routeAt: SIGNALS.QUALITY_TO_ROUTE }, signals: signalsFor(key),
+      comm: { channel: channelOf(key), listen: engOf(key).comm?.listen ?? null, routeAt: SIGNALS.QUALITY_TO_ROUTE, cipher: engOf(key).comm?.cipher || null, keys: [...keysOf(key)], linked: linkedTo(key).map(shipName) }, signals: signalsFor(key),
       postureOffers: Object.entries(engOf(key).postureOffers || {}).map(([st, o]) => ({ station: st, level: o.level, items: st === 'Engineering' ? Object.entries(o.power).map(([x, v]) => `${x} ${v}%`) : o.tac })),
       autoRequests: Object.entries(engOf(key).autoReq || {}).map(([p, r]) => ({ panel: p, name: AUTO_NAMES[p], station: AUTO_STATION[p], mode: r.v, by: r.by, lead: r.lead, leadId: r.leadId })), orders: engOf(key).orderLog,
       autopilotMode: autopilots.get(key) ? { mode: autopilots.get(key).mode, range: autopilots.get(key).range || null } : null, followRanges: FOLLOW_RANGES,
@@ -1844,11 +1855,24 @@ function crewCommand(ws, msg) {
       if (ws.station !== 'Communications') return note('Only Communications works the comms stage');
       const e = engOf(key);
       if (msg.tune !== undefined) { e.comm.channel = SIGNALS.clampChannel(msg.tune); e.dirty = true; coreLog(key, 'Communications', `transmitting on channel ${e.comm.channel} (${titled(ws)})`); scheduleNav(); return note(`transmitting on channel ${e.comm.channel}`); }
+      if (msg.cipher !== undefined) { e.comm.cipher = myCipher(key, msg.cipher); e.dirty = true; coreLog(key, 'Communications', `transmitting ${e.comm.cipher ? `enciphered: ${SIGNALS.cipherName(e.comm.cipher)}` : 'in the clear'} (${titled(ws)})`); scheduleNav(); return note(e.comm.cipher ? `enciphering with ${SIGNALS.cipherName(e.comm.cipher)}` : 'transmitting in the clear'); }
+      if (msg.shareKey) {
+        // (Our private key, to a vessel we have a data link with: over the link, never the air.)
+        const t = shipKey(clean(msg.shareKey));
+        if (!links.has(linkKey(key, t))) return note(`no data link with the ${shipName(t)}: keys go over a data link`);
+        const mine = `private:${shipKey(shipName(key))}`, te = engOf(t);
+        if (!te.comm.keys.includes(mine)) { te.comm.keys.push(mine); te.dirty = true; }
+        coreLog(key, 'Communications', `our private key shared with the ${shipName(t)} over the data link (${titled(ws)})`);
+        coreLog(t, 'Communications', `the ${shipName(key)}'s private key received over the data link`);
+        scheduleNav();
+        return note(`private key shared with the ${shipName(t)}`);
+      }
       if (msg.listen !== undefined) { e.comm.listen = msg.listen === null ? null : SIGNALS.clampChannel(msg.listen); e.heardIds = new Set(); e.dirty = true; scheduleNav(); return note(e.comm.listen === null ? 'listening: off' : `listening on channel ${e.comm.listen}`); }
       if (msg.route) {
         const sig = signalsFor(key).find((x) => x.id === msg.route.hail && x.kind === 'hail' && x.addressed);
         if (!sig) return note('that hail is no longer on the air');
-        const chain = Array.isArray(msg.route.chain) ? msg.route.chain.slice(0, 8).map((m) => ({ type: m?.type, channel: Number(m?.channel), shift: Number(m?.shift), frequency: Number(m?.frequency), amplitude: Number(m?.amplitude), phase: Number(m?.phase) })) : [];
+        // (A decryptor works only with a key this vessel holds.)
+        const chain = Array.isArray(msg.route.chain) ? msg.route.chain.slice(0, 8).map((m) => ({ type: m?.type, channel: Number(m?.channel), shift: Number(m?.shift), frequency: Number(m?.frequency), amplitude: Number(m?.amplitude), phase: Number(m?.phase), cipher: typeof m?.cipher === 'string' && keysOf(key).has(m.cipher) ? m.cipher : null })) : [];
         const q = SIGNALS.quality(sig, chain);
         if (q.quality < SIGNALS.QUALITY_TO_ROUTE) return note(`too noisy to put through: ${Math.round(q.quality * 100)}% (needs ${SIGNALS.QUALITY_TO_ROUTE * 100}%): ${q.parts.interference > 0 ? 'interference on its channel, ' : ''}${q.parts.phaseError > 15 ? `phase off by ${Math.round(q.parts.phaseError)}°, ` : ''}noise ${Math.round(q.parts.noise * 100)}%`);
         const callee = typeof msg.route.to === 'string' && users.get(msg.route.to);
@@ -2741,7 +2765,9 @@ function freshEng(saved, { cold = false, k = null } = {}) {
     // Life support's air and tanks (brought back against the vessel's graph on its first tick).
     life: s.life && typeof s.life === 'object' ? s.life : null, lifeReady: false,
     // Communications: the channel it transmits and answers on, and the one it's listening to (or none).
-    comm: { channel: Number.isFinite(s.comm?.channel) ? SIGNALS.clampChannel(s.comm.channel) : null, listen: Number.isFinite(s.comm?.listen) ? SIGNALS.clampChannel(s.comm.listen) : null },
+    // (And the cipher it transmits with, or none; the keys it holds beyond Starfleet's and its own.)
+    comm: { channel: Number.isFinite(s.comm?.channel) ? SIGNALS.clampChannel(s.comm.channel) : null, listen: Number.isFinite(s.comm?.listen) ? SIGNALS.clampChannel(s.comm.listen) : null,
+      cipher: typeof s.comm?.cipher === 'string' && SIGNALS.cipherOf(s.comm.cipher) ? s.comm.cipher : null, keys: Array.isArray(s.comm?.keys) ? s.comm.keys.filter((x) => typeof x === 'string' && x.startsWith('private:')).slice(0, 50) : [] },
     coreLog: Array.isArray(s.coreLog) ? s.coreLog.filter((x) => x && typeof x.text === 'string' && Number.isFinite(x.at)).slice(-CORE_LOG.keep) : [], coreLost: Number.isFinite(s.coreLost) ? s.coreLost : 0,
     // The corridors: each link's ties as Engineering set them ({ A, B, C, EPS }: closed or open), and its damage.
     corridorTies: s.corridorTies && typeof s.corridorTies === 'object' && !Array.isArray(s.corridorTies) ? Object.fromEntries(Object.entries(s.corridorTies).filter(([, v]) => v && typeof v === 'object').map(([id, v]) => [id, Object.fromEntries(['A', 'B', 'C', 'EPS'].filter((n) => typeof v[n] === 'boolean').map((n) => [n, v[n]]))])) : {},
@@ -4517,7 +4543,9 @@ setInterval(() => {
     { const was = JSON.stringify(lifeSig(k)); lifeTick(k, f); if (JSON.stringify(lifeSig(k)) !== was) e.dirty = true; } // (saved when the air changes)
     reportSystems(k, f);
     // (Listening: each signal heard on the channel that isn't ours or for us goes in the core log, once.)
-    if (e.comm?.listen != null) for (const x of signalsFor(k)) if (x.listened && !x.addressed && !(e.heardIds ||= new Set()).has(x.id)) { e.heardIds.add(x.id); coreLog(k, 'Communications', `intercepted on channel ${x.channel}, bearing ${x.bearing}: ${x.kind === 'link' ? 'a data link' : x.kind === 'hail' ? 'a hail' : 'a call'}, ${x.from} to ${x.to}${x.parties?.length ? ` (${x.parties.join(', ')})` : ''}`); }
+    // (Enciphered without the key: the computer cores work at it, strength x a minute a core.)
+    if (e.comm?.listen != null) for (const x of signalsFor(k)) if (x.listened && x.cipher && !x.keyed && (e.breaking?.[x.id] || 0) < 1) { const n = coresOnline(k); (e.breaking ||= {})[x.id] = (e.breaking[x.id] || 0) + n / (60 * (SIGNALS.cipherOf(x.cipher)?.strength || 1)); if (e.breaking[x.id] >= 1) coreLog(k, 'Communications', `broke the ${SIGNALS.cipherName(x.cipher)} cipher on channel ${x.channel}`); }
+    if (e.comm?.listen != null) for (const x of signalsFor(k)) if (x.listened && !x.addressed && x.parties && !(e.heardIds ||= new Set()).has(x.id)) { e.heardIds.add(x.id); coreLog(k, 'Communications', `intercepted on channel ${x.channel}, bearing ${x.bearing}: ${x.kind === 'link' ? 'a data link' : x.kind === 'hail' ? 'a hail' : 'a call'}, ${x.from} to ${x.to}${x.parties?.length ? ` (${x.parties.join(', ')})` : ''}`); }
 
     // Self-destruct: containment off, and the core goes.
     if (e.selfDestruct && now >= e.selfDestruct.at) { destroy(k, `self-destruct, by order of ${e.selfDestruct.by}`); changed = true; continue; }

@@ -25,12 +25,13 @@
     const act = window.__stage = {
       route(sid) { const p = pathFrom(sid); if (p) send({ type: 'comms', route: { hail: sid, to: p.to, chain: p.chain } }); },
       listen(ch) { send({ type: 'comms', listen: ch }); },
+      key(nid, step) { const d = editor.getNodeFromId(nid).data, ks = own?.comm?.keys || ['starfleet'], i = (ks.indexOf(d.cipher) + step + ks.length) % ks.length; editor.updateNodeDataFromId(nid, { ...d, cipher: ks[i] }); paint(); },
       set(nid, key, delta, min, max, wrap) { const d = editor.getNodeFromId(nid).data; let v = (Number(d[key]) || 0) + delta; v = wrap ? ((v % wrap) + wrap) % wrap : Math.max(min, Math.min(max, v)); editor.updateNodeDataFromId(nid, { ...d, [key]: v }); paint(); },
     };
 
     function addModule(kind) {
-      const n = ['filter', 'phase', 'wave'].reduce((t, k) => t + editor.getNodesFromName(k).length, 0);
-      const data = kind === 'filter' ? { type: 'filter', channel: own?.comm?.channel || 100 } : kind === 'phase' ? { type: 'phase', shift: 0 } : { type: 'wave', frequency: 5, amplitude: 5, phase: 0 };
+      const n = ['filter', 'phase', 'wave', 'decrypt'].reduce((t, k) => t + editor.getNodesFromName(k).length, 0);
+      const data = kind === 'filter' ? { type: 'filter', channel: own?.comm?.channel || 100 } : kind === 'phase' ? { type: 'phase', shift: 0 } : kind === 'decrypt' ? { type: 'decrypt', cipher: own?.comm?.keys?.[0] || 'starfleet' } : { type: 'wave', frequency: 5, amplitude: 5, phase: 0 };
       editor.addNode(kind, 1, 1, 300 + (n % 2) * 20, 20 + n * 175, `stage-node stage-${kind}`, data, '');
       paint();
     }
@@ -71,6 +72,7 @@
       return `<div class="stage-title">${s.kind === 'hail' ? 'Hail' : s.kind === 'call' ? 'Call' : 'Data link'} · RF source</div>`
         + `<div>Channel ${s.channel} · bearing ${String(s.bearing).padStart(3, '0')}° · ${s.distance} away</div>`
         + `<div>Strength ${pct(s.strength)} · phase ${s.phase > 0 ? '+' : ''}${s.phase}° · interference ${pct(s.interference)}</div>`
+        + (s.cipher ? `<div>Enciphered: ${s.cipherName}${s.keyed ? ' · we have the key (wire a decryptor)' : s.breaking !== undefined ? ` · no key: breaking ${pct(s.breaking)}` : ' · no key'}</div>` : '')
         + (s.from ? `<div>From the ${s.from}${s.to ? ` for the ${s.to}` : ''}${s.parties?.length ? `: ${s.parties.join(', ')}` : ''}</div>` : '<div>Unidentified carrier</div>')
         + (s.addressed && s.kind === 'hail' ? `<div>${q ? `Through: ${pct(q.quality)}${who ? ` to ${who.name}` : ''}` : 'Not wired to anyone'} <button class="lcars-button tr-tap" id="stage-route-${s.id}" onclick="window.__stage.route('${s.id}')"${!q || q.quality < window.SIGNALS.QUALITY_TO_ROUTE ? ' disabled' : ''}>Put through</button></div>` : '')
         + (!s.addressed ? `<div><button class="lcars-button tr-tap" onclick="window.__stage.listen(${s.listened ? 'null' : s.channel})">${s.listened ? 'Stop listening' : `Listen on ${s.channel}`}</button></div>` : '');
@@ -78,6 +80,7 @@
     function moduleHtml(nid, d) {
       const b = (t, key, delta, min, max, wrap) => `<button class="lcars-button tr-tap" onclick="window.__stage.set(${nid}, '${key}', ${delta}, ${min}, ${max}, ${wrap || 0})">${t}</button>`;
       const sig = signalInto(nid);
+      if (d.type === 'decrypt') return `<div class="stage-title">Decryptor</div><div>Key: ${window.SIGNALS.cipherName(d.cipher)}${sig?.cipher ? (sig.cipher === d.cipher ? ' · the signal\'s' : ` · the signal's is ${sig.cipherName}`) : ''}</div><div>${`<button class="lcars-button tr-tap" onclick="window.__stage.key(${nid}, -1)">◀</button><button class="lcars-button tr-tap" onclick="window.__stage.key(${nid}, 1)">▶</button>`}</div>`;
       if (d.type === 'filter') return `<div class="stage-title">RF filter</div><div>Passes channel ${d.channel}${sig ? (sig.channel === d.channel ? ' · on the signal' : ` · the signal's is ${sig.channel}`) : ''}</div><div>${b('−10', 'channel', -10, 100, 999)}${b('−1', 'channel', -1, 100, 999)}${b('+1', 'channel', 1, 100, 999)}${b('+10', 'channel', 10, 100, 999)}</div>`;
       if (d.type === 'phase') return `<div class="stage-title">Phase shifter</div><div>Shift ${d.shift > 0 ? '+' : ''}${d.shift}°${sig ? ` · error ${Math.round(window.SIGNALS.quality(sig, [d]).parts.phaseError)}°` : ''}</div><div>${b('−15°', 'shift', -15, -180, 180)}${b('+15°', 'shift', 15, -180, 180)}</div>`;
       const m = sig ? window.SIGNALS.waveMatch(sig, d) : 0;
@@ -111,7 +114,9 @@
       head.replaceChildren(
         pillBar(`Transmitting on ${own.comm.channel}`, [tap('−10', () => send({ type: 'comms', tune: own.comm.channel - 10 })), tap('−1', () => send({ type: 'comms', tune: own.comm.channel - 1 })), tap('+1', () => send({ type: 'comms', tune: own.comm.channel + 1 })), tap('+10', () => send({ type: 'comms', tune: own.comm.channel + 10 }))]),
         pillBar(own.comm.listen == null ? 'Not listening' : `Listening on ${own.comm.listen}`, [tap('Stop', () => send({ type: 'comms', listen: null }), 'stage-listen-off')]),
-        pillBar('Add a module', [tap('RF filter', () => addModule('filter'), 'stage-add-filter'), tap('Phase shifter', () => addModule('phase'), 'stage-add-phase'), tap('Waveform matcher', () => addModule('wave'), 'stage-add-wave')]),
+        pillBar('Add a module', [tap('RF filter', () => addModule('filter'), 'stage-add-filter'), tap('Phase shifter', () => addModule('phase'), 'stage-add-phase'), tap('Waveform matcher', () => addModule('wave'), 'stage-add-wave'), tap('Decryptor', () => addModule('decrypt'), 'stage-add-decrypt')]),
+        pillBar(`Sending ${own.comm.cipher ? `enciphered: ${window.SIGNALS.cipherName(own.comm.cipher)}` : 'in the clear'}`, [['In the clear', null], ['Starfleet', 'starfleet'], ['Private', 'private']].map(([t, v]) => { const b = tap(t, () => send({ type: 'comms', cipher: v }), `stage-cipher-${v || 'none'}`); b.setAttribute('aria-pressed', String((own.comm.cipher || null) === v || (v === 'private' && String(own.comm.cipher).startsWith('private:')))); return b; })),
+        ...(own.comm.linked?.length ? [pillBar('Share our private key with', own.comm.linked.map((n) => tap(n, () => send({ type: 'comms', shareKey: n }), `stage-share-${n.replace(/\W+/g, '-')}`)))] : []),
         el('p', { className: 'st-state', id: 'stage-state', textContent: sigs.length ? `${sigs.length} signal${sigs.length === 1 ? '' : 's'} on the air: ${sigs.filter((s) => s.addressed && s.kind === 'hail').length} hail${sigs.filter((s) => s.addressed && s.kind === 'hail').length === 1 ? '' : 's'} for us` : 'Nothing on the air in range' }));
       paint();
     }
