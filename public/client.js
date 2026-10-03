@@ -584,6 +584,10 @@ function renderShipState() {
   const occupied = new Set(comms.users.filter((u) => u.ship.toLowerCase() === me.ship.toLowerCase() && !u.shielded).map((u) => u.station));
   const airless = ls ? Object.entries(ls).filter(([loc, x]) => occupied.has(loc) && !x.got.atmosphere).map(([loc]) => loc) : [];
   bc.setAlert('life', airless.length ? `NO ATMOSPHERE: ${airless.join(', ')}` : p && p.lifeSupport < 50 ? `Life support at ${p.lifeSupport}%` : null);
+  // The air where people are: carbon dioxide or oxygen wrong (red when it's dangerous).
+  const bad = (lastNav?.own?.grid?.life?.places || []).filter((x) => x.crew && x.warn.length);
+  const danger = bad.filter((x) => x.warn.some((w) => w.startsWith('danger')));
+  bc.setAlert('air', bad.length ? `AIR: ${bad.map((x) => `${x.name}: ${x.warn.join(', ')} (CO₂ ${x.kPa.co2.toFixed(1)}, O₂ ${x.kPa.o2.toFixed(1)} kPa)`).join(' · ')}` : null, { level: danger.length ? 'red' : 'yellow' });
   // (Where you are, without your environmental shield on: no heat, no gravity.)
   const mine = ls?.[myPlace()], bare = !me.equipment?.shield?.on;
   const exposed = mine && bare ? [!mine.got.thermal && 'NO HEAT', !mine.got.gravity && 'NO GRAVITY'].filter(Boolean) : [];
@@ -1248,13 +1252,36 @@ function renderBay() {
     el('p', { className: 'ops-hint', textContent: b.capacity ? `${b.landed.length} of ${b.capacity} landed` : '' }),
     el('ul', { className: 'st-list', id: 'bay-landed' }, ...(b.landed.length ? b.landed.map((n) => el('li', { textContent: `The ${n}` })) : [el('li', { className: 'empty', textContent: 'Nothing landed' })])));
 }
+// Each place's air (life support: tools/life-support.js), under the switches: its oxygen, carbon
+// dioxide and pressure, who's there, what's wrong; and the tanks. Its own box, rebuilt only when a
+// rounded reading changes, so the switches above don't move.
+function renderAir(box, life) {
+  const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
+  const sig = JSON.stringify(life ? [life.speed, life.places.map((p) => [p.name, f1(p.kPa.o2), f1(p.kPa.co2), Math.round(p.total), p.warn, p.crew]), Object.values(life.tanks).map((t) => Math.round(t.kg))] : null);
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  if (!life) { box.replaceChildren(); return; }
+  const status = (p) => (p.warn.length ? p.warn.join(', ').toUpperCase() : 'nominal');
+  const T = { o2: 'Oxygen', n2: 'Nitrogen', h2o: 'Water', carbon: 'Carbon store' };
+  box.replaceChildren(
+    el('h3', { className: 'ops-subhead', textContent: `Air${life.speed !== 1 ? ` (life support at ${life.speed}×)` : ''}` }),
+    el('table', { className: 'grid-table ls-table', id: 'air-table' },
+      el('thead', {}, el('tr', {}, ...['Place', 'Crew', 'O₂ kPa', 'CO₂ kPa', 'Pressure kPa', 'Status'].map((t) => el('th', { scope: 'col', textContent: t })))),
+      el('tbody', {}, ...life.places.map((p) => { const tr = el('tr', { id: `air-${p.name.replace(/\W+/g, '-')}` }, el('th', { scope: 'row', textContent: p.name }), el('td', { textContent: String(p.crew || '') }), el('td', { textContent: f1(p.kPa.o2) }), el('td', { textContent: f1(p.kPa.co2) }), el('td', { textContent: String(Math.round(p.total)) }), el('td', { className: 'grid-note', textContent: status(p) })); if (p.warn.some((w) => w.startsWith('danger'))) tr.dataset.danger = ''; else if (p.warn.length) tr.dataset.warn = ''; return tr; }))),
+    el('p', { className: 'ops-hint', id: 'air-tanks', textContent: Object.entries(life.tanks).map(([t, x]) => `${T[t] || t} ${Math.round(x.kg)}${x.cap ? ` of ${Math.round(x.cap)}` : ''} kg`).join(' · ') }),
+    el('p', { className: 'ops-hint', textContent: 'Each place has its own air. The crew breathe where their station is; the scrubber, the water reclaimer and the ventilation run on the atmosphere system (a place switched off or unpowered is sealed from them), hydroponics on the lighting. Carbon dioxide over 1 kPa is high, over 4 dangerous; oxygen under 16 kPa low, under 12 dangerous.' }));
+}
 function renderLifeSupport() {
   const root = document.querySelector('[data-lifesupport]');
   const ls = lastNav?.own?.grid?.ls;
   if (!root || !ls) return;
+  let lsBox = root.querySelector('#ls-box'), airBox = root.querySelector('#air-box');
+  if (!lsBox) { root.replaceChildren(lsBox = Object.assign(document.createElement('div'), { id: 'ls-box' }), airBox = Object.assign(document.createElement('div'), { id: 'air-box' })); }
+  renderAir(airBox, lastNav?.own?.grid?.life);
   const sig = JSON.stringify(ls);
-  if (root.dataset.sig === sig) return;
-  root.dataset.sig = sig;
+  if (lsBox.dataset.sig === sig) return;
+  lsBox.dataset.sig = sig;
   const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
   const SYS = [['atmosphere', 'Atmosphere'], ['thermal', 'Thermal'], ['gravity', 'Gravity'], ['lights', 'Lights']];
   const tap = (loc, sys, on, got) => {
@@ -1265,7 +1292,7 @@ function renderLifeSupport() {
     return b;
   };
   const all = (sys, on) => el('button', { type: 'button', className: 'lcars-button lcars-button--pill grid-mini', textContent: on ? 'All on' : 'All off', onclick: () => send({ type: 'grid', ls: { loc: 'all', sys, on } }) });
-  root.replaceChildren(el('table', { className: 'grid-table ls-table', id: 'ls-table' },
+  lsBox.replaceChildren(el('table', { className: 'grid-table ls-table', id: 'ls-table' },
     el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'Place' }), ...SYS.map(([k, n]) => el('th', { scope: 'col' }, el('span', { textContent: n }), all(k, true), all(k, false))), el('th', { scope: 'col', textContent: 'Status' }))),
     el('tbody', {}, ...Object.entries(ls).map(([loc, x]) => el('tr', { id: `ls-${loc.replace(/\s/g, '-')}` }, el('th', { scope: 'row', textContent: loc }),
       ...SYS.map(([k]) => el('td', {}, tap(loc, k, x.on[k], x.got[k]))),
@@ -1407,13 +1434,13 @@ function renderCrewPanels() {
   // Medical: sickbay and life signs.
   const med = document.querySelector('[data-medical]');
   const emhOn = !!lastNav?.own?.automation?.medical;
-  if (med && changed(med, crewSig, ownPower()?.lifeSupport, emhOn)) {
+  if (med && changed(med, crewSig, ownPower()?.lifeSupport, emhOn, JSON.stringify((lastNav?.own?.grid?.life?.places || []).filter((x) => x.crew && x.warn.length).map((x) => [x.name, x.warn])))) {
     const p = ownPower();
     med.replaceChildren(
       capsule(el('div', { className: 'st-control' },
         el('p', { className: 'st-state', id: 'emh-state', textContent: emhOn ? 'Emergency medical hologram: active' : 'Emergency medical hologram: off' }),
         button(emhOn ? 'Deactivate EMH' : 'Activate EMH', () => send({ type: 'emh', on: !emhOn }), emhOn ? '' : 'lcars-button--alert')), { id: 'emh-monitor' }),
-      el('p', { className: 'ops-hint', textContent: p ? `Life support ${p.lifeSupport}%${p.lifeSupport < 50 ? ': crew at risk' : ''}` : '' }),
+      el('p', { className: 'ops-hint', textContent: p ? `Life support ${p.lifeSupport}%${p.lifeSupport < 50 ? ': crew at risk' : ''}${(() => { const w = (lastNav?.own?.grid?.life?.places || []).filter((x) => x.crew && x.warn.length); return w.length ? ` · air: ${w.map((x) => `${x.name} ${x.warn.join(', ')}`).join('; ')}` : ''; })()}` : '' }),
       el('ul', { className: 'st-list st-patients' }, ...crew.map((u) => {
         const li = el('li', {}, `${u.name}${u.id === me.id ? ' (you)' : ''}`, el('span', { textContent: `${u.station} · ${status(u)}` }),
           u.sickbay ? button('Discharge', () => send({ type: 'sickbay', who: u.id, on: false })) : button('Admit', () => send({ type: 'sickbay', who: u.id, on: true }), 'lcars-button--alert'));

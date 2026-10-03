@@ -9,7 +9,7 @@ const path = require('path');
 
 const DIR = process.env.RELAY_DATA || path.join(__dirname, '..', 'data');
 const FILE = path.join(DIR, 'settings.json');
-const DEFAULTS = { host: '', port: 8085, registration: 'approval', adminAccess: 'localhost', engine: 'relay', game: '', database: null, solver: 'graph' };
+const DEFAULTS = { host: '', port: 8085, registration: 'approval', adminAccess: 'localhost', engine: 'relay', game: '', database: null, solver: 'graph', lifeSpeed: 1 };
 const ENGINES = ['relay', 'graph']; // (what plays the power grid: the relay's own solver, or the ship graphs')
 const SOLVERS = ['graph', 'path']; // (with the graph engine: the graph solver, or the path tracer)
 const REGISTRATION = ['open', 'approval', 'closed'];
@@ -32,6 +32,7 @@ function check(v) {
   if (v.game !== undefined && typeof v.game !== 'string') return { field: 'game', message: 'a game id (text)' };
   if (v.engine !== undefined && !ENGINES.includes(v.engine)) return { field: 'engine', message: `one of ${ENGINES.join(', ')}` };
   if (v.solver !== undefined && !SOLVERS.includes(v.solver)) return { field: 'solver', message: `one of ${SOLVERS.join(', ')}` };
+  if (v.lifeSpeed !== undefined && !(typeof v.lifeSpeed === 'number' && v.lifeSpeed > 0 && v.lifeSpeed <= 3600)) return { field: 'lifeSpeed', message: 'how much faster life support runs than real time: more than 0, up to 3600 (1: real time)' };
   return null;
 }
 // Is a port free on this host? (true, or the error's code)

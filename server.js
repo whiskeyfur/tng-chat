@@ -82,6 +82,10 @@ const GRAPH_PLAY = (process.env.ENGINE || SETTINGS.read().engine) === 'graph';
 // ("solver": "path" in data/settings.json; tools/path-solver.js). SOLVER in the environment wins.
 const PATH_PLAY = (process.env.SOLVER || SETTINGS.read().solver) === 'path';
 const PATH_SOLVER = require('./tools/path-solver');
+// Life support (tools/life-support.js): each place's air, run each second after the power; "lifeSpeed"
+// in data/settings.json runs it faster (1: real time).
+const LIFE = require('./tools/life-support');
+const LIFE_SPEED = Number(SETTINGS.read().lifeSpeed) || 1;
 // Which game this is (set by the cutover): a ship or a starbase saved in another game starts new.
 const GAME_ID = SETTINGS.read().game || '';
 const { classes: CLASSES, starbase: BASE_DESIGN, relay: RELAY_FILE } = CONFIG.loadShips((line) => console.warn(line));
@@ -2504,6 +2508,8 @@ function freshEng(saved, { cold = false, k = null } = {}) {
     auto: Object.fromEntries(AUTO_PANELS.map((p) => [p, p === 'engineering' ? (['startup', 'shutdown'].includes(s.auto?.[p]) ? s.auto[p] : null) : !!s.auto?.[p]])), autoStatus: {},
     // The orders given aboard (newest first, the last ORDER_LOG): text, when, by whom, to whom, who has acknowledged.
     orderLog: Array.isArray(s.orderLog) ? s.orderLog.slice(0, ORDER_LOG).filter((o) => o && typeof o.text === 'string') : [],
+    // Life support's air and tanks (brought back against the vessel's graph on its first tick).
+    life: s.life && typeof s.life === 'object' ? s.life : null, lifeReady: false,
     forcefields: Array.isArray(s.forcefields) ? s.forcefields.filter((st) => STATIONS.includes(st)) : [], // stations Security has isolated
     // Docked with another ship: kept across restarts (it's checked once both are back).
     // Two docking ports. A starbase takes one (docked, dockedPort); ships dock
@@ -2639,6 +2645,7 @@ const savedEng = (k) => {
     // (Each load's power path, as the design had it: a design change is noticed on the next load.)
     paths: Object.fromEntries(Object.keys(e.ties).filter((x) => /^(console|system|sub):/.test(x) && !CONDUITS.includes(x)).map((x) => [x, conduitsOf(k, x).join('>')])),
     dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores * 100) / 100, sporeLoaded: e.spore?.loaded || 0, brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog,
+    life: e.lifeReady && e.life ? { air: Object.fromEntries(Object.entries(e.life.air).map(([a, x]) => [a, Object.fromEntries(Object.entries(x).map(([gas, v]) => [gas, Math.round(v * 1000) / 1000]))])), tanks: Object.fromEntries(Object.entries(e.life.tanks).map(([t, v]) => [t, Math.round(v * 1000) / 1000])), waste: Math.round(e.life.waste * 1000) / 1000 } : e.life,
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
     shipDocks: Object.fromEntries(PORTS.map((p) => [p, e.shipDocks[p] ? shipName(e.shipDocks[p]) : null])),
@@ -3073,6 +3080,7 @@ function gridView(k) {
     core: e.core, antimatter: Math.floor(e.antimatter), deuterium: Math.floor(e.deuterium), fuelCaps: e.fuelCaps || { antimatter: FUEL.antimatter, deuterium: FUEL.deuterium },
     drives: Object.fromEntries(DRIVES.map((d) => { const dr = e.drives[d]; return [d, { state: dr.state, start: dr.start, thrusters: !!(e.ties[`thrusters${d[0].toUpperCase()}${d.slice(1)}`] || []).length, epsTap: dr.epsTap, accel: dr.accel, gear: dr.gear, top: Math.round(driveTop(dr) * 1000) / 1000 }]; })),
     aux: Object.fromEntries(AUX.map((a) => [a, { state: e.aux[a].state, start: e.aux[a].start, epsTap: e.aux[a].epsTap }])), auxOutput: FUSION.aux,
+    life: lifeView(k),
     // Each place: what's switched on, what it's actually getting, and whether it's lit.
     ls: (() => {
       // Served: the system has power (at less than full, it serves them less well: life support's level shows that).
@@ -4182,6 +4190,39 @@ function combatCommand(ws, msg) {
 // charge, torpedoes restock while docked, locks lost when the target leaves
 // sensor range. The ship's computers get a copy every few seconds.
 let combatTick = 0;
+// Life support, a second (times lifeSpeed): the crew breathe the air of the place their station is
+// in; the atmosphere system's power runs the air handling, the scrubber and the reclaimer (each place's
+// own only where its atmosphere is switched on and served), the lighting's the hydroponics.
+const lifePlaceOf = (k, station) => { const ps = placesOf(k); return (ps.find((p) => p.stations.includes(station)) || ps.find((p) => p.default) || ps[0])?.name; };
+function lifeTick(k, f) {
+  const g = GRAPHS[graphIdOf(k)], e = engOf(k);
+  if (!g || !e) return;
+  if (!e.lifeReady) { e.life = LIFE.restore(g, e.life); e.lifeReady = true; }
+  const { all } = SHIP_GRAPH.nodes(g), idByName = Object.fromEntries(Object.entries(all).filter(([, s]) => s.type === 'place').map(([id, s]) => [s.name, id]));
+  const share = (x) => { const u = lsShare(k, x); return u > 0 ? Math.max(0, Math.min(1, (f.delivered[x] || 0) / (100 * u))) : 0; };
+  const power = { 'system-atmosphere': share('atmosphere'), 'system-lighting': share('lighting') };
+  const crew = {};
+  for (const u of crewOf(k)) { const id = idByName[lifePlaceOf(k, placeOf(u))]; if (id) crew[id] = (crew[id] || 0) + 1; }
+  const places = {};
+  for (const p of placesOf(k)) {
+    const id = idByName[p.name], locs = [p.name, ...p.stations].filter((l) => e.ls[l]);
+    if (id) places[id] = locs.some((l) => e.ls[l].atmosphere !== false) ? power['system-atmosphere'] : 0;
+  }
+  e.lifeLast = LIFE.step(g, e.life, { dt: 1, speed: LIFE_SPEED, crew, power, places });
+  e.lifeCrew = crew;
+}
+// What the screens show: each place's air (its pressures, kPa, and what's wrong), who's there, and the tanks.
+function lifeView(k) {
+  const e = engOf(k), g = GRAPHS[graphIdOf(k)];
+  if (!e?.lifeLast || !g) return null;
+  const { all } = SHIP_GRAPH.nodes(g), r2 = (v) => Math.round(v * 100) / 100;
+  const placeOfAir = (a) => Object.keys(all).find((id) => all[id].systems?.[a]);
+  return {
+    speed: LIFE_SPEED,
+    places: Object.entries(e.lifeLast.air).map(([a, x]) => ({ name: all[placeOfAir(a)]?.name || a, kPa: Object.fromEntries(Object.entries(x.kPa).map(([gas, v]) => [gas, r2(v)])), total: r2(x.total), warn: x.warn, crew: e.lifeCrew?.[placeOfAir(a)] || 0 })),
+    tanks: Object.fromEntries(Object.entries(e.lifeLast.tanks).map(([t, v]) => [t.replace(/^tank-/, ''), { kg: Math.round(v * 10) / 10, cap: Object.values(all[t]?.capacity || {})[0] || 0 }])),
+  };
+}
 setInterval(() => {
   combatTick++;
   checkTransporterLocks();
@@ -4197,6 +4238,7 @@ setInterval(() => {
     const before = state();
     flowCache.delete(k);
     const f = flow(k);
+    lifeTick(k, f);
 
     // Self-destruct: containment off, and the core goes.
     if (e.selfDestruct && now >= e.selfDestruct.at) { destroy(k, `self-destruct, by order of ${e.selfDestruct.by}`); changed = true; continue; }
@@ -5793,7 +5835,7 @@ async function adminSettings(ws, msg) {
   const reply = (m) => send(ws, { type: 'admin-settings', ...m, settings: shown(SETTINGS.read()), effective: shown(SETTINGS.effective()), listening: { host: HOST || '', port: PORT }, supervised: !!process.send, accounts: ACCOUNTS.any() });
   if (msg.action === 'settings') return reply({});
   const change = {};
-  for (const k of ['host', 'port', 'registration', 'adminAccess']) if (msg.settings?.[k] !== undefined) change[k] = k === 'port' ? Number(msg.settings[k]) : String(msg.settings[k]).trim();
+  for (const k of ['host', 'port', 'registration', 'adminAccess', 'lifeSpeed']) if (msg.settings?.[k] !== undefined) change[k] = k === 'port' || k === 'lifeSpeed' ? Number(msg.settings[k]) : String(msg.settings[k]).trim();
   const bad = SETTINGS.check(change);
   if (bad) return reply({ saved: false, error: bad });
   const port = change.port ?? PORT, host = change.host ?? (HOST || '');

@@ -4,7 +4,15 @@
 // low, oxygen held, the oxygen tank barely drawn on, carbon stored); unpowered, its carbon dioxide
 // climbs past the warning and toward danger while its oxygen falls. Hydroponics keeps the air breathable when the atmosphere system is down;
 // a starbase's tanks never run dry; water vapour never passes saturation; nothing goes negative.
+// In play: the relay runs it each second (at the admin's speed) and shows each place's air on
+// Engineering's grid; with the atmosphere switched off, the air where the crew are goes stale; the
+// air and the tanks are saved with the ship.
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const assert = require('assert');
+const { spawn } = require('child_process');
+const WebSocket = require('ws');
 const GRAPH = require('../tools/ship-graph');
 const CONFIG = require('../tools/config');
 const LS = require('../tools/life-support');
@@ -59,5 +67,47 @@ try {
 } catch (err) {
   console.error('FAIL:', err.stack || err.message);
 }
-console.log(ok ? 'PASS' : 'FAIL');
-process.exit(ok ? 0 : 1);
+
+// In play: a relay and a runabout's computer, life support at 600×.
+(async () => {
+  if (!ok) return finish();
+  ok = false;
+  const PORT = Number(process.env.PORT || 8099) + 15, DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'tng-chat-life-'));
+  const env = { ...process.env, PORT, RELAY_DATA: DATA, STARBASES_FILE: path.join(DATA, 'starbases.json') };
+  fs.writeFileSync(path.join(DATA, 'settings.json'), JSON.stringify({ port: PORT, lifeSpeed: 600 }));
+  const procs = [];
+  const run = (args) => { const p = spawn(process.execPath, args, { cwd: path.join(__dirname, '..'), env, stdio: 'ignore' }); procs.push(p); return p; };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    run(['server.js']); await wait(1200);
+    run(['tools/shipcore.js', '--relay', `ws://localhost:${PORT}`, '--data', DATA, '--warm', '--class', 'runabout', 'Airship']); await wait(2500);
+    const ws = new WebSocket(`ws://localhost:${PORT}`), msgs = [];
+    ws.on('message', (m) => msgs.push(JSON.parse(m)));
+    await new Promise((r) => ws.on('open', r));
+    ws.send(JSON.stringify({ type: 'register', name: 'chief', ship: 'Airship', station: 'Engineering' }));
+    const life = async (pred, what) => { for (let i = 0; i < 100; i++) { const l = [...msgs].reverse().find((m) => m.type === 'nav' && m.own?.grid?.life)?.own.grid.life; if (l && pred(l)) return l; await wait(150); } throw new Error(`timed out: ${what}`); };
+    const first = await life((l) => l.places.some((p) => p.crew), 'the air on Engineering\'s grid, with the crew in it');
+    assert.equal(first.speed, 600);
+    const where = first.places.find((p) => p.crew);
+    assert.ok(where.kPa.o2 > 20 && where.kPa.co2 < 1 && first.tanks.o2.kg > 0, `breathable to start (${JSON.stringify(where.kPa)})`);
+    // (The atmosphere switched off everywhere: the air where the chief is goes stale.)
+    ws.send(JSON.stringify({ type: 'grid', ls: { loc: 'all', sys: 'atmosphere', on: false } }));
+    const co2At = (l) => l.places.find((p) => p.name === where.name).kPa.co2;
+    const a = co2At(await life(() => true, 'a reading')); await wait(2500);
+    const b = co2At(await life(() => true, 'a later reading'));
+    assert.ok(b > a, `carbon dioxide rising with the atmosphere off (${a} to ${b} kPa)`);
+    ws.close();
+    for (const p of procs.splice(1)) { p.kill(); await new Promise((r) => p.once('exit', r)); }
+    const saved = JSON.parse(fs.readFileSync(path.join(DATA, 'Airship', '.nav.json'), 'utf8'));
+    assert.ok(saved.eng?.life?.air && Object.keys(saved.eng.life.air).length === first.places.length && saved.eng.life.tanks['tank-o2'] > 0, 'the air and the tanks saved with the ship');
+    console.log(`ok - in play at 600×: Engineering's grid shows each place's air (${where.name}: O2 ${where.kPa.o2} kPa, CO2 ${where.kPa.co2}, the chief there); with the atmosphere off, its CO2 rose ${a} to ${b} kPa; the air and the tanks saved with the ship`);
+    ok = true;
+  } catch (err) {
+    console.error('FAIL:', err.stack || err.message);
+  } finally {
+    for (const p of procs) p.kill('SIGKILL');
+    fs.rmSync(DATA, { recursive: true, force: true });
+    finish();
+  }
+})();
+function finish() { console.log(ok ? 'PASS' : 'FAIL'); process.exit(ok ? 0 : 1); }

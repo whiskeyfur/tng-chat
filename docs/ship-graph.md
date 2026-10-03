@@ -211,7 +211,7 @@ John's solver, beside the graph solver; it plays with `"solver": "path"` in `dat
 
 `db/path-solver.sql` is the same in SQL (a stored procedure, a recursive query for each path), for `tools/bench.js`'s comparison; it gives every load the same answer.
 
-## Life support (tools/life-support.js; wish list 1, not in play yet)
+## Life support (tools/life-support.js; wish list 1)
 
 Five more resources, in kg: o2, n2, co2, h2o and c (carbon: biomass, food). Every vessel's graph has:
 
@@ -222,7 +222,7 @@ Five more resources, in kg: o2, n2, co2, h2o and c (carbon: biomass, food). Ever
 - **The water reclaimer** (atmosphere power): humidity over the comfortable level, and the crew's waste, back to the water tank (93%). Vapour past saturation condenses to it.
 - **Hydroponics**, where the design says `"hydroponics": true` (the Galaxy, the Intrepid, starbases), on the lighting's power: carbon dioxide and water into oxygen for the air and biomass.
 
-The crew in each place breathe its oxygen and give off carbon dioxide and water vapour (per person per day: 0.84 kg O2, 1.0 kg CO2, 2.5 kg of water drunk, 1.0 breathed out). Everything runs at the share of its power the solve gave it. Each place's air says what's wrong: carbon dioxide over 1 kPa high, over 4 kPa danger; oxygen under 16 kPa low, under 12 danger. `speed` (the admin's setting, 1 for real time) runs it faster. The constants are `lifeSupport` in `config/system-types.json` (the database's `game_rules`). `test/life-support.js`: a runabout keeps its air for two days on power and loses it without (carbon dioxide high after 17 hours); hydroponics keeps a Galaxy's air breathable with its atmosphere system down.
+The crew in each place breathe its oxygen and give off carbon dioxide and water vapour (per person per day: 0.84 kg O2, 1.0 kg CO2, 2.5 kg of water drunk, 1.0 breathed out). In play, the relay runs it each second after the power: the crew breathe the air of the place that holds their station; the atmosphere system's power (the share the places switched on need) runs the air handling, the scrubber and the reclaimer, and a place whose atmosphere is switched off is sealed from them; the lighting's runs the hydroponics. The air and the tanks are saved with the ship (`eng.life`). Engineering's Life support panel shows each place's air (oxygen, carbon dioxide, pressure, who's there, what's wrong) and the tanks; every console aboard gets an AIR alert when a place with people in it is wrong (red when dangerous), and Medical says so too. Admin → Settings → Life support sets the speed (`lifeSpeed` in data/settings.json: real time, 10×, 60×, 600×). Everything runs at the share of its power the solve gave it. Each place's air says what's wrong: carbon dioxide over 1 kPa high, over 4 kPa danger; oxygen under 16 kPa low, under 12 danger. `speed` (the admin's setting, 1 for real time) runs it faster. The constants are `lifeSupport` in `config/system-types.json` (the database's `game_rules`). `test/life-support.js`: a runabout keeps its air for two days on power and loses it without (carbon dioxide high after 17 hours); hydroponics keeps a Galaxy's air breathable with its atmosphere system down.
 
 ## Step 3: the graph in play
 

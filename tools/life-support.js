@@ -32,9 +32,22 @@ function init(g) {
   return state;
 }
 
+// A saved state brought back for this graph: places and tanks it no longer has dropped, new ones as
+// a new vessel's, every amount a number of 0 or more.
+function restore(g, saved) {
+  const fresh = init(g), num = (v, d) => (Number.isFinite(v) && v >= 0 ? v : d);
+  if (!saved || typeof saved !== 'object') return fresh;
+  for (const [a, air] of Object.entries(fresh.air)) if (saved.air?.[a]) for (const gas of GASES) air[gas] = num(saved.air[a][gas], air[gas]);
+  for (const t of Object.keys(fresh.tanks)) fresh.tanks[t] = num(saved.tanks?.[t], fresh.tanks[t]);
+  fresh.waste = num(saved.waste, 0);
+  return fresh;
+}
+
 // One step. crew: { placeId: people }; power: { systemId: 0..1 } (the share of its draw the solve
-// gave it). Returns what each place's air is now, and what's wrong.
-function step(g, state, { dt = 1, speed = 1, crew = {}, power = {} } = {}) {
+// gave it); places: { placeId: 0..1 }, if given, each place's air handling (switched on there, and
+// served): a place without it is sealed off from the ventilation and the regulator. Returns what each
+// place's air is now, and what's wrong.
+function step(g, state, { dt = 1, speed = 1, crew = {}, power = {}, places: placePower = null } = {}) {
   const ls = lib(), T = ls.air.tempK, day = ls.perPersonPerDay, { all } = GRAPH.nodes(g);
   const secs = dt * speed, perDay = secs / 86400;
   const places = Object.keys(state.air), vol = (a) => all[a].volume, placeOf = (a) => Object.keys(all).find((id) => all[id].systems?.[a]) || null;
@@ -45,8 +58,10 @@ function step(g, state, { dt = 1, speed = 1, crew = {}, power = {} } = {}) {
   const fill = (id, kg) => { if (!all[id]) return kg; const room = creative(id) ? Infinity : cap(id) - tank(id), put = Math.min(room, kg); state.tanks[id] = tank(id) + (creative(id) ? 0 : put); return kg - put; };
   const draw = (id, kg) => { if (!all[id]) return 0; const got = creative(id) ? kg : Math.min(tank(id), kg); if (!creative(id)) state.tanks[id] = tank(id) - got; return got; };
   // (Taking a gas from the air, from the places in proportion to what each holds.)
-  const fromAir = (gas, kg) => { const total = places.reduce((n, a) => n + state.air[a][gas], 0); if (total <= 0) return 0; const t = Math.min(kg, total); for (const a of places) state.air[a][gas] -= t * (state.air[a][gas] / total); return t; };
-  const toAir = (gas, kg) => { const V = places.reduce((n, a) => n + vol(a), 0); for (const a of places) state.air[a][gas] += kg * vol(a) / V; };
+  // (The processors reach the air through the ventilation: the places it serves.)
+  let reach = places;
+  const fromAir = (gas, kg) => { const total = reach.reduce((n, a) => n + state.air[a][gas], 0); if (total <= 0) return 0; const t = Math.min(kg, total); for (const a of reach) state.air[a][gas] -= t * (state.air[a][gas] / total); return t; };
+  const toAir = (gas, kg) => { const V = reach.reduce((n, a) => n + vol(a), 0); if (!V) return; for (const a of reach) state.air[a][gas] += kg * vol(a) / V; };
 
   // The crew.
   const short = {};
@@ -62,11 +77,14 @@ function step(g, state, { dt = 1, speed = 1, crew = {}, power = {} } = {}) {
     state.waste += Math.max(0, draw('tank-h2o', n * day.h2oDrink * perDay) - n * day.h2oVapour * perDay);
   }
   // Ventilation: each place toward the mix of all of them (ten minutes to even out, at full power).
+  const served = (a) => (placePower ? Math.max(0, Math.min(1, placePower[placeOf(a)] ?? 0)) : 1);
+  const vented = places.filter((a) => served(a) > 0);
   const k = Math.min(1, (secs / 600) * fAir);
-  if (k > 0 && places.length > 1) {
-    const V = places.reduce((n, a) => n + vol(a), 0);
-    for (const gas of GASES) { const mean = places.reduce((n, a) => n + state.air[a][gas], 0) / V; for (const a of places) state.air[a][gas] += (mean * vol(a) - state.air[a][gas]) * k; }
+  if (k > 0 && vented.length > 1) {
+    const V = vented.reduce((n, a) => n + vol(a), 0);
+    for (const gas of GASES) { const mean = vented.reduce((n, a) => n + state.air[a][gas], 0) / V; for (const a of vented) state.air[a][gas] += (mean * vol(a) - state.air[a][gas]) * k * served(a); }
   }
+  reach = vented;
   // The CO2 scrubber: carbon dioxide out of the air; oxygen to its tank, carbon to the store.
   const scrub = all['co2-scrubber'];
   let scrubbed = 0;
@@ -96,9 +114,9 @@ function step(g, state, { dt = 1, speed = 1, crew = {}, power = {} } = {}) {
     toAir('o2', done * (32 / 44)); fill('tank-carbon', done * (12 / 44));
   }
   // The regulator: oxygen and nitrogen topped up from the tanks to the air it keeps.
-  if (fAir > 0) for (const a of places) for (const [gas, p, tid] of [['o2', ls.air.o2kPa, 'tank-o2'], ['n2', ls.air.n2kPa, 'tank-n2']]) {
+  if (fAir > 0) for (const a of vented) for (const [gas, p, tid] of [['o2', ls.air.o2kPa, 'tank-o2'], ['n2', ls.air.n2kPa, 'tank-n2']]) {
     const lack = kgFor(gas, p, vol(a), T) - state.air[a][gas];
-    if (lack > 0) state.air[a][gas] += draw(tid, Math.min(lack, lack * Math.min(1, (secs / 300) * fAir)));
+    if (lack > 0) state.air[a][gas] += draw(tid, Math.min(lack, lack * Math.min(1, (secs / 300) * fAir * served(a))));
   }
   // (Water vapour past saturation condenses: to the reclaimer, as waste.)
   for (const a of places) { const most = kgFor('h2o', ls.air.saturationKPa, vol(a), T); if (state.air[a].h2o > most) { state.waste += state.air[a].h2o - most; state.air[a].h2o = most; } }
@@ -115,4 +133,4 @@ function step(g, state, { dt = 1, speed = 1, crew = {}, power = {} } = {}) {
   return { air: out, scrubbed, reclaimed, tanks: { ...state.tanks }, waste: state.waste };
 }
 
-module.exports = { init, step, kPa, kgFor };
+module.exports = { init, restore, step, kPa, kgFor };
