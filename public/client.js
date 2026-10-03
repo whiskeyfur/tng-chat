@@ -244,6 +244,26 @@ document.getElementById('link')?.addEventListener('click', (ev) => {
   window.open('admin', 'stchat-admin');
 });
 
+// The computer core's log (the relay pushes each entry; the whole of it on asking): every view of
+// it, each panel's own (its station's entries, or all), newest first. Taps: All or Warnings.
+let coreEntries = [], coreLost = 0, coreAsked = false;
+const coreFilter = {};
+function renderCoreLog() {
+  for (const box of document.querySelectorAll('[data-corelog]')) {
+    const only = box.dataset.corelog, key = only || 'all', f = coreFilter[key] || 'all';
+    const list = coreEntries.filter((x) => (!only || x.sys === only) && (f === 'all' || x.level !== 'info'));
+    const sig = JSON.stringify([list.length, list[list.length - 1]?.at, f, coreLost]);
+    if (box.dataset.sig === sig) continue;
+    box.dataset.sig = sig;
+    const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+    const tap = (text, v) => { const b = el('button', { type: 'button', className: 'lcars-button tr-tap', textContent: text, onclick: () => { coreFilter[key] = v; box.dataset.sig = ''; renderCoreLog(); } }); b.setAttribute('aria-pressed', String(f === v)); return b; };
+    const hhmm = (t) => new Date(t).toTimeString().slice(0, 8);
+    box.replaceChildren(pillBar('Show', [tap('All', 'all'), tap('Warnings', 'warn')]),
+      el('ol', { className: 'lcars-log core-log', 'aria-live': 'off' }, ...(list.length ? list.slice(-60).reverse().map((x) => el('li', { className: `lcars-log__line${x.level !== 'info' ? ' lcars-log__line--warn' : ''}`, textContent: `${hhmm(x.at)} · ${x.sys}: ${x.text}` })) : [el('li', { className: 'lcars-log__line', textContent: only ? `Nothing from ${only} yet` : 'Nothing reported yet' })])),
+      ...(coreLost ? [el('p', { className: 'ops-hint', textContent: `${coreLost} report${coreLost === 1 ? '' : 's'} lost while no computer core was online` })] : []));
+  }
+}
+
 // This station's automation (the Station screen): its own panels' toggles, kept in step with Ops'
 // (a tap each; Engineering's Off, Startup, Shutdown), and what Ops has asked this station to confirm
 // (its lead on duty answers: Confirm or Deny).
@@ -2635,6 +2655,7 @@ async function onMessage(msg) {
       if (stationView) setHeader(stationView.code, `${me.title || me.name} · ${me.ship}`, me.station);
       break;
     case 'registered':
+      coreAsked = false; coreEntries = []; coreLost = 0; // (a new ship's, or the same one's again: asked for on the next update)
       try { sessionStorage.removeItem(SIGNIN_DRAFT); } catch {}
       me = { id: msg.id, name: msg.name, ship: msg.ship, station: msg.station, console: msg.console || null, title: msg.title, position: msg.position || null, post: msg.post || null, equipment: msg.equipment || null };
       renderEquipment();
@@ -2700,9 +2721,17 @@ async function onMessage(msg) {
       traffic = msg.calls;
       renderTraffic();
       break;
+    case 'core-log':
+      if (msg.full) coreEntries = msg.entries || []; else coreEntries.push(...(msg.entries || []));
+      if (coreEntries.length > 300) coreEntries.splice(0, coreEntries.length - 300);
+      if (msg.lost !== undefined) coreLost = msg.lost;
+      renderCoreLog();
+      break;
     case 'nav':
       lastNav = msg;
+      if (!coreAsked) { coreAsked = true; send({ type: 'core-log-get' }); }
       renderStationAutomation();
+      renderCoreLog();
       // An automated panel at this station: a bar says so (a tap here by hand takes it back).
       { const all = Object.entries(msg.own?.automation || {}).filter(([, a]) => a.station === me?.station);
         // (The holographic doctor has its own bar: it works alongside Medical, it doesn't take the console.)

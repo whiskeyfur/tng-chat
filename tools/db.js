@@ -272,6 +272,7 @@ async function apply(db, op) {
   if (op.kind === 'bases') return writeBases(db, op.bases, op.relays);
   if (op.kind === 'users') return writeUsers(db, op);
   if (op.kind === 'sessions') return writeSessions(db, op);
+  if (op.kind === 'log') { await db.query('insert into core_log (ship_name, at, system, level, text) values (?, ?, ?, ?, ?)', [op.ship, op.at, String(op.sys).slice(0, 64), ['info', 'warn', 'alarm'].includes(op.level) ? op.level : 'info', String(op.text).slice(0, 300)]); return; }
   throw new Error(`no such write: ${op.kind}`);
 }
 // A cycle of writes, as one transaction: all of it or none (a crash or an error part-way leaves the

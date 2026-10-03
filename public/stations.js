@@ -316,8 +316,8 @@
       panel('st-tactical', 'Tactical plot', 'red', false, sweep(240, 'red', 4, 'Tactical plot')),
       panel('st-dept', 'Department readiness', 'blue', false, h('ul', { class: 'st-depts', 'data-depts': '' })),
       panel('st-roster', 'Senior staff on duty', 'lilac', true, h('ul', { class: 'st-roster', 'data-roster': '' })),
-      panel('st-log', "Captain's log", 'peach', true, logView([
-        [`${ship}: holding position, all departments reporting`], ['Long range sensors: no contacts of note'], ['Science: survey of system complete'], ['Engineering: warp core at optimum efficiency']])),
+      // The computer core's log: what the ship's systems, automation and crew reported (client.js fills it in).
+      panel('st-log', 'Computer core log', 'peach', true, h('div', { 'data-corelog': '' })),
     ] }),
     'First Officer': (ship) => ({ code: 'XO 02', color: 'red', panels: [
       panel('st-orders', 'Orders', 'red', true, h('div', { 'data-orders': '' })),
@@ -325,8 +325,7 @@
       panel('st-roster', 'Duty roster', 'gold', true, h('ul', { class: 'st-roster', 'data-roster': '' })),
       panel('st-dept', 'Department readiness', 'blue', false, h('ul', { class: 'st-depts', 'data-depts': '' })),
       panel('st-msd', 'Master systems display', 'orange', false, h('div', { class: 'msd', 'data-msd': '' })),
-      panel('st-log', 'Duty log', 'lilac', true, logView([
-        ['Security drill scheduled, deck 8'], [`${ship}: personnel evaluations due`], ['Shore leave rotation approved'], ['Away team readiness confirmed']])),
+      panel('st-log', 'Computer core log', 'lilac', true, h('div', { 'data-corelog': '' })),
     ] }),
     Helm: () => {
       return { code: 'CON 03', color: 'orange', panels: [
@@ -360,8 +359,7 @@
       panel('st-decks', 'Internal sensors · deck status', 'gold', true, deckGrid(14, 10)),
       panel('st-fields', 'Force fields', 'blue', false,
         ...['Brig', 'Main bridge', 'Engineering', 'Armory'].map((n) => live(gauge(n, 'blue'), drift(1, 0.95, 1, 0.01)))),
-      panel('st-log', 'Security log', 'red', false, logView([
-        ['Deck 6: routine sweep complete'], [`${ship}: internal sensors nominal`], ['Armory inventory verified'], ['Deck 11: door malfunction logged', 'warn'], ['Brig: no detainees']])),
+      panel('st-log', 'Security log', 'red', false, h('div', { 'data-corelog': 'Security' })),
     ] }),
     Engineering: (ship) => {
       const core = drift(0.92, 0.85, 0.98, 0.01);
@@ -386,6 +384,7 @@
         panel('st-corridors', 'Corridors', 'gold', true, h('div', { 'data-corridors': '' })),
         // The air: tanks and processors, the air handler, each place (client.js fills it in).
         panel('st-airdist', 'Air distribution', 'sky', true, h('div', { class: 'dist', 'data-airdist': '' })),
+        panel('st-corelog', 'Computer core log', 'peach', true, h('div', { 'data-corelog': '' })),
       ] };
     },
     Medical: () => ({ code: 'MED 07', color: 'blue', panels: [
@@ -411,8 +410,7 @@
         live(readout('Tachyon count', 'gold'), drift(140, 100, 200, 8), Math.round),
         live(readout('Gravimetric shear', 'orange'), drift(0.4, 0.1, 0.9, 0.03), (v) => v.toFixed(2)),
         live(readout('Radiation', 'red', 'rad'), drift(12, 8, 18, 0.5), (v) => v.toFixed(1)))),
-      panel('st-log', 'Science log', 'lilac', true, logView([
-        ['Stellar cartography updated'], ['Class M planet catalogued'], ['Ion storm tracked at bearing 210', 'warn'], ['Spectrometer recalibrated']])),
+      panel('st-log', 'Science log', 'lilac', true, h('div', { 'data-corelog': 'Science' })),
     ] }),
     Communications: (ship) => ({ code: 'COM 09', color: 'peach', panels: [
       panel('st-traffic', 'Comm traffic', 'sky', true, h('div', { 'data-traffic': '' })),
@@ -424,8 +422,7 @@
       panel('st-signal', 'Carrier signal', 'sky', false, trace(110, 'sky', (t) => 0.7 * Math.sin(t * 14) * (0.7 + 0.3 * Math.sin(t * 0.7)) + rand(-0.04, 0.04), 160, 'Carrier signal'),
         live(gauge('Signal strength', 'sky'), drift(0.86, 0.7, 0.98, 0.03)),
         live(readout('Relay', 'gold'), () => 'Starbase relay 4')),
-      panel('st-log', 'Message traffic', 'lilac', false, logView([
-        ['Starfleet Command: priority one routing test'], [`${ship}: subspace relay handshake`], ['Encrypted packet received, decoding'], ['Long range comm array aligned']])),
+      panel('st-log', 'Message traffic', 'lilac', false, h('div', { 'data-corelog': 'Communications' })),
     ] }),
     Transporter: (ship) => ({ code: 'TRN 11', color: 'blue', panels: [
       panel('st-transporter', 'Transporter controls', 'blue', true, h('div', { 'data-transporter': '' }), transporterPad()),

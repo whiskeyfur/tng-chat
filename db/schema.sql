@@ -220,6 +220,17 @@ create table if not exists sessions (
   foreign key (username) references users (username) on delete cascade
 );
 
+-- The computer core's log (each vessel's: what its systems, automation and crew reported; ms since 1970).
+create table if not exists core_log (
+  log_id    bigint not null auto_increment primary key,
+  ship_name varchar(32) not null,
+  at        bigint not null,
+  system    varchar(64) not null,
+  level     enum('info', 'warn', 'alarm') not null default 'info',
+  text      varchar(300) not null,
+  key (ship_name, at)
+);
+
 -- A planet's orbit: where it is at any time (an event moves planets.x and y along it).
 create table if not exists orbits (
   planet_id      int not null primary key,

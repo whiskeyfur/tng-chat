@@ -515,7 +515,26 @@ function peerInfo(id) {
 
 function opLog(key, text) {
   for (const op of opsOf(key)) send(op, { type: 'op-log', text });
+  coreLog(key, 'Operations', text);
 }
+// The computer core's log (wish list: systems report to the computer core, the log viewable aboard):
+// what the systems, the automation and the crew's orders say, while a core is online to take it (what
+// comes while none is, is counted as lost). Kept with the ship (its last CORE_LOG.keep), and every entry
+// in the database's core_log when there is one. Pushed to the crew and ops as it comes.
+const CORE_LOG = { max: 300, keep: 100, sent: 100 };
+let coreSeq = 0;
+function coreLog(k, sys, text, level = /DANGER|FAIL|CUT|BREACH|DESTROY|EJECT|cut off|failed|damaged|lost|no power/i.test(text) ? 'warn' : 'info') {
+  const e = engOf(k);
+  if (!e || !navState.has(k) || String(k).startsWith('__graph__')) return;
+  if (!coresOnline(k)) { e.coreLost = (e.coreLost || 0) + 1; return; }
+  const entry = { at: Date.now(), sys, level, text: String(text).slice(0, 300) };
+  (e.coreLog ||= []).push(entry);
+  if (e.coreLog.length > CORE_LOG.max) e.coreLog.splice(0, e.coreLog.length - CORE_LOG.max);
+  e.dirty = true;
+  if (STORE.enabled()) STORE.write(`log:${++coreSeq}`, { kind: 'log', ship: shipName(k), ...entry });
+  for (const u of [...crewOf(k), ...opsOf(k)]) send(u, { type: 'core-log', entries: [entry] });
+}
+const coreLogView = (k) => { const e = engOf(k); return { type: 'core-log', full: true, entries: (e?.coreLog || []).slice(-CORE_LOG.sent), lost: e?.coreLost || 0 }; };
 
 // --- connecting people ------------------------------------------------------
 
@@ -720,6 +739,7 @@ function operatorMessage(op, msg) {
       broadcastAllOps();
       return ok(msg.type === 'link-decline' ? `declined the data link from the ${shipName(other)}` : `withdrew the data link request to the ${shipName(other)}`);
     }
+    case 'core-log-get': send(op, coreLogView(op.shipKey)); return;
     case 'automation': {
       // Ops picks which panels run themselves: { panel, on } (Engineering: { panel, mode: 'startup' | 'shutdown' | null }).
       if (!AUTO_PANELS.includes(msg.panel)) return fail('no such panel to automate (Ops itself never is)');
@@ -2648,6 +2668,7 @@ function freshEng(saved, { cold = false, k = null } = {}) {
     orderLog: Array.isArray(s.orderLog) ? s.orderLog.slice(0, ORDER_LOG).filter((o) => o && typeof o.text === 'string') : [],
     // Life support's air and tanks (brought back against the vessel's graph on its first tick).
     life: s.life && typeof s.life === 'object' ? s.life : null, lifeReady: false,
+    coreLog: Array.isArray(s.coreLog) ? s.coreLog.filter((x) => x && typeof x.text === 'string' && Number.isFinite(x.at)).slice(-CORE_LOG.keep) : [], coreLost: Number.isFinite(s.coreLost) ? s.coreLost : 0,
     // The corridors: each link's ties as Engineering set them ({ A, B, C, EPS }: closed or open), and its damage.
     corridorTies: s.corridorTies && typeof s.corridorTies === 'object' && !Array.isArray(s.corridorTies) ? Object.fromEntries(Object.entries(s.corridorTies).filter(([, v]) => v && typeof v === 'object').map(([id, v]) => [id, Object.fromEntries(['A', 'B', 'C', 'EPS'].filter((n) => typeof v[n] === 'boolean').map((n) => [n, v[n]]))])) : {},
     linkDamage: s.corridorDamage && typeof s.corridorDamage === 'object' ? Object.fromEntries(Object.entries(s.corridorDamage).filter(([, v]) => Number.isFinite(v) && v > 0).map(([id, v]) => [id, Math.min(100, v)])) : {},
@@ -2785,7 +2806,7 @@ const savedEng = (k) => {
     antimatter: round1(e.antimatter), deuterium: round1(e.deuterium), taps: e.taps, ties: e.ties, forcefields: e.forcefields, remoteBlock: !!e.remoteBlock, stores: Object.fromEntries(Object.entries(e.stores).map(([x, v]) => [x, Math.round(v)])), breakers: e.breakers, xlBlock: e.xlBlock || [], computers: e.computers.map((x) => (x.state === 'online' ? 'online' : 'off')), docked: e.docked,
     // (Each load's power path, as the design had it: a design change is noticed on the next load.)
     paths: Object.fromEntries(Object.keys(e.ties).filter((x) => /^(console|system|sub):/.test(x) && !CONDUITS.includes(x)).map((x) => [x, conduitsOf(k, x).join('>')])),
-    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores * 100) / 100, sporeLoaded: e.spore?.loaded || 0, brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog, corridorTies: e.corridorTies, corridorDamage: Object.fromEntries(Object.entries(e.linkDamage || {}).map(([id, v]) => [id, Math.round(v)])),
+    dockedPort: e.dockedPort, conn: e.conn, connTies: e.connTies, spores: Math.round(e.spores * 100) / 100, sporeLoaded: e.spore?.loaded || 0, brigField: !!e.brigField, conduits: !!e.conduits, bridgeModes: e.bridgeModes, prefix: e.prefix, auto: e.auto, orderLog: e.orderLog, coreLog: (e.coreLog || []).slice(-CORE_LOG.keep), coreLost: e.coreLost || 0, corridorTies: e.corridorTies, corridorDamage: Object.fromEntries(Object.entries(e.linkDamage || {}).map(([id, v]) => [id, Math.round(v)])),
     life: e.lifeReady && e.life ? { air: Object.fromEntries(Object.entries(e.life.air).map(([a, x]) => [a, Object.fromEntries(Object.entries(x).map(([gas, v]) => [gas, Math.round(v * 1000) / 1000]))])), tanks: Object.fromEntries(Object.entries(e.life.tanks).map(([t, v]) => [t, Math.round(v * 1000) / 1000])), waste: Math.round(e.life.waste * 1000) / 1000 } : e.life,
     // Its open data links over subspace (hard links come back by themselves while docked and tied).
     links: linkedTo(k).filter((o) => !hardLinks.has(linkKey(k, o))).map(shipName), drydock: !!e.drydock, berth: e.berth, bayOpen: !!e.bayOpen, landed: e.landed ? shipName(e.landed) : null, emerg: Object.fromEntries(EMERG.names.map((n) => [n, Math.round(e.emerg[n])])),
@@ -4167,7 +4188,7 @@ function combatView(k) {
   };
 }
 
-const tellStations = (k, stations, text) => { for (const u of crewOf(k)) if (stations.includes(u.station)) send(u, { type: 'notice', text }); };
+const tellStations = (k, stations, text) => { for (const u of crewOf(k)) if (stations.includes(u.station)) send(u, { type: 'notice', text }); coreLog(k, stations[0], text); };
 
 // A ship's systems changed (damage, repair, the grid): keep it within what it has.
 function enforcePower(k) {
@@ -4221,6 +4242,7 @@ function hit(t, dmg, from, what = '', aim = null, { torpedo = false, yield: y = 
       tellStations(t, ['Engineering', 'Captain'], `Engineering: crippled by a torpedo: ${more.map(damageName).join(', ')} badly damaged`);
     }
     said.push(`hull ${Math.round(c.hull)}%`, `${damageName(sys)} damaged`);
+    coreLog(t, damageName(sys), `hit by the ${shipName(from)}: hull ${Math.round(c.hull)}%, ${damageName(sys)} damaged (${Math.round(c.damage[sys])}%)`, 'warn');
     opLog(t, `hit by the ${shipName(from)}${what ? ` (${what})` : ''}: hull ${Math.round(c.hull)}%, ${damageName(sys)} damaged`);
     tellStations(t, ['Engineering'], `Engineering: ${damageName(sys)} damaged (${Math.ceil(c.damage[sys])}%)`);
     if (c.hull <= 0) {
@@ -4375,6 +4397,18 @@ function lifeTick(k, f) {
 }
 // (A change worth saving: a place's oxygen or carbon dioxide by a tenth of a kPa, a tank by a kg.)
 const lifeSig = (k) => { const l = engOf(k)?.lifeLast; return l ? [Object.values(l.air).map((x) => [Math.round(x.kPa.o2 * 10), Math.round(x.kPa.co2 * 10)]), Object.values(l.tanks).map(Math.round)] : null; };
+// Each system reports to the computer core when its power goes or comes back (switched on, and drawing
+// nothing), and each place when its air goes wrong or comes right.
+function reportSystems(k, f) {
+  const e = engOf(k), alloc = allocOf(k), now = {};
+  for (const x of SYSTEMS) if ((alloc[x] || 0) > 0 && f.demand?.[x] > 0) now[x] = (f.delivered[x] || 0) > 0.5;
+  const was = e.reported || {};
+  if (e.reported) for (const [x, on] of Object.entries(now)) if (was[x] !== undefined && was[x] !== on) coreLog(k, SYSTEM_NAMES[x] || x, on ? 'power restored' : 'no power', on ? 'info' : 'warn');
+  e.reported = now;
+  const air = Object.fromEntries((lifeView(k)?.places || []).map((p) => [p.name, p.warn.join(', ')]));
+  if (e.reportedAir) for (const [p, w] of Object.entries(air)) if ((e.reportedAir[p] ?? '') !== w) coreLog(k, 'Life support', w ? `${p}: ${w}` : `${p}: air normal again`, w.startsWith('danger') ? 'alarm' : w ? 'warn' : 'info');
+  e.reportedAir = air;
+}
 // What the screens show: each place's air (its pressures, kPa, and what's wrong), who's there, and the tanks.
 function lifeView(k) {
   const e = engOf(k), g = GRAPHS[graphIdOf(k)];
@@ -4407,6 +4441,7 @@ setInterval(() => {
     flowCache.delete(k);
     const f = flow(k);
     { const was = JSON.stringify(lifeSig(k)); lifeTick(k, f); if (JSON.stringify(lifeSig(k)) !== was) e.dirty = true; } // (saved when the air changes)
+    reportSystems(k, f);
 
     // Self-destruct: containment off, and the core goes.
     if (e.selfDestruct && now >= e.selfDestruct.at) { destroy(k, `self-destruct, by order of ${e.selfDestruct.by}`); changed = true; continue; }
@@ -4942,7 +4977,8 @@ function stationCommand(ws, msg) {
   if (['helm', 'autopilot', 'spore-jump', 'scan', 'sci-lock', 'plot-course'].includes(t)) return gate(navCommand);
   if (t === 'power') return navCommand(ws, msg), true;
   if (t === 'order-ack' || t === 'order-decline') return crewCommand(ws, msg), true; // answering an order needs no console
-  if (t === 'automation' || t === 'automation-answer' || t === 'posture') return crewCommand(ws, msg), true; // (nor setting, or answering about, a station's automation)
+  if (t === 'automation' || t === 'automation-answer' || t === 'posture') return crewCommand(ws, msg), true;
+  if (t === 'core-log-get') return send(ws, coreLogView(ws.shipKey)), true; // (the computer core's log, from the start) // (nor setting, or answering about, a station's automation)
   if (['alert', 'order', 'reassign', 'lockout', 'confine', 'sickbay', 'emh', 'forcefield', 'brig-field', 'person-field', 'bay-doors', 'readiness'].includes(t)) return gate(crewCommand);
   if (['lock', 'aim', 'yield', 'frequency', 'fire', 'repair', 'arm'].includes(t)) return gate(combatCommand);
   if (t === 'grid') return gridCommand(ws, msg), true; // emergency power: works with the console dark
