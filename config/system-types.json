@@ -1,0 +1,238 @@
+{
+  "about": "The kinds of system a ship graph is made of (docs/ship-graph.md). A system names its type; what's here is what every system of that type is, so a design only says what's different. role: bus (carries a resource between systems), source (puts a resource in), store (takes and gives back), conduit (a path power runs through), load (uses it), group (holds others: no flow of its own). Resources: power, eps, odn, deu, am, heat.",
+  "types": {
+    "bus": {
+      "role": "bus",
+      "resources": [
+        "power"
+      ],
+      "about": "A low-power bus (A, B, C): a pool its sources feed and its loads draw from."
+    },
+    "eps-manifold": {
+      "role": "bus",
+      "resources": [
+        "eps"
+      ],
+      "about": "The EPS: high-energy plasma, from the reactors to the big loads and down the taps to the low buses."
+    },
+    "solar": {
+      "role": "source",
+      "resources": [
+        "power"
+      ],
+      "about": "Solar arrays: their output, while tied."
+    },
+    "emergency-battery": {
+      "role": "source",
+      "resources": [
+        "power"
+      ],
+      "about": "A consumable battery: supplies its bus when nothing else will, never recharged aboard (replaced at a starbase)."
+    },
+    "battery": {
+      "role": "store",
+      "resources": [
+        "power"
+      ],
+      "about": "A bus battery: charges from its bus, covers a shortfall; its main breaker in or out of service."
+    },
+    "eps-pressure": {
+      "role": "store",
+      "resources": [
+        "eps"
+      ],
+      "about": "The EPS manifold's own charge: pressure it holds and gives back."
+    },
+    "fusion-reactor": {
+      "role": "source",
+      "resources": [
+        "eps",
+        "deu",
+        "power"
+      ],
+      "about": "An impulse or auxiliary fusion reactor: deuterium in, EPS out; its chamber is a subsystem on the low buses."
+    },
+    "thrusters": {
+      "role": "conduit",
+      "resources": [
+        "eps"
+      ],
+      "about": "A drive's maneuvering thrusters: tied to the EPS, what the drive isn't spending on thrust feeds it."
+    },
+    "warp-core": {
+      "role": "source",
+      "resources": [
+        "eps",
+        "deu",
+        "am",
+        "power"
+      ],
+      "about": "The matter/antimatter reaction: deuterium and antimatter in, EPS out; constriction, injector and antimatter conduit are its subsystems."
+    },
+    "dock-feed": {
+      "role": "source",
+      "resources": [
+        "power",
+        "eps"
+      ],
+      "about": "Power through the docking connectors: a starbase's, or a docked ship's (import and export)."
+    },
+    "docking-port": {
+      "role": "conduit",
+      "resources": [
+        "power",
+        "eps",
+        "odn",
+        "deu",
+        "am"
+      ],
+      "about": "A docking port: everything a connection carries. count: null on a starbase, as many as are needed."
+    },
+    "docking-connectors": {
+      "role": "conduit",
+      "resources": [
+        "power",
+        "eps",
+        "odn",
+        "deu",
+        "am"
+      ],
+      "about": "The connectors behind the ports, where a connection's resources come aboard."
+    },
+    "fuel-bus": {
+      "role": "bus",
+      "resources": [
+        "deu",
+        "am"
+      ],
+      "about": "The deuterium or antimatter bus: moves fuel between the tanks and what burns it."
+    },
+    "tank": {
+      "role": "store",
+      "resources": [
+        "deu",
+        "am"
+      ],
+      "about": "Fuel storage: the main tanks or pods, or a system's own tank."
+    },
+    "place": {
+      "role": "conduit",
+      "resources": [
+        "power",
+        "eps"
+      ],
+      "about": "A place aboard (a deck's room): the conduit its loads' power runs through, tied to the buses it may carry."
+    },
+    "conduit": {
+      "role": "conduit",
+      "resources": [
+        "power"
+      ],
+      "about": "A path power runs through below a place (life support's, for its systems)."
+    },
+    "group": {
+      "role": "group",
+      "resources": [],
+      "about": "A heading over systems that have no flow of their own together (the computer cores)."
+    },
+    "console": {
+      "role": "load",
+      "resources": [
+        "power",
+        "odn"
+      ],
+      "about": "A station's console: dark without power."
+    },
+    "system": {
+      "role": "load",
+      "resources": [
+        "power",
+        "eps"
+      ],
+      "about": "A ship system (shields, sensors, transporter...): draws its rating at 100%."
+    },
+    "subsystem": {
+      "role": "load",
+      "resources": [
+        "power"
+      ],
+      "about": "Part of a system, a station or a source: its parent stops without it."
+    },
+    "containment": {
+      "role": "load",
+      "resources": [
+        "power"
+      ],
+      "about": "Antimatter containment: the pods', or a tank's own; never let go with antimatter in it."
+    },
+    "coolant-loop": {
+      "role": "bus",
+      "resources": [
+        "heat"
+      ],
+      "about": "Coolant: carries heat from the systems that make it to the heat sinks and radiators."
+    },
+    "heat-sink": {
+      "role": "store",
+      "resources": [
+        "heat"
+      ],
+      "about": "Takes heat faster than the radiators can dump it, and gives it back to them: time, not a way out."
+    },
+    "radiator": {
+      "role": "sink",
+      "resources": [
+        "heat",
+        "power"
+      ],
+      "about": "Dumps heat to space at its rate; its coolant pumps run on power."
+    }
+  },
+  "heat": {
+    "about": "Heat (step 2 simulates it): what a system makes, as a share of what it handles. of: \"consumes\" (a load's draw) or \"produces\" (a source's output). byEffect: a hotter share for what a system does. A system whose heat can't leave warms: past warm, its effects weaken; past hot, it takes damage.",
+    "byType": {
+      "system": {
+        "of": "consumes",
+        "share": 0.1
+      },
+      "console": {
+        "of": "consumes",
+        "share": 0.5
+      },
+      "subsystem": {
+        "of": "consumes",
+        "share": 0.2
+      },
+      "warp-core": {
+        "of": "produces",
+        "share": 0.15
+      },
+      "fusion-reactor": {
+        "of": "produces",
+        "share": 0.12
+      },
+      "battery": {
+        "of": "produces",
+        "share": 0.05
+      },
+      "dock-feed": {
+        "of": "produces",
+        "share": 0
+      }
+    },
+    "byEffect": {
+      "phasers": 0.3,
+      "ftl": 0.2,
+      "shields": 0.15,
+      "torpedoes": 0.2,
+      "tractor": 0.15,
+      "transport": 0.15
+    },
+    "pumpPower": 5,
+    "temperature": {
+      "warm": 0.7,
+      "hot": 0.9,
+      "about": "Of a system's heat limit (step 2): above warm it works less well, above hot it's damaged."
+    }
+  }
+}

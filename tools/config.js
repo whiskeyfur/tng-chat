@@ -116,7 +116,25 @@ function saveShip(id, design) {
   fs.renameSync(`${file}.tmp`, file);
   return null;
 }
+// The ship graphs (config/ships-graph/<class>.json: tools/ship-graph.js, step 1; the game doesn't
+// read them yet), each checked against the system types: a bad one is skipped, named.
+function loadGraphs(log = console.warn) {
+  const GRAPH = require('./ship-graph');
+  const dir = path.join(DIR, 'ships-graph'), out = {};
+  let files = [];
+  try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.startsWith('.')).sort(); } catch { return out; }
+  let lib;
+  try { lib = JSON.parse(fs.readFileSync(path.join(DIR, 'system-types.json'), 'utf8')).types; } catch (err) { log(`config: can't read config/system-types.json: ${err.message}`); return out; }
+  for (const f of files) {
+    let g;
+    try { g = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (err) { log(`config: skipping config/ships-graph/${f}: not valid JSON (${err.message})`); continue; }
+    const bad = GRAPH.check(g, lib);
+    if (bad.length) { log(`config: skipping config/ships-graph/${f}: ${bad.slice(0, 3).join('; ')}${bad.length > 3 ? ` (and ${bad.length - 3} more)` : ''}`); continue; }
+    out[f.slice(0, -5)] = g;
+  }
+  return out;
+}
 // The designs as files say (for the editor): { id: content }.
 const readShips = () => loadFolder('ships', {}, () => {});
 
-module.exports = { DIR, loadShips, loadSystems, checkShip, saveShip, readShips };
+module.exports = { DIR, loadShips, loadSystems, loadGraphs, checkShip, saveShip, readShips };

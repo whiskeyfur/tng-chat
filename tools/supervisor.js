@@ -137,7 +137,7 @@ let timer = null;
 const changed = new Set();
 function onChange(file) {
   if (!file || IGNORE.includes(file) || /(^|[/\\])\.|~$|\.swp$|\.tmp$/.test(path.basename(file))) return;
-  if (/[/\\]layouts([/\\]|$)/.test(path.relative(ROOT, file))) return; // (config/layouts: the layout designer's, nothing running uses them)
+  if (/[/\\](layouts|ships-graph)([/\\]|$)|system-types\.json$/.test(path.relative(ROOT, file))) return; // (config/layouts, the layout designer's; the ship graphs and system types, not read by the game yet)
   changed.add(file);
   clearTimeout(timer);
   timer = setTimeout(apply, DELAY);

@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node tools/supervisor.js",
-    "test": "node test/e2e.js && node test/restart.js && node test/touch.js && node test/netmap.js && node test/config.js && node test/admin.js && node test/accounts.js && node test/fallback.js && node test/layouts.js",
+    "test": "node test/e2e.js && node test/restart.js && node test/touch.js && node test/netmap.js && node test/config.js && node test/admin.js && node test/accounts.js && node test/fallback.js && node test/layouts.js && node test/graph.js",
     "export-pages": "node tools/export-pages.js",
     "shipcore": "node tools/shipcore.js",
     "relay": "node server.js",

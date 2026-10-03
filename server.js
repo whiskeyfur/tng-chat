@@ -5516,6 +5516,24 @@ function greet(ws) {
   send(ws, { type: 'ships', ships: shipList() });
 }
 
+// (tools/ship-graph.js: with SHIP_GRAPH_DUMP set, the relay prints its power tables and what each
+// ship class has aboard, as it builds a new ship of that class, and exits: nothing starts.)
+if (process.env.SHIP_GRAPH_DUMP) {
+  const out = { tables: { NODES, SOURCES, SOURCE_NODES, STORES, EMERG, TANKS, AM_CONTAIN, GRID, FUSION, CORE, FUEL, FUELBUS, POWER_MAX, RATING, CONN_RES, SYSTEM_PRIORITY, SUBSYSTEMS, SYSTEM_NAMES, SYSTEM_CHILDREN, STATION_SYSTEMS, XL_DIRS }, classes: {} };
+  for (const id of Object.keys(CLASSES)) {
+    const k = `__graph__${id}`;
+    shipClasses.set(k, id);
+    const e = freshEng(undefined, { k });
+    Object.assign(e.ties, classOf(k).ties || {});
+    eng.set(k, e); deriveConduits(k); designReactors(k, true); pruneLoads(k);
+    const keys = Object.keys(e.ties).filter((x) => x === 'crosslink' || aboardKey(k, x));
+    out.classes[id] = { busMax: busMaxOf(k), fuelCaps: fuelCapsOf(k), tankCaps: tankCapsOf(k), coreOutput: CORE.max * (classOf(k).core ?? 1), taps: e.taps, breakers: e.breakers, xlBlock: e.xlBlock || [], connTies: e.connTies,
+      keys: Object.fromEntries(keys.map((x) => [x, { nodes: x === 'crosslink' ? ['A', 'B', 'C'] : tieNodes(x), tied: e.ties[x] || [], path: /^(console|system|sub|contain):|^place:/.test(x) ? conduitsOf(k, x) : [] }])) };
+    eng.delete(k); flowCache.delete(k); shipClasses.delete(k);
+  }
+  process.stdout.write(JSON.stringify(out));
+  process.exit(0);
+}
 server.listen(PORT, HOST || undefined, () => console.log(`${RELAY_NAME} on http://${HOST && HOST !== '0.0.0.0' && HOST !== '::' ? (HOST.includes(':') ? `[${HOST}]` : HOST) : 'localhost'}:${PORT}${HOST ? ` (listening on ${HOST})` : ''}`));
 
 // Run by tools/supervisor.js: before a restart (or after the pages change)
