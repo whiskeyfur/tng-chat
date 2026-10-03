@@ -2756,10 +2756,12 @@ function flow(k) {
   };
   // Antimatter containment first, ahead of everything: from its feeds in turn.
   let contained = 0;
+  const wants = {};
   if (e.antimatter > 0) {
     const row = cells.containment;
     // Its 20, and recharging its internal reserve when that's down.
     const want = GRID.containment + (e.contain.reserve < reserveCap() ? CONTAIN.recharge : 0);
+    wants.containment = want;
     for (const n of e.ties.containment) { tied[n] += want / e.ties.containment.length; if (contained < want) { const t = take(n, want - contained); row[n] += t; contained += t; } }
     // Short: the stores hold it (containment comes ahead of everything).
     storesOk = true;
@@ -2774,6 +2776,7 @@ function flow(k) {
     tankFeed[name] = 0;
     if (!(e.tanks.am[name] > 0)) continue;
     const draw = tankContainDraw(name), want = draw * (e.tankContain[name].reserve < draw * CONTAIN.reserveSecs ? 1.25 : 1);
+    wants[key] = want;
     const row = cells[key] || (cells[key] = blank()), ts = e.ties[key] || [];
     for (const n of ts) { tied[n] += want / ts.length; if (tankFeed[name] < want) { const t = take(n, want - tankFeed[name]); row[n] += t; tankFeed[name] += t; } }
     storesOk = true;
@@ -2866,6 +2869,7 @@ function flow(k) {
   cells.stores = blank();
   for (const [name, node] of Object.entries(STORES)) { cells.stores[node] += cells[name][node]; delete cells[name]; }
   const amtOf = Object.fromEntries(loads);
+  Object.assign(wants, amtOf);
   const full = (key) => (got[key] || 0) >= amtOf[key] - 1e-9;
   const subOk = {};
   for (const name of Object.keys(SUBSYSTEMS)) subOk[name] = full(`sub:${name}`) && (c.damage[name] || 0) < SUB_FAIL_DAMAGE;
@@ -2910,7 +2914,7 @@ function flow(k) {
   const epsSpare = e.epsLive && coresUp ? Math.max(0, Math.min(srcs.filter((s) => s.ties.includes('EPS')).reduce((n, s) => n + Math.max(0, s.share ? Math.min(s.left, s.share.EPS) : s.left), 0), maxOf('EPS') - viaEps)) : 0;
   const tapAvail = Object.fromEntries(['A', 'B', 'C'].map((X) => [X, Math.min(taps[X], buses[X].tapUsed + epsSpare)]));
   const f = {
-    epsSpare, tapAvail,
+    epsSpare, tapAvail, wants, got,
     cells, totals, buses, xferOk, emergUsed, consoleOk, demand, capacity, delivered, containmentOk, containFeed, tankFeed, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
     crossflow, storeUsed: used, coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps, epsGen, srcCap: cap,
   };
@@ -5526,12 +5530,52 @@ if (process.env.SHIP_GRAPH_DUMP) {
     const e = freshEng(undefined, { k });
     Object.assign(e.ties, classOf(k).ties || {});
     eng.set(k, e); deriveConduits(k); designReactors(k, true); pruneLoads(k);
+    // (The order the relay serves its loads in: the graph's pri writes it as numbers.)
+    if (!out.tables.LOAD_ORDER) { flowCache.delete(k); out.tables.LOAD_ORDER = Object.keys(flow(k).wants); out.tables.EPS_CHARGE_GEN = EPS_CHARGE_GEN;
+      // (What each subsystem draws while it works: the relay's numbers.)
+      out.tables.SUB_DRAW = { constriction: GRID.constriction.run, injector: GRID.injector, amConduit: 5, portChamber: FUSION.chamberRun, starboardChamber: FUSION.chamberRun, aux1Chamber: FUSION.chamberRun, aux2Chamber: FUSION.chamberRun, rf: GRID.comms, radio: GRID.comms, subspace: GRID.comms, forcefields: GRID.forcefield, brigField: GRID.forcefield, holoEmitters: EMH.draw, bayDoors: BAY.doors, bayField: BAY.field, patternBuffers: TR.buffers, targetingScanners: TR.small, heisenberg: TR.small, biofilter: TR.small, energizingCoils: TR.coils, computer1: COMPUTER.draw, computer2: COMPUTER.draw, computer3: COMPUTER.draw, deuTransfer: FUELBUS.transfer, amTransfer: FUELBUS.transfer }; flowCache.delete(k); }
     const keys = Object.keys(e.ties).filter((x) => x === 'crosslink' || aboardKey(k, x));
     out.classes[id] = { busMax: busMaxOf(k), fuelCaps: fuelCapsOf(k), tankCaps: tankCapsOf(k), coreOutput: CORE.max * (classOf(k).core ?? 1), taps: e.taps, breakers: e.breakers, xlBlock: e.xlBlock || [], connTies: e.connTies,
       keys: Object.fromEntries(keys.map((x) => [x, { nodes: x === 'crosslink' ? ['A', 'B', 'C'] : tieNodes(x), tied: e.ties[x] || [], path: /^(console|system|sub|contain):|^place:/.test(x) ? conduitsOf(k, x) : [] }])) };
     eng.delete(k); flowCache.delete(k); shipClasses.delete(k);
   }
-  process.stdout.write(JSON.stringify(out));
+  // (SHIP_GRAPH_SCENARIOS: each class in a set of grid states, today's solver's inputs and answers,
+  // for tools/graph-solver.js's comparison.)
+  if (process.env.SHIP_GRAPH_SCENARIOS) {
+    out.scenarios = {};
+    const SCEN = {
+      cold: { cold: true },
+      warm: {},
+      'all-on': { set: (k, e) => { navState.get(k).warp = 5; const c = combatOf(k); c.armed = true; c.shield = 50; shields.add(k); } },
+      brownout: { set: (k, e) => { e.core = 'offline'; for (const [, x] of reactorsOf(e)) x.state = 'off'; e.docked = null; navState.get(k).warp = 0.5; } },
+      crosslink: { set: (k, e) => { e.core = 'offline'; for (const [, x] of reactorsOf(e)) x.state = 'off'; e.docked = STARBASES[0]?.name || null; e.ties.crosslink = ['A', 'B', 'C']; e.taps = { A: 0, B: 0, C: 0 }; } },
+      'one-way': { set: (k, e) => { e.core = 'offline'; for (const [, x] of reactorsOf(e)) x.state = 'off'; e.docked = STARBASES[0]?.name || null; e.ties.crosslink = ['A', 'B', 'C']; e.xlBlock = ['B>A']; e.taps = { A: 0, B: 0, C: 0 }; } },
+      'eps-tap': { set: (k, e) => { for (const x of ['solar', 'dock', 'ship', 'emergA', 'emergB', 'emergC']) if (e.ties[x]) e.ties[x] = []; e.taps = { A: 100, B: 100, C: 100 }; e.breakers = { A: false, B: false, C: false }; } },
+      docked: { set: (k, e) => { e.docked = STARBASES[0]?.name || null; } },
+      // (Nothing but solar: too little for everything, the batteries out of service.)
+      starved: { set: (k, e) => { e.core = 'offline'; for (const [, x] of reactorsOf(e)) x.state = 'off'; e.docked = null; e.breakers = { A: false, B: false, C: false }; for (const x of ['emergA', 'emergB', 'emergC']) if (e.ties[x]) e.ties[x] = []; e.ties.solar = ['B']; e.epsLive = false; } },
+    };
+    for (const id of Object.keys(CLASSES)) {
+      out.scenarios[id] = {};
+      for (const [name, sc] of Object.entries(SCEN)) {
+        const k = `__graph__${id}`;
+        shipClasses.set(k, id);
+        navState.set(k, { x: 0, y: 0, heading: 0, warp: 0, dest: null });
+        const e = freshEng(undefined, { k, cold: !!sc.cold });
+        Object.assign(e.ties, sc.cold ? {} : classOf(k).ties || {});
+        eng.set(k, e); deriveConduits(k); if (!sc.cold) designReactors(k, true); pruneLoads(k);
+        sc.set?.(k, e);
+        flowCache.delete(k);
+        const f = flow(k);
+        out.scenarios[id][name] = {
+          state: { ties: e.ties, taps: e.taps, coresUp: e.computers.some((x) => x.state === 'online'), epsLive: !!e.epsLive, breakers: e.breakers, xlBlock: e.xlBlock || [], stores: e.stores, antimatter: e.antimatter, busMax: busMaxOf(k), srcCap: f.srcCap, wants: f.wants },
+          today: { got: f.got, cells: f.cells, crossflow: f.crossflow, charging: f.charging, viaEps: f.viaEps },
+        };
+        eng.delete(k); flowCache.delete(k); navState.delete(k); combat.delete(k); shields.delete(k); shipClasses.delete(k);
+      }
+    }
+  }
+  fs.writeSync(1, JSON.stringify(out)); // (all of it before exiting: a pipe takes a big write in parts)
   process.exit(0);
 }
 server.listen(PORT, HOST || undefined, () => console.log(`${RELAY_NAME} on http://${HOST && HOST !== '0.0.0.0' && HOST !== '::' ? (HOST.includes(':') ? `[${HOST}]` : HOST) : 'localhost'}:${PORT}${HOST ? ` (listening on ${HOST})` : ''}`));

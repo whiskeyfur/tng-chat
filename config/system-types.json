@@ -1,5 +1,5 @@
 {
-  "about": "The kinds of system a ship graph is made of (docs/ship-graph.md). A system names its type; what's here is what every system of that type is, so a design only says what's different. role: bus (carries a resource between systems), source (puts a resource in), store (takes and gives back), conduit (a path power runs through), load (uses it), group (holds others: no flow of its own). Resources: power, eps, odn, deu, am, heat.",
+  "about": "The kinds of system a ship graph is made of (docs/ship-graph.md). A system names its type; what's here is what every system of that type is, so a design only says what's different. role: bus (carries a resource between systems), source (puts a resource in), store (takes and gives back), conduit (a path power runs through), load (uses it), group (holds others: no flow of its own). Resources: power, eps, odn, deu, am, heat. lastResort: a source drawn on only when nothing else will do (batteries, the EPS's pressure).",
   "types": {
     "bus": {
       "role": "bus",
@@ -27,21 +27,24 @@
       "resources": [
         "power"
       ],
-      "about": "A consumable battery: supplies its bus when nothing else will, never recharged aboard (replaced at a starbase)."
+      "about": "A consumable battery: supplies its bus when nothing else will, never recharged aboard (replaced at a starbase).",
+      "lastResort": true
     },
     "battery": {
       "role": "store",
       "resources": [
         "power"
       ],
-      "about": "A bus battery: charges from its bus, covers a shortfall; its main breaker in or out of service."
+      "about": "A bus battery: charges from its bus, covers a shortfall; its main breaker in or out of service.",
+      "lastResort": true
     },
     "eps-pressure": {
       "role": "store",
       "resources": [
         "eps"
       ],
-      "about": "The EPS manifold's own charge: pressure it holds and gives back."
+      "about": "The EPS manifold's own charge: pressure it holds and gives back.",
+      "lastResort": true
     },
     "fusion-reactor": {
       "role": "source",
@@ -218,6 +221,10 @@
       "dock-feed": {
         "of": "produces",
         "share": 0
+      },
+      "containment": {
+        "of": "consumes",
+        "share": 0.2
       }
     },
     "byEffect": {

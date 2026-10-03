@@ -28,6 +28,581 @@
     }
   ],
   "systems": {
+    "ship-power": {
+      "key": "ship",
+      "type": "dock-feed",
+      "name": "Docked ship power",
+      "upstream": {
+        "docking-connectors": {
+          "power": {
+            "pull": true,
+            "push": true
+          }
+        }
+      }
+    },
+    "ship-eps": {
+      "key": "shipEps",
+      "type": "dock-feed",
+      "name": "Docked ship EPS",
+      "upstream": {
+        "docking-connectors": {
+          "eps": {
+            "pull": true,
+            "push": true
+          }
+        }
+      }
+    },
+    "solar": {
+      "key": "solar",
+      "type": "solar",
+      "name": "Solar",
+      "produces": {
+        "power": 25
+      },
+      "upstream": {}
+    },
+    "dock-power": {
+      "key": "dock",
+      "type": "dock-feed",
+      "name": "Dock power (starbase)",
+      "produces": {
+        "power": 700
+      },
+      "upstream": {
+        "docking-connectors": {
+          "power": {
+            "pull": true,
+            "push": true
+          }
+        }
+      }
+    },
+    "dock-eps": {
+      "key": "dockEps",
+      "type": "dock-feed",
+      "name": "Dock EPS (starbase)",
+      "produces": {
+        "eps": 700
+      },
+      "upstream": {
+        "docking-connectors": {
+          "eps": {
+            "pull": true,
+            "push": true
+          }
+        }
+      }
+    },
+    "impulse-port": {
+      "key": "impulsePort",
+      "type": "fusion-reactor",
+      "name": "Impulse reactor (port)",
+      "produces": {
+        "eps": 75,
+        "heat": 9
+      },
+      "consumes": {
+        "deu": 0.1
+      },
+      "effects": {
+        "impulse": {}
+      },
+      "upstream": {
+        "tank-deu-port": {
+          "deu": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "impulse-port-thrusters": {
+          "key": "thrustersPort",
+          "type": "thrusters",
+          "name": "Impulse reactor (port) thrusters",
+          "upstream": {
+            "impulse-port": {
+              "eps": {
+                "pull": "auto",
+                "push": false
+              }
+            }
+          },
+          "effects": {
+            "maneuver": {}
+          }
+        },
+        "subsystem-portchamber": {
+          "key": "sub:portChamber",
+          "type": "subsystem",
+          "name": "Fusion reaction chamber",
+          "place": "place-impulse-and-aux-pods",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1006,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1006,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1006,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "impulse-starboard": {
+      "key": "impulseStarboard",
+      "type": "fusion-reactor",
+      "name": "Impulse reactor (starboard)",
+      "produces": {
+        "eps": 75,
+        "heat": 9
+      },
+      "consumes": {
+        "deu": 0.1
+      },
+      "effects": {
+        "impulse": {}
+      },
+      "upstream": {
+        "tank-deu-starboard": {
+          "deu": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "impulse-starboard-thrusters": {
+          "key": "thrustersStarboard",
+          "type": "thrusters",
+          "name": "Impulse reactor (starboard) thrusters",
+          "upstream": {
+            "impulse-starboard": {
+              "eps": {
+                "pull": "auto",
+                "push": false
+              }
+            }
+          },
+          "effects": {
+            "maneuver": {}
+          }
+        },
+        "subsystem-starboardchamber": {
+          "key": "sub:starboardChamber",
+          "type": "subsystem",
+          "name": "Fusion reaction chamber",
+          "place": "place-impulse-and-aux-pods",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1007,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1007,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1007,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "aux-1": {
+      "key": "aux1",
+      "type": "fusion-reactor",
+      "name": "Aux fusion 1",
+      "produces": {
+        "eps": 75,
+        "heat": 9
+      },
+      "consumes": {
+        "deu": 0.1
+      },
+      "upstream": {
+        "tank-deu-aux1": {
+          "deu": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "subsystem-aux1chamber": {
+          "key": "sub:aux1Chamber",
+          "type": "subsystem",
+          "name": "Fusion reaction chamber",
+          "place": "place-impulse-and-aux-pods",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1008,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1008,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1008,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "aux-2": {
+      "key": "aux2",
+      "type": "fusion-reactor",
+      "name": "Aux fusion 2",
+      "produces": {
+        "eps": 75,
+        "heat": 9
+      },
+      "consumes": {
+        "deu": 0.1
+      },
+      "upstream": {
+        "tank-deu-aux2": {
+          "deu": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "subsystem-aux2chamber": {
+          "key": "sub:aux2Chamber",
+          "type": "subsystem",
+          "name": "Fusion reaction chamber",
+          "place": "place-impulse-and-aux-pods",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1009,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1009,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1009,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        }
+      }
+    },
+    "warp-core": {
+      "key": "core",
+      "type": "warp-core",
+      "name": "Warp core",
+      "produces": {
+        "eps": 300,
+        "heat": 45
+      },
+      "consumes": {
+        "deu": 0.231,
+        "am": 0.231
+      },
+      "upstream": {
+        "tank-deu-core": {
+          "deu": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "tank-am-core": {
+          "am": {
+            "pull": "auto",
+            "push": false
+          }
+        }
+      },
+      "systems": {
+        "subsystem-amconduit": {
+          "key": "sub:amConduit",
+          "type": "subsystem",
+          "name": "Antimatter transfer conduit",
+          "place": "place-aft-compartment",
+          "consumes": {
+            "power": 5
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1005,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1005,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1005,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 1
+          }
+        },
+        "subsystem-constriction": {
+          "key": "sub:constriction",
+          "type": "subsystem",
+          "name": "Magnetic constriction",
+          "place": "place-aft-compartment",
+          "consumes": {
+            "power": 20
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1003,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1003,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1003,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 4
+          }
+        },
+        "subsystem-injector": {
+          "key": "sub:injector",
+          "type": "subsystem",
+          "name": "Antimatter injector",
+          "place": "place-aft-compartment",
+          "consumes": {
+            "power": 10
+          },
+          "upstream": {
+            "bus-a": {
+              "power": {
+                "pull": "auto",
+                "push": false,
+                "pri": 1004,
+                "min": "all"
+              }
+            },
+            "bus-b": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1004,
+                "min": "all"
+              }
+            },
+            "bus-c": {
+              "power": {
+                "pull": true,
+                "push": false,
+                "pri": 1004,
+                "min": "all"
+              }
+            }
+          },
+          "produces": {
+            "heat": 2
+          }
+        }
+      }
+    },
+    "emergency-a": {
+      "key": "emergA",
+      "type": "emergency-battery",
+      "name": "Emergency battery A",
+      "produces": {
+        "power": 100
+      },
+      "capacity": {
+        "power": 5000
+      },
+      "upstream": {}
+    },
+    "emergency-b": {
+      "key": "emergB",
+      "type": "emergency-battery",
+      "name": "Emergency battery B",
+      "produces": {
+        "power": 100
+      },
+      "capacity": {
+        "power": 5000
+      },
+      "upstream": {}
+    },
+    "emergency-c": {
+      "key": "emergC",
+      "type": "emergency-battery",
+      "name": "Emergency battery C",
+      "produces": {
+        "power": 100
+      },
+      "capacity": {
+        "power": 5000
+      },
+      "upstream": {}
+    },
+    "battery-a": {
+      "key": "batteryA",
+      "type": "battery",
+      "name": "Battery A",
+      "capacity": {
+        "power": 1000
+      },
+      "produces": {
+        "power": 100,
+        "heat": 5
+      },
+      "upstream": {}
+    },
+    "battery-b": {
+      "key": "batteryB",
+      "type": "battery",
+      "name": "Battery B",
+      "capacity": {
+        "power": 1000
+      },
+      "produces": {
+        "power": 100,
+        "heat": 5
+      },
+      "upstream": {}
+    },
+    "battery-c": {
+      "key": "batteryC",
+      "type": "battery",
+      "name": "Battery C",
+      "capacity": {
+        "power": 1000
+      },
+      "produces": {
+        "power": 100,
+        "heat": 5
+      },
+      "upstream": {}
+    },
+    "eps-pressure": {
+      "key": "pressure",
+      "type": "eps-pressure",
+      "name": "EPS pressure",
+      "capacity": {
+        "eps": 1000
+      },
+      "produces": {
+        "eps": 300
+      },
+      "upstream": {}
+    },
     "bus-a": {
       "type": "bus",
       "name": "Bus A",
@@ -274,6 +849,12 @@
             "push": false
           }
         },
+        "containment-am-pods": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
         "console-helm": {
           "heat": {
             "pull": "auto",
@@ -424,6 +1005,138 @@
             "push": false
           }
         },
+        "subsystem-constriction": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-amconduit": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-injector": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-portchamber": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-starboardchamber": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-aux1chamber": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-aux2chamber": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-patternbuffers": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-targetingscanners": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-energizingcoils": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-heisenberg": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-biofilter": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-deutransfer": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-amtransfer": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-computer1": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-computer2": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-computer3": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-rf": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-radio": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "subsystem-subspace": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "containment-amcore": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
+        "containment-amtorpedo": {
+          "heat": {
+            "pull": "auto",
+            "push": false
+          }
+        },
         "heat-sink": {
           "heat": {
             "pull": "auto",
@@ -436,7 +1149,7 @@
       "type": "heat-sink",
       "name": "Heat sink",
       "capacity": {
-        "heat": 8742
+        "heat": 9642
       },
       "upstream": {}
     },
@@ -444,7 +1157,7 @@
       "type": "radiator",
       "name": "Radiator 1",
       "consumes": {
-        "heat": 150,
+        "heat": 165,
         "power": 5
       },
       "upstream": {
@@ -452,7 +1165,7 @@
           "heat": {
             "pull": "auto",
             "push": false,
-            "rate": 150
+            "rate": 165
           }
         },
         "bus-b": {
@@ -469,7 +1182,7 @@
       "type": "radiator",
       "name": "Radiator 2",
       "consumes": {
-        "heat": 150,
+        "heat": 165,
         "power": 5
       },
       "upstream": {
@@ -477,7 +1190,7 @@
           "heat": {
             "pull": "auto",
             "push": false,
-            "rate": 150
+            "rate": 165
           }
         },
         "bus-b": {
@@ -486,156 +1199,6 @@
             "push": false,
             "pri": 100,
             "min": 5
-          }
-        }
-      }
-    },
-    "solar": {
-      "key": "solar",
-      "type": "solar",
-      "name": "Solar",
-      "produces": {
-        "power": 25
-      },
-      "upstream": {}
-    },
-    "emergency-a": {
-      "key": "emergA",
-      "type": "emergency-battery",
-      "name": "Emergency battery A",
-      "produces": {
-        "power": 100
-      },
-      "capacity": {
-        "power": 5000
-      },
-      "upstream": {}
-    },
-    "emergency-b": {
-      "key": "emergB",
-      "type": "emergency-battery",
-      "name": "Emergency battery B",
-      "produces": {
-        "power": 100
-      },
-      "capacity": {
-        "power": 5000
-      },
-      "upstream": {}
-    },
-    "emergency-c": {
-      "key": "emergC",
-      "type": "emergency-battery",
-      "name": "Emergency battery C",
-      "produces": {
-        "power": 100
-      },
-      "capacity": {
-        "power": 5000
-      },
-      "upstream": {}
-    },
-    "battery-a": {
-      "type": "battery",
-      "name": "Battery A",
-      "capacity": {
-        "power": 1000
-      },
-      "produces": {
-        "power": 100,
-        "heat": 5
-      },
-      "upstream": {}
-    },
-    "battery-b": {
-      "type": "battery",
-      "name": "Battery B",
-      "capacity": {
-        "power": 1000
-      },
-      "produces": {
-        "power": 100,
-        "heat": 5
-      },
-      "upstream": {}
-    },
-    "battery-c": {
-      "type": "battery",
-      "name": "Battery C",
-      "capacity": {
-        "power": 1000
-      },
-      "produces": {
-        "power": 100,
-        "heat": 5
-      },
-      "upstream": {}
-    },
-    "eps-pressure": {
-      "type": "eps-pressure",
-      "name": "EPS pressure",
-      "capacity": {
-        "eps": 1000
-      },
-      "produces": {
-        "eps": 300
-      },
-      "upstream": {}
-    },
-    "dock-eps": {
-      "key": "dockEps",
-      "type": "dock-feed",
-      "name": "Dock EPS (starbase)",
-      "produces": {
-        "eps": 700
-      },
-      "upstream": {
-        "docking-connectors": {
-          "eps": {
-            "pull": true,
-            "push": true
-          }
-        }
-      }
-    },
-    "dock-power": {
-      "key": "dock",
-      "type": "dock-feed",
-      "name": "Dock power (starbase)",
-      "produces": {
-        "power": 700
-      },
-      "upstream": {
-        "docking-connectors": {
-          "power": {
-            "pull": true,
-            "push": true
-          }
-        }
-      }
-    },
-    "ship-eps": {
-      "key": "shipEps",
-      "type": "dock-feed",
-      "name": "Docked ship EPS",
-      "upstream": {
-        "docking-connectors": {
-          "eps": {
-            "pull": true,
-            "push": true
-          }
-        }
-      }
-    },
-    "ship-power": {
-      "key": "ship",
-      "type": "dock-feed",
-      "name": "Docked ship power",
-      "upstream": {
-        "docking-connectors": {
-          "power": {
-            "pull": true,
-            "push": true
           }
         }
       }
@@ -680,369 +1243,6 @@
       "name": "Docking port 1",
       "upstream": {}
     },
-    "aux-1": {
-      "key": "aux1",
-      "type": "fusion-reactor",
-      "name": "Aux fusion 1",
-      "produces": {
-        "eps": 75,
-        "heat": 9
-      },
-      "upstream": {
-        "tank-deu-aux1": {
-          "deu": {
-            "pull": "auto",
-            "push": false
-          }
-        }
-      },
-      "systems": {
-        "subsystem-aux1chamber": {
-          "key": "sub:aux1Chamber",
-          "type": "subsystem",
-          "name": "Fusion reaction chamber",
-          "place": "place-impulse-and-aux-pods",
-          "upstream": {
-            "bus-a": {
-              "power": {
-                "pull": "auto",
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-b": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-c": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            }
-          }
-        }
-      }
-    },
-    "aux-2": {
-      "key": "aux2",
-      "type": "fusion-reactor",
-      "name": "Aux fusion 2",
-      "produces": {
-        "eps": 75,
-        "heat": 9
-      },
-      "upstream": {
-        "tank-deu-aux2": {
-          "deu": {
-            "pull": "auto",
-            "push": false
-          }
-        }
-      },
-      "systems": {
-        "subsystem-aux2chamber": {
-          "key": "sub:aux2Chamber",
-          "type": "subsystem",
-          "name": "Fusion reaction chamber",
-          "place": "place-impulse-and-aux-pods",
-          "upstream": {
-            "bus-a": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-b": {
-              "power": {
-                "pull": "auto",
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-c": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            }
-          }
-        }
-      }
-    },
-    "impulse-port": {
-      "key": "impulsePort",
-      "type": "fusion-reactor",
-      "name": "Impulse reactor (port)",
-      "produces": {
-        "eps": 75,
-        "heat": 9
-      },
-      "effects": {
-        "impulse": {}
-      },
-      "upstream": {
-        "tank-deu-port": {
-          "deu": {
-            "pull": "auto",
-            "push": false
-          }
-        }
-      },
-      "systems": {
-        "impulse-port-thrusters": {
-          "key": "thrustersPort",
-          "type": "thrusters",
-          "name": "Impulse reactor (port) thrusters",
-          "upstream": {
-            "impulse-port": {
-              "eps": {
-                "pull": "auto",
-                "push": false
-              }
-            }
-          },
-          "effects": {
-            "maneuver": {}
-          }
-        },
-        "subsystem-portchamber": {
-          "key": "sub:portChamber",
-          "type": "subsystem",
-          "name": "Fusion reaction chamber",
-          "place": "place-impulse-and-aux-pods",
-          "upstream": {
-            "bus-a": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-b": {
-              "power": {
-                "pull": "auto",
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-c": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            }
-          }
-        }
-      }
-    },
-    "impulse-starboard": {
-      "key": "impulseStarboard",
-      "type": "fusion-reactor",
-      "name": "Impulse reactor (starboard)",
-      "produces": {
-        "eps": 75,
-        "heat": 9
-      },
-      "effects": {
-        "impulse": {}
-      },
-      "upstream": {
-        "tank-deu-starboard": {
-          "deu": {
-            "pull": "auto",
-            "push": false
-          }
-        }
-      },
-      "systems": {
-        "impulse-starboard-thrusters": {
-          "key": "thrustersStarboard",
-          "type": "thrusters",
-          "name": "Impulse reactor (starboard) thrusters",
-          "upstream": {
-            "impulse-starboard": {
-              "eps": {
-                "pull": "auto",
-                "push": false
-              }
-            }
-          },
-          "effects": {
-            "maneuver": {}
-          }
-        },
-        "subsystem-starboardchamber": {
-          "key": "sub:starboardChamber",
-          "type": "subsystem",
-          "name": "Fusion reaction chamber",
-          "place": "place-impulse-and-aux-pods",
-          "upstream": {
-            "bus-a": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-b": {
-              "power": {
-                "pull": "auto",
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-c": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            }
-          }
-        }
-      }
-    },
-    "warp-core": {
-      "key": "core",
-      "type": "warp-core",
-      "name": "Warp core",
-      "produces": {
-        "eps": 300,
-        "heat": 45
-      },
-      "upstream": {
-        "tank-deu-core": {
-          "deu": {
-            "pull": "auto",
-            "push": false
-          }
-        },
-        "tank-am-core": {
-          "am": {
-            "pull": "auto",
-            "push": false
-          }
-        }
-      },
-      "systems": {
-        "subsystem-amconduit": {
-          "key": "sub:amConduit",
-          "type": "subsystem",
-          "name": "Antimatter transfer conduit",
-          "place": "place-aft-compartment",
-          "upstream": {
-            "bus-a": {
-              "power": {
-                "pull": "auto",
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-b": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-c": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            }
-          }
-        },
-        "subsystem-constriction": {
-          "key": "sub:constriction",
-          "type": "subsystem",
-          "name": "Magnetic constriction",
-          "place": "place-aft-compartment",
-          "upstream": {
-            "bus-a": {
-              "power": {
-                "pull": "auto",
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-b": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-c": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            }
-          }
-        },
-        "subsystem-injector": {
-          "key": "sub:injector",
-          "type": "subsystem",
-          "name": "Antimatter injector",
-          "place": "place-aft-compartment",
-          "upstream": {
-            "bus-a": {
-              "power": {
-                "pull": "auto",
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-b": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            },
-            "bus-c": {
-              "power": {
-                "pull": true,
-                "push": false,
-                "pri": 150,
-                "min": "all"
-              }
-            }
-          }
-        }
-      }
-    },
     "fuel-am": {
       "type": "fuel-bus",
       "name": "Antimatter bus",
@@ -1073,12 +1273,15 @@
           "type": "subsystem",
           "name": "AM bus transfer",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 5
+          },
           "upstream": {
             "bus-a": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1047,
                 "min": "all"
               }
             },
@@ -1086,7 +1289,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1047,
                 "min": "all"
               }
             },
@@ -1094,10 +1297,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1047,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 1
           }
         }
       }
@@ -1150,12 +1356,15 @@
           "type": "subsystem",
           "name": "Deu. bus transfer",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 5
+          },
           "upstream": {
             "bus-a": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1046,
                 "min": "all"
               }
             },
@@ -1163,7 +1372,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1046,
                 "min": "all"
               }
             },
@@ -1171,10 +1380,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1046,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 1
           }
         }
       }
@@ -1191,12 +1403,15 @@
           "key": "contain:amCore",
           "type": "containment",
           "name": "AmCore",
+          "consumes": {
+            "power": 1
+          },
           "upstream": {
             "bus-a": {
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 0,
+                "pri": 1,
                 "min": "all"
               }
             },
@@ -1204,7 +1419,7 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 0,
+                "pri": 1,
                 "min": "all"
               }
             },
@@ -1212,10 +1427,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 0,
+                "pri": 1,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 0.2
           }
         }
       }
@@ -1232,6 +1450,9 @@
           "key": "containment",
           "type": "containment",
           "name": "Antimatter containment (pods)",
+          "consumes": {
+            "power": 20
+          },
           "upstream": {
             "bus-a": {
               "power": {
@@ -1257,6 +1478,9 @@
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 4
           }
         }
       }
@@ -1273,12 +1497,15 @@
           "key": "contain:amTorpedo",
           "type": "containment",
           "name": "AmTorpedo",
+          "consumes": {
+            "power": 2
+          },
           "upstream": {
             "bus-a": {
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 0,
+                "pri": 2,
                 "min": "all"
               }
             },
@@ -1286,7 +1513,7 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 0,
+                "pri": 2,
                 "min": "all"
               }
             },
@@ -1294,10 +1521,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 0,
+                "pri": 2,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 0.4
           }
         }
       }
@@ -1521,27 +1751,28 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 103
+                "pri": 1051
               }
             },
             "bus-b": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 103
+                "pri": 1051
               }
             },
             "bus-c": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 103
+                "pri": 1051
               }
             }
           },
           "produces": {
             "heat": 1
-          }
+          },
+          "via": "life-support"
         },
         "system-gravity": {
           "key": "system:gravity",
@@ -1559,27 +1790,28 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 107
+                "pri": 1055
               }
             },
             "bus-b": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 107
+                "pri": 1055
               }
             },
             "bus-c": {
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 107
+                "pri": 1055
               }
             }
           },
           "produces": {
             "heat": 2
-          }
+          },
+          "via": "life-support"
         },
         "system-lighting": {
           "key": "system:lighting",
@@ -1597,27 +1829,28 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 105
+                "pri": 1053
               }
             },
             "bus-b": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 105
+                "pri": 1053
               }
             },
             "bus-c": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 105
+                "pri": 1053
               }
             }
           },
           "produces": {
             "heat": 0.1
-          }
+          },
+          "via": "life-support"
         },
         "system-lights": {
           "key": "system:lights",
@@ -1637,27 +1870,28 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 106
+                "pri": 1054
               }
             },
             "bus-b": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 106
+                "pri": 1054
               }
             },
             "bus-c": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 106
+                "pri": 1054
               }
             }
           },
           "produces": {
             "heat": 0.6
-          }
+          },
+          "via": "life-support"
         },
         "system-thermal": {
           "key": "system:thermal",
@@ -1677,27 +1911,28 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 104
+                "pri": 1052
               }
             },
             "bus-b": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 104
+                "pri": 1052
               }
             },
             "bus-c": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 104
+                "pri": 1052
               }
             }
           },
           "produces": {
             "heat": 0.8
-          }
+          },
+          "via": "life-support"
         }
       }
     },
@@ -1711,6 +1946,9 @@
           "type": "subsystem",
           "name": "Computer core 1",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 2
+          },
           "effects": {
             "computing": {}
           },
@@ -1719,7 +1957,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1043,
                 "min": "all"
               }
             },
@@ -1727,7 +1965,7 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1043,
                 "min": "all"
               }
             },
@@ -1735,10 +1973,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1043,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 0.4
           }
         },
         "subsystem-computer2": {
@@ -1746,6 +1987,9 @@
           "type": "subsystem",
           "name": "Computer core 2",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 2
+          },
           "effects": {
             "computing": {}
           },
@@ -1754,7 +1998,7 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1044,
                 "min": "all"
               }
             },
@@ -1762,7 +2006,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1044,
                 "min": "all"
               }
             },
@@ -1770,10 +2014,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1044,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 0.4
           }
         },
         "subsystem-computer3": {
@@ -1781,6 +2028,9 @@
           "type": "subsystem",
           "name": "Computer core 3",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 2
+          },
           "effects": {
             "computing": {}
           },
@@ -1789,7 +2039,7 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1045,
                 "min": "all"
               }
             },
@@ -1797,7 +2047,7 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1045,
                 "min": "all"
               }
             },
@@ -1805,10 +2055,13 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1045,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 0.4
           }
         }
       }
@@ -1826,7 +2079,7 @@
           "power": {
             "pull": "auto",
             "push": false,
-            "pri": 150,
+            "pri": 1015,
             "min": 2
           }
         },
@@ -1834,7 +2087,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1015,
             "min": 2
           }
         },
@@ -1842,7 +2095,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1015,
             "min": 2
           }
         }
@@ -1856,6 +2109,9 @@
           "type": "subsystem",
           "name": "Radio (hails, ship-to-ship calls)",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 10
+          },
           "effects": {
             "comms": {
               "range": "hails"
@@ -1866,7 +2122,7 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1031,
                 "min": "all"
               }
             },
@@ -1874,7 +2130,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1031,
                 "min": "all"
               }
             },
@@ -1882,10 +2138,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1031,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 2
           }
         },
         "subsystem-rf": {
@@ -1893,6 +2152,9 @@
           "type": "subsystem",
           "name": "Local RF (calls aboard)",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 10
+          },
           "effects": {
             "comms": {
               "range": "aboard"
@@ -1903,7 +2165,7 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1030,
                 "min": "all"
               }
             },
@@ -1911,7 +2173,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1030,
                 "min": "all"
               }
             },
@@ -1919,10 +2181,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1030,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 2
           }
         },
         "subsystem-subspace": {
@@ -1930,6 +2195,9 @@
           "type": "subsystem",
           "name": "Subspace relay (data links)",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 10
+          },
           "effects": {
             "comms": {
               "range": "subspace"
@@ -1940,7 +2208,7 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1032,
                 "min": "all"
               }
             },
@@ -1948,7 +2216,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1032,
                 "min": "all"
               }
             },
@@ -1956,10 +2224,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1032,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 2
           }
         }
       }
@@ -1977,7 +2248,7 @@
           "power": {
             "pull": "auto",
             "push": false,
-            "pri": 150,
+            "pri": 1014,
             "min": 2
           }
         },
@@ -1985,7 +2256,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1014,
             "min": 2
           }
         },
@@ -1993,7 +2264,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1014,
             "min": 2
           }
         }
@@ -2015,7 +2286,7 @@
           "power": {
             "pull": "auto",
             "push": false,
-            "pri": 150,
+            "pri": 1012,
             "min": 2
           }
         },
@@ -2023,7 +2294,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1012,
             "min": 2
           }
         },
@@ -2031,7 +2302,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1012,
             "min": 2
           }
         }
@@ -2053,7 +2324,7 @@
           "power": {
             "pull": "auto",
             "push": false,
-            "pri": 150,
+            "pri": 1016,
             "min": 2
           }
         },
@@ -2061,7 +2332,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1016,
             "min": 2
           }
         },
@@ -2069,7 +2340,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1016,
             "min": 2
           }
         }
@@ -2091,7 +2362,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1017,
             "min": 2
           }
         },
@@ -2099,7 +2370,7 @@
           "power": {
             "pull": "auto",
             "push": false,
-            "pri": 150,
+            "pri": 1017,
             "min": 2
           }
         },
@@ -2107,7 +2378,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1017,
             "min": 2
           }
         }
@@ -2129,7 +2400,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1020,
             "min": 2
           }
         },
@@ -2137,7 +2408,7 @@
           "power": {
             "pull": "auto",
             "push": false,
-            "pri": 150,
+            "pri": 1020,
             "min": 2
           }
         },
@@ -2145,7 +2416,7 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 150,
+            "pri": 1020,
             "min": 2
           }
         }
@@ -2159,12 +2430,15 @@
           "type": "subsystem",
           "name": "Biofilter",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 2
+          },
           "upstream": {
             "bus-a": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1041,
                 "min": "all"
               }
             },
@@ -2172,7 +2446,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1041,
                 "min": "all"
               }
             },
@@ -2180,10 +2454,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1041,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 0.4
           }
         },
         "subsystem-energizingcoils": {
@@ -2191,12 +2468,15 @@
           "type": "subsystem",
           "name": "Energizing coils",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 5
+          },
           "upstream": {
             "bus-a": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1042,
                 "min": "all"
               }
             },
@@ -2204,7 +2484,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1042,
                 "min": "all"
               }
             },
@@ -2212,10 +2492,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1042,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 1
           }
         },
         "subsystem-heisenberg": {
@@ -2223,12 +2506,15 @@
           "type": "subsystem",
           "name": "Heisenberg compensators",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 2
+          },
           "upstream": {
             "bus-a": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1040,
                 "min": "all"
               }
             },
@@ -2236,7 +2522,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1040,
                 "min": "all"
               }
             },
@@ -2244,10 +2530,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1040,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 0.4
           }
         },
         "subsystem-patternbuffers": {
@@ -2255,12 +2544,15 @@
           "type": "subsystem",
           "name": "Pattern buffers",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 15
+          },
           "upstream": {
             "bus-a": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1038,
                 "min": "all"
               }
             },
@@ -2268,7 +2560,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1038,
                 "min": "all"
               }
             },
@@ -2276,10 +2568,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1038,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 3
           }
         },
         "subsystem-targetingscanners": {
@@ -2287,12 +2582,15 @@
           "type": "subsystem",
           "name": "Targeting scanners",
           "place": "place-aft-compartment",
+          "consumes": {
+            "power": 2
+          },
           "upstream": {
             "bus-a": {
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1039,
                 "min": "all"
               }
             },
@@ -2300,7 +2598,7 @@
               "power": {
                 "pull": "auto",
                 "push": false,
-                "pri": 150,
+                "pri": 1039,
                 "min": "all"
               }
             },
@@ -2308,10 +2606,13 @@
               "power": {
                 "pull": true,
                 "push": false,
-                "pri": 150,
+                "pri": 1039,
                 "min": "all"
               }
             }
+          },
+          "produces": {
+            "heat": 0.4
           }
         }
       }
@@ -2332,7 +2633,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 100
+            "pri": 1048
           }
         }
       },
@@ -2356,7 +2657,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 111
+            "pri": 1059
           }
         }
       },
@@ -2380,7 +2681,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 110
+            "pri": 1058
           }
         }
       },
@@ -2406,7 +2707,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 113
+            "pri": 1061
           }
         }
       },
@@ -2427,13 +2728,14 @@
               "eps": {
                 "pull": "auto",
                 "push": false,
-                "pri": 114
+                "pri": 1062
               }
             }
           },
           "produces": {
             "heat": 10
-          }
+          },
+          "via": "system-engines"
         }
       }
     },
@@ -2453,7 +2755,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 102
+            "pri": 1050
           }
         }
       },
@@ -2479,21 +2781,21 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 109
+            "pri": 1057
           }
         },
         "bus-b": {
           "power": {
             "pull": true,
             "push": false,
-            "pri": 109
+            "pri": 1057
           }
         },
         "bus-c": {
           "power": {
             "pull": "auto",
             "push": false,
-            "pri": 109
+            "pri": 1057
           }
         }
       },
@@ -2519,7 +2821,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 115
+            "pri": 1063
           }
         }
       },
@@ -2545,7 +2847,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 108
+            "pri": 1056
           }
         }
       },
@@ -2571,7 +2873,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 112
+            "pri": 1060
           }
         }
       },
@@ -2595,7 +2897,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 101
+            "pri": 1049
           }
         }
       },
@@ -2619,7 +2921,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 122
+            "pri": 1070
           }
         }
       },
@@ -2643,21 +2945,21 @@
           "power": {
             "pull": true,
             "push": false,
-            "pri": 126
+            "pri": 1074
           }
         },
         "bus-b": {
           "power": {
             "pull": "auto",
             "push": false,
-            "pri": 126
+            "pri": 1074
           }
         },
         "bus-c": {
           "power": {
             "pull": true,
             "push": false,
-            "pri": 126
+            "pri": 1074
           }
         }
       },
@@ -2683,7 +2985,7 @@
           "eps": {
             "pull": "auto",
             "push": false,
-            "pri": 121
+            "pri": 1069
           }
         }
       },

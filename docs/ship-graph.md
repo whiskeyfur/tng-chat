@@ -137,23 +137,68 @@ That's enough to chart from any system: what feeds it sits to its left and what 
 
 ## Rough spots, for review
 
-- **Heat** is in the schema only, and the numbers are first guesses:
-  - Systems' and reactors' shares are set; subsystems make none yet, because their draws aren't in the graph.
+- **Heat** numbers are first guesses:
+  - Systems', subsystems', containments' and reactors' shares are set, now that the graph has their draws.
   - "Every system at once" is the worst case. A design may want fewer radiators and rely on the heat sink for bursts (phasers firing, a warp jump).
-- **pri and min** write today's rule as numbers. Step 2's solver comparison will show whether they reproduce it exactly.
+- **pri and min** write today's rule as numbers. Step 2's comparison shows they reproduce it exactly: the graph solver and the relay's agree in every state tested.
+- **Serving rules the graph solver still takes from today's solver:**
+  - Single-bus loads are served bus by bus, with each bus's battery charging after its own loads.
+  - A bus draws on its sources in the order they're listed.
+  - These are rules of the solver, not settings in the graph. Step 3 could make them settings.
+- **Power exported to a docked ship or starbase** (`feed:*`) isn't a system in the graph yet. The comparison leaves it out; the test states don't export.
+- **Heat sizing is conservative:** a ship rarely draws everything at once (the runabout makes 77/s at full stretch, against radiators sized for 300).
 - **The ODN** (consoles' data link) isn't in the graph yet; consoles list `odn` as a resource but nothing feeds it.
 - **Docking power:** the starbase's and a docked ship's power are separate sources behind the docking connectors, not the ports themselves. That's how the relay models them today. One port per runabout; a starbase's ports are one entry with `count: null`.
 - **Thrusters:** a drive's thrusters are a conduit that feeds the EPS (what the drive doesn't spend on thrust), as today.
 - **The runabout's comms:** its RF, radio and subspace subsystems belong to Communications, a station it doesn't have. They sit at the top level with `parentName: "Communications"`. Either the runabout gets a Communications console, or the subsystems move to Operations.
 - **Draws:**
   - Systems' `consumes` is their rating at 100%, and a console's is 2.
-  - Subsystems' and containments' draws vary in play (starting, running), so they aren't in the graph yet.
-  - Reactors' fuel use isn't in the graph yet either.
+  - Subsystems' and containments' `consumes` is what they draw while working. Some draw more while starting (the constriction 60), which the graph doesn't show.
+
+## Step 2: the graph solver
+
+`tools/graph-solver.js` works out who gets how much power from a ship's graph and its runtime state. It runs alongside the relay's own solver, which play still uses. `test/solver.js` runs both on every class in nine grid states and requires the same answers on every load, every source, the batteries, the crosslink and charging. The nine states:
+- cold iron
+- warm
+- all on (at warp, armed, shields up)
+- a brownout
+- the crosslink both ways
+- the crosslink one way
+- buses on their EPS taps alone
+- docked
+- starved (solar only, batteries out of service)
+
+All 54 agree.
+
+The rules, read from the graph:
+- **Sources:** a bus draws on its sources in the order the graph lists them. After those it draws on the EPS through its tap, up to the tap's rate. Last-resort sources (batteries, the EPS's pressure, emergency batteries; `lastResort` in the type library) are drawn on only when nothing else will do.
+- **Crosslink:** crosslinked buses are one pool, and power crosses only the ways their links allow. A source tied to several buses gives each an even share first.
+- **Serving order:**
+  1. Loads are served in `pri` order, containment first: each containment draws from its feeds in turn, and the batteries straight away if it's short.
+  2. Then loads on one bus, each bus in turn, followed by that bus's battery charging.
+  3. Then loads on two buses, then on three, each split evenly.
+  4. Then whatever is still short gets any share left over, then the batteries.
+- **Conduits:** a load gets a bus's power only while its place and every conduit on its path are tied to that bus too.
+- **`min`:** a load that can't get its minimum gets nothing, and its power passes on. The solver works it out again without that load until nothing else falls short.
+
+What `min` changes against today, from the starved state: the subspace relay gets 5 of its 10 MW, which isn't enough to work. The relay powers it anyway, and the graph solver gives those 5 MW to the next load. Containment never loses power to a minimum.
+
+**Draws and fuel** are in the graphs now, from the relay's numbers:
+- Subsystems: the constriction 20, the injector 10, pattern buffers 15, a computer core 2, and so on.
+- Containment fields: their draw.
+- The warp core: deuterium and antimatter, scaled to its output.
+- Fusion reactors: 0.1 deuterium/s.
+
+**Heat**, in the graph solver only (off in play):
+- Each tick, `heatStep()` gives each system its heat for what it handled. The coolant loop takes it to the radiators, which dump it while their pumps have power, and to the heat sink, which holds what the radiators can't.
+- What neither takes stays in the systems that made it. Past 70% of a system's limit its effects weaken, down to half at 90%. Past 90% it takes damage.
+- The runabout at full stretch (warp 5, armed, shields up) makes 77/s. Its radiators dump that with room to spare: they're sized for every system's full draw at once, which is 300.
+- With the pumps off, the sink fills and then the systems warm and overheat (the test times it).
 
 ## The steps
 
-1. **Now:** the schema, the type library, the converter and the checks. Nothing in play changes.
-2. A graph-based solver alongside today's. Tests run both on every ship and require the same flows.
+1. **Done:** the schema, the type library, the converter and the checks. Nothing in play changes.
+2. **Done:** a graph-based solver alongside today's. Tests run both on every ship and require the same flows. The graphs now carry draws and fuel use, and heat is simulated in the graph solver only.
 3. Distribution (root-agnostic) and the Power grid read the graph; ships save by system id.
    - **No old-save conversion** (John): the switch starts a new game.
    - Before it, `shipcore-data/` and `data/starbases.json` are moved to a timestamped backup folder, never deleted; accounts and settings stay.

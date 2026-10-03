@@ -48,11 +48,11 @@ const BUS_ID = { A: 'bus-a', B: 'bus-b', C: 'bus-c', EPS: 'eps' };
 const resOf = (node) => (node === 'EPS' ? 'eps' : 'power');
 
 // The relay's own tables and what each class has aboard (the relay in its dump mode: nothing starts).
-function dump() {
+function dump({ scenarios = false } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ship-graph-'));
   try {
     return JSON.parse(execFileSync(process.execPath, ['server.js'], { cwd: ROOT, maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, SHIP_GRAPH_DUMP: '1', PORT: '0', RELAY_DATA: tmp, STARBASES_FILE: path.join(tmp, 'starbases.json'), SHIPCORE_DATA: tmp } }).toString());
+      env: { ...process.env, SHIP_GRAPH_DUMP: '1', ...(scenarios ? { SHIP_GRAPH_SCENARIOS: '1' } : {}), PORT: '0', RELAY_DATA: tmp, STARBASES_FILE: path.join(tmp, 'starbases.json'), SHIPCORE_DATA: tmp } }).toString());
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
@@ -89,17 +89,19 @@ function convert(id, design, d) {
   const src = (key, sid, sys) => { if (!keys[key]) return; idOf[key] = sid; add(sid, { key, ...sys }); for (const n of keys[key].nodes) link(BUS_ID[n], sid, resOf(n), { pull: allow(keys[key].tied.includes(n)), push: false }); };
   src('solar', 'solar', { type: 'solar', name: 'Solar', produces: { power: design.solar?.output ?? 0 } });
   for (const n of ['A', 'B', 'C']) src(`emerg${n}`, `emergency-${n.toLowerCase()}`, { type: 'emergency-battery', name: `Emergency battery ${n}`, produces: { power: t.EMERG.out }, capacity: { power: t.EMERG.cap } });
-  src('impulsePort', 'impulse-port', { type: 'fusion-reactor', name: 'Impulse reactor (port)', produces: { eps: t.GRID.impulse } });
-  src('impulseStarboard', 'impulse-starboard', { type: 'fusion-reactor', name: 'Impulse reactor (starboard)', produces: { eps: t.GRID.impulse } });
-  src('aux1', 'aux-1', { type: 'fusion-reactor', name: 'Aux fusion 1', produces: { eps: t.FUSION.aux } });
-  src('aux2', 'aux-2', { type: 'fusion-reactor', name: 'Aux fusion 2', produces: { eps: t.FUSION.aux } });
-  src('core', 'warp-core', { type: 'warp-core', name: 'Warp core', produces: { eps: c.coreOutput } });
+  src('impulsePort', 'impulse-port', { type: 'fusion-reactor', name: 'Impulse reactor (port)', produces: { eps: t.GRID.impulse }, consumes: { deu: t.FUEL.impulseBurn } });
+  src('impulseStarboard', 'impulse-starboard', { type: 'fusion-reactor', name: 'Impulse reactor (starboard)', produces: { eps: t.GRID.impulse }, consumes: { deu: t.FUEL.impulseBurn } });
+  src('aux1', 'aux-1', { type: 'fusion-reactor', name: 'Aux fusion 1', produces: { eps: t.FUSION.aux }, consumes: { deu: t.FUEL.impulseBurn } });
+  src('aux2', 'aux-2', { type: 'fusion-reactor', name: 'Aux fusion 2', produces: { eps: t.FUSION.aux }, consumes: { deu: t.FUEL.impulseBurn } });
+  // (Fuel: the core burns deuterium and antimatter for what it gives; a fusion reactor deuterium.)
+  const coreBurn = Math.round((c.coreOutput / t.GRID.core) * t.FUEL.coreBurn * 1000) / 1000;
+  src('core', 'warp-core', { type: 'warp-core', name: 'Warp core', produces: { eps: c.coreOutput }, consumes: { deu: coreBurn, am: coreBurn } });
   // (A drive's thrusters: tied to the EPS, what the drive isn't spending on thrust feeds it.)
   for (const [key, drive] of [['thrustersPort', 'impulse-port'], ['thrustersStarboard', 'impulse-starboard']]) if (keys[key] && systems[drive]) { idOf[key] = `${drive}-thrusters`; add(`${drive}-thrusters`, { key, type: 'thrusters', name: `${systems[drive].name} thrusters`, parent: drive, upstream: { [drive]: { eps: { pull: 'auto', push: false } } } }); for (const n of keys[key].nodes) link(BUS_ID[n], `${drive}-thrusters`, resOf(n), { pull: allow(keys[key].tied.includes(n)), push: false }); }
   // The bus batteries and the EPS's pressure: each charges from its bus and supplies it.
   for (const [store, node] of Object.entries(t.STORES)) {
     const sid = node === 'EPS' ? 'eps-pressure' : `battery-${node.toLowerCase()}`, on = node === 'EPS' ? true : c.breakers[node];
-    add(sid, { type: node === 'EPS' ? 'eps-pressure' : 'battery', name: node === 'EPS' ? 'EPS pressure' : `Battery ${node}`, capacity: { [resOf(node)]: node === 'EPS' ? t.GRID.epsCap : t.GRID.batteryCap }, produces: { [resOf(node)]: node === 'EPS' ? t.GRID.epsOut : t.GRID.batteryOut } });
+    add(sid, { key: store, type: node === 'EPS' ? 'eps-pressure' : 'battery', name: node === 'EPS' ? 'EPS pressure' : `Battery ${node}`, capacity: { [resOf(node)]: node === 'EPS' ? t.GRID.epsCap : t.GRID.batteryCap }, produces: { [resOf(node)]: node === 'EPS' ? t.GRID.epsOut : t.GRID.batteryOut } });
     link(BUS_ID[node], sid, resOf(node), { pull: allow(on), push: allow(on), rate: node === 'EPS' ? t.GRID.epsCharge : t.GRID.batteryCharge });
   }
   // Docking: the ports, their connectors, and power through them (a starbase's; a docked ship's).
@@ -169,12 +171,16 @@ function convert(id, design, d) {
     if (via) sys.via = via; // (a conduit it runs through below its place: life support's, the engines')
     if (key.startsWith('system:')) sys.consumes = { [k.nodes.includes('EPS') ? 'eps' : 'power']: t.RATING[x] ?? 100 };
     if (key.startsWith('console:')) sys.consumes = { power: t.GRID.console };
+    // (What a subsystem draws while it works; a containment field, its draw for what it holds.)
+    if (key.startsWith('sub:') && t.SUB_DRAW?.[x] !== undefined) sys.consumes = { power: t.SUB_DRAW[x] };
+    if (key === 'containment') sys.consumes = { power: t.GRID.containment };
+    if (key.startsWith('contain:')) { const tank = { 'contain:amCore': 'core', 'contain:amTorpedo': 'torpedo' }[key]; sys.consumes = { power: Math.round((t.GRID.containment * t.TANKS.am[tank].cap) / t.FUEL.antimatter * 100) / 100 }; }
     add(sid, sys);
     // (Who's served first when a bus is short: containment ahead of everything; then loads tied to one
-    // bus, then two, then three, each tier in the systems' priority order. Today's rule, as numbers.)
-    const tier = key === 'containment' || key.startsWith('contain:') ? 0 : 100 * Math.max(1, k.tied.length);
-    const order = key.startsWith('system:') ? t.SYSTEM_PRIORITY.indexOf(x) : -1;
-    const pri = tier === 0 ? 0 : tier + (order < 0 ? 50 : order);
+    // bus, then two, then three (1000s, 2000s, 3000s), each tier in the order the relay serves its
+    // loads (subsystems, consoles, then the systems by priority). Today's rule, as numbers.)
+    const order = t.LOAD_ORDER.indexOf(key), tier = key === 'containment' || key.startsWith('contain:') ? 0 : 1000 * Math.max(1, k.tied.length);
+    const pri = tier + (order < 0 ? 999 : order);
     // (The least it works on: a console or a subsystem needs all it draws; a system works on what it gets.)
     const min = key.startsWith('console:') ? t.GRID.console : key.startsWith('sub:') || key.startsWith('contain:') || key === 'containment' ? 'all' : undefined;
     for (const n of k.nodes) link(sid, BUS_ID[n], resOf(n), { pull: allow(k.tied.includes(n)), push: false, pri, ...(min !== undefined ? { min } : {}) });
@@ -212,10 +218,12 @@ function convert(id, design, d) {
   for (const s of Object.values(systems)) if (s.via && !s.parent) s.parent = s.via;
   const kids = {};
   for (const [id, s] of Object.entries(systems)) if (s.parent) (kids[s.parent] ||= []).push(id);
-  const sorted = (ids) => ids.sort((a, b) => rank(systems[a]) - rank(systems[b]) || a.localeCompare(b));
+  // (Sources first, in the order a bus draws on them; then the rest by kind.)
+  const srcOrder = (id) => { const i = [...t.SOURCES, ...Object.keys(t.STORES)].indexOf(systems[id].key); return i < 0 ? Infinity : i; };
+  const sorted = (ids) => ids.sort((a, b) => (srcOrder(a) === srcOrder(b) ? rank(systems[a]) - rank(systems[b]) || a.localeCompare(b) : srcOrder(a) - srcOrder(b)));
   const node = (id) => {
     const { parent, via, ...rest } = systems[id];
-    return { ...rest, ...(via && via !== parent ? { via } : {}), ...(kids[id] ? { systems: Object.fromEntries(sorted(kids[id]).map((k) => [k, node(k)])) } : {}) };
+    return { ...rest, ...(via ? { via } : {}), ...(kids[id] ? { systems: Object.fromEntries(sorted(kids[id]).map((k) => [k, node(k)])) } : {}) };
   };
   return {
     schema: SCHEMA,
