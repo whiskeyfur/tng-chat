@@ -26,6 +26,9 @@
     lib: null, types: {}, resources: [], designs: [],
     id: null, isNew: false, root: null, order: [], // the design's own fields (all but systems); its systems' ids in file order
     dirty: false, loading: false, sel: null, wireMode: 'state', hideHeat: false,
+    // The view: one resource's graph (or all of them), optionally rooted on one system (its
+    // neighbours only). The whole design is st.model; the canvas shows the view's part of it.
+    model: null, view: 'power', focus: null, removed: new Set(), removedParent: {}, positions: {}, layout: null,
   };
   window.__shipdesigner = st;
   st.toGraph = () => toGraph();
@@ -84,7 +87,7 @@
 
   // --- systems as nodes --------------------------------------------------------------------------
   // node.sys: the system's fields (without upstream and systems); node.sysId, node.parentId;
-  // node.keyOrder / node.upOrder: the file's key order, kept on saving. A wire's bundle: link.bundle,
+  // node.keyOrder: the file's key order, kept on saving. A wire's bundle: link.bundle,
   // { resource: { pull, push, connect, rate, pushRate, pri, min, why } }.
   const nodeById = (id) => graph._nodes.find((n) => n.sysId === id);
   const linkOf = (id) => (graph.links.get ? graph.links.get(id) : graph.links[id]);
@@ -125,7 +128,7 @@
   function makeNode(id, sys, parentId) {
     const n = LiteGraph.createNode(nodeType(featureOf(sys)));
     n.sysId = id; n.parentId = parentId || null;
-    n.keyOrder = Object.keys(sys); n.upOrder = Object.keys(sys.upstream || {});
+    n.keyOrder = Object.keys(sys);
     n.sys = clone(sys); delete n.sys.upstream; delete n.sys.systems;
     styleNode(n);
     return n;
@@ -135,6 +138,7 @@
   const takes = (n) => new Set([...(st.types[n.sys.type]?.resources || []), ...Object.keys(n.sys.consumes || {})]);
   // A new wire's bundle: what the two have in common (power, if nothing).
   function newBundle(origin, node) {
+    if (st.view !== 'all') return { [st.view]: { pull: 'auto', push: false } };
     const g = gives(origin), t = takes(node), common = [...g].filter((r) => t.has(r) && r !== 'heat');
     return Object.fromEntries((common.length ? common.slice(0, 1) : [[...g][0] || 'power']).map((r) => [r, { pull: 'auto', push: false }]));
   }
@@ -146,18 +150,50 @@
     return out;
   }
   function load(id, file, layout, isNew = false) {
-    st.loading = true;
-    graph.clear();
     st.id = id; st.isNew = isNew;
     st.root = clone(file); delete st.root.systems;
-    const list = walk(file.systems, null, []);
-    st.order = list.map((x) => x.id);
+    st.model = clone(file);
+    st.layout = layout; st.positions = {}; st.focus = null;
+    build();
+    setDirty(false);
+    problems(null);
+  }
+  const viewKey = () => `${st.view}|${st.focus || ''}`;
+  // Which links the view draws between shown systems: all of them, or rooted, only the root's.
+  const wired = (a, b) => !st.focus || a === st.focus || b === st.focus;
+  const inView = (r) => st.view === 'all' || r === st.view;
+  // Which systems the view shows: those on its resource's graph (linked by it, or of a type, or
+  // drawing, making or holding it); rooted on a system, just it and its neighbours.
+  function shownIds(list) {
+    const ids = new Set();
+    for (const { id, s: sys } of list) {
+      for (const [u, rs] of Object.entries(sys.upstream || {})) if (Object.keys(rs).some(inView)) { ids.add(id); ids.add(u); }
+      if (st.view === 'all' || (st.types[sys.type]?.resources || []).includes(st.view) || ['consumes', 'produces', 'capacity', 'creative'].some((f) => sys[f] && st.view in sys[f])) ids.add(id);
+    }
+    if (st.focus && ids.has(st.focus)) {
+      const near = new Set([st.focus]);
+      for (const { id, s: sys } of list) for (const [u, rs] of Object.entries(sys.upstream || {})) if (Object.keys(rs).some(inView)) { if (id === st.focus) near.add(u); if (u === st.focus) near.add(id); }
+      return near;
+    }
+    return ids;
+  }
+  function build() {
+    st.loading = true;
+    graph.clear();
+    st.removed = new Set(); st.removedParent = {};
+    const list = walk(st.model.systems, null, []);
+    const ids = shownIds(list);
     const pending = [];
-    for (const { id: sid, s, parent } of list) {
-      const n = makeNode(sid, s, parent);
+    for (const { id: sid, s: sys, parent } of list) {
+      if (!ids.has(sid)) continue;
+      const n = makeNode(sid, sys, parent);
       n.addOutput('out', SLOT);
-      // (An input per wire, in the file's order, then the free one.)
-      for (const [u, rs] of Object.entries(s.upstream || {})) { n.addInput('in', SLOT, { pos: [...IN_POS] }); pending.push({ n, slot: n.inputs.length - 1, u, bundle: rs }); }
+      // (An input per wire, in the file's order, then the free one. A wire: the view's resources.)
+      for (const [u, rs] of Object.entries(sys.upstream || {})) {
+        const bundle = Object.fromEntries(Object.entries(rs).filter(([r]) => inView(r)));
+        if (!ids.has(u) || !Object.keys(bundle).length || !wired(u, sid)) continue;
+        n.addInput('in', SLOT, { pos: [...IN_POS] }); pending.push({ n, slot: n.inputs.length - 1, u, bundle });
+      }
       addSpare(n);
       fitNode(n);
       graph.add(n);
@@ -168,18 +204,30 @@
       const link = up.connect(0, p.n, p.slot);
       if (link) { link.bundle = clone(p.bundle); colourLink(link); }
     }
-    // (The free input last means it's drawn last: on top, where a wire is dropped.)
     labelAll();
-    if (layout?.nodes && list.every(({ id: sid }) => layout.nodes[sid])) {
-      for (const n of graph._nodes) n.pos = [...layout.nodes[n.sysId]];
-      regroup(layout.groups);
-    } else arrange();
-    if (layout?.view) { canvas.ds.offset = [...layout.view.offset]; canvas.ds.scale = layout.view.scale; } else fit();
+    const saved = st.positions[viewKey()] || (st.view === 'all' && !st.focus ? st.layout : null);
+    if (saved?.nodes && graph._nodes.every((n) => saved.nodes[n.sysId])) {
+      for (const n of graph._nodes) n.pos = [...saved.nodes[n.sysId]];
+      regroup(saved.groups);
+      if (saved.view) { canvas.ds.offset = [...saved.view.offset]; canvas.ds.scale = saved.view.scale; } else fit();
+    } else { arrange(); fit(); }
     st.loading = false;
-    setDirty(false);
+    viewControls();
     select(null);
-    problems(null);
     canvas.setDirty(true, true);
+  }
+  // Another view: what's on the canvas goes back into the design first.
+  function setView(view, focus = null) {
+    st.positions[viewKey()] = layoutOf(true);
+    st.model = toGraph();
+    st.view = view; st.focus = focus;
+    try { localStorage.setItem('shipdesigner.view', view); } catch { /* (no storage) */ }
+    build();
+  }
+  function viewControls() {
+    $('view').value = st.view;
+    $('unfocus').hidden = !st.focus;
+    $('unfocus').textContent = st.focus ? `Rooted on ${st.focus}: show all` : '';
   }
 
   // --- wires ----------------------------------------------------------------------------------------
@@ -205,7 +253,7 @@
   // A wire dropped on a taken slot (they share a spot) goes to the free one instead.
   function canDraw(node, origin, slot, originSlot) {
     if (st.loading) return true;
-    if (!origin || origin === node || linksIn(node).some((l) => l.origin_id === origin.id && l.target_slot !== slot)) return false;
+    if (!origin || origin === node || !wired(origin.sysId, node.sysId) || linksIn(node).some((l) => l.origin_id === origin.id && l.target_slot !== slot)) return false;
     const inp = node.inputs[slot];
     if (inp && !inp.spare) {
       setTimeout(() => { const free = node.inputs.findIndex((i) => i.spare); if (free >= 0) origin.connect(originSlot ?? 0, node, free); });
@@ -237,6 +285,7 @@
   }
   function nodeRemoved(node) {
     if (st.loading) return;
+    st.removed.add(node.sysId); st.removedParent[node.sysId] = node.parentId;
     for (const n of graph._nodes) if (n.parentId === node.sysId) n.parentId = node.parentId;
     if (st.sel?.node === node) select(null);
     setDirty(true);
@@ -248,7 +297,7 @@
     if (st.loading || n.sys) return;
     const f = n.feature, base = f || 'system';
     let i = 1; while (nodeById(`${base}-${i}`)) i++;
-    n.sysId = `${base}-${i}`; n.parentId = null; n.keyOrder = []; n.upOrder = [];
+    n.sysId = `${base}-${i}`; n.parentId = null; n.keyOrder = [];
     n.sys = { type: f === 'seat' ? 'console' : 'system', name: `New ${(f || 'system').replace(/-/g, ' ')}`, ...(f ? { effects: { [f]: {} } } : {}) };
     addSlots(n); styleNode(n); fitNode(n); labelInputs(n);
     setDirty(true);
@@ -260,39 +309,58 @@
     const keys = [...order.filter((k) => k in obj), ...Object.keys(obj).filter((k) => !order.includes(k))];
     return Object.fromEntries(keys.map((k) => [k, obj[k]]));
   }
-  function systemOf(n) {
-    const s = clone(n.sys);
+  // A shown system: its own fields from the node; its links from the design, with those the view
+  // shows (the view's resources, from systems on the canvas) taken from the wires instead.
+  function systemOf(n, base, shown) {
+    const s = clone(n.sys), orig = base?.upstream || {}, wires = {};
+    for (const l of linksIn(n)) { const o = graph.getNodeById(l.origin_id); if (o) wires[o.sysId] = l.bundle || {}; }
     const up = {};
-    for (const inp of n.inputs || []) {
-      if (inp.link == null) continue;
-      const l = linkOf(inp.link), o = l && graph.getNodeById(l.origin_id);
-      if (!o) continue;
-      up[o.sysId] = clone(l.bundle || {});
+    for (const src of [...Object.keys(orig), ...Object.keys(wires).filter((k) => !(k in orig))]) {
+      if (st.removed.has(src)) continue;
+      const o = orig[src] || {}, w = wires[src];
+      let obj = {};
+      if (!shown.has(src) || !wired(src, n.sysId)) obj = clone(o);
+      else {
+        for (const k of Object.keys(o)) if (!inView(k)) obj[k] = clone(o[k]); else if (w && k in w) obj[k] = clone(w[k]);
+        for (const k of Object.keys(w || {})) if (!(k in obj)) obj[k] = clone(w[k]);
+      }
+      if (Object.keys(obj).length) up[src] = obj;
     }
-    // (In the file's order: its upstream systems, and each one's resources.)
-    const upOrdered = ordered(up, n.upOrder);
-    s.upstream = upOrdered;
+    s.upstream = up;
     return s;
   }
+  // The whole design: the shown systems from the canvas, the rest as they were (less links to a
+  // system deleted here), nested by parent, in the file's order (new ones last).
   function toGraph() {
-    const nodes = [...graph._nodes].filter((n) => n.sys);
-    const rank = (n) => { const i = st.order.indexOf(n.sysId); return i < 0 ? 1e9 + n.id : i; };
-    nodes.sort((a, b) => rank(a) - rank(b));
-    const built = new Map(nodes.map((n) => [n.sysId, systemOf(n)]));
-    const systems = {};
-    for (const n of nodes) {
-      const s = built.get(n.sysId), parent = n.parentId && built.get(n.parentId);
-      const target = parent && n.parentId !== n.sysId ? (parent.systems ||= {}) : systems;
-      target[n.sysId] = s;
+    const nodes = new Map([...graph._nodes].filter((n) => n.sys).map((n) => [n.sysId, n]));
+    const shown = new Set(nodes.keys());
+    const list = walk(st.model.systems, null, []).filter((x) => !st.removed.has(x.id));
+    const ids = [...list.map((x) => x.id), ...[...nodes.values()].filter((n) => !list.some((x) => x.id === n.sysId)).sort((a, b) => a.id - b.id).map((n) => n.sysId)];
+    const base = new Map(list.map((x) => [x.id, x]));
+    const built = new Map(), parentOf = new Map(), orderOf = new Map();
+    for (const id of ids) {
+      const n = nodes.get(id), b = base.get(id);
+      if (n) { built.set(id, systemOf(n, b?.s, shown)); parentOf.set(id, n.parentId); orderOf.set(id, n.keyOrder); continue; }
+      const s = clone(b.s); delete s.systems;
+      if (s.upstream) for (const k of Object.keys(s.upstream)) if (st.removed.has(k)) delete s.upstream[k];
+      let p = b.parent, guard = 0; while (p && st.removed.has(p) && guard++ < 50) p = st.removedParent[p];
+      built.set(id, s); parentOf.set(id, p); orderOf.set(id, Object.keys(b.s));
     }
-    for (const n of nodes) {
-      const s = built.get(n.sysId), fresh = ordered(s, n.keyOrder.length ? n.keyOrder : ['type', 'name', 'key', 'place', 'via', 'capacity', 'produces', 'consumes', 'effects', 'creative', 'upstream', 'systems']);
+    const systems = {};
+    for (const id of ids) {
+      const s = built.get(id), p = parentOf.get(id), parent = p && p !== id && built.get(p);
+      (parent ? (parent.systems ||= {}) : systems)[id] = s;
+    }
+    for (const id of ids) {
+      const s = built.get(id), ko = orderOf.get(id), fresh = ordered(s, ko?.length ? ko : ['type', 'name', 'key', 'place', 'via', 'capacity', 'produces', 'consumes', 'effects', 'creative', 'upstream', 'systems']);
       for (const k of Object.keys(s)) delete s[k];
       Object.assign(s, fresh);
     }
     return { ...st.root, systems };
   }
-  function layoutOf() {
+  // Positions to save: the all-resources view's (the canvas's, or as it was left).
+  function layoutOf(here = false) {
+    if (!here && viewKey() !== 'all|') return st.positions['all|'] || null;
     const nodes = {}, groups = {};
     for (const n of graph._nodes) if (n.sysId) nodes[n.sysId] = Array.from(n.pos, Math.round);
     for (const g of graph._groups) if (g.sysId) groups[g.sysId] = [...g.pos, ...g.size].map(Math.round);
@@ -304,6 +372,7 @@
   // it draws from. Crosslinks and batteries make loops: the first edge back into one is dropped.
   // A system's parts sit under it, in its column.
   function arrange() {
+    if (st.focus && nodeById(st.focus)) return arrangeRooted();
     const nodes = graph._nodes.filter((n) => n.sys);
     const top = nodes.filter((n) => !n.parentId || !nodeById(n.parentId));
     const topOf = (n) => { let x = n, guard = 0; while (x.parentId && nodeById(x.parentId) && guard++ < 20) x = nodeById(x.parentId); return x; };
@@ -357,11 +426,25 @@
     }
     regroup();
   }
+  // Rooted on a system: it in the middle, what it draws from on the left, what draws from it on
+  // the right (both ways: on the left).
+  function arrangeRooted() {
+    const root = nodeById(st.focus), left = [], right = [];
+    const ups = new Set(linksIn(root).map((l) => l.origin_id)), downs = new Set(linksOut(root).map((l) => l.target_id));
+    for (const n of graph._nodes) if (n !== root && n.sys) (ups.has(n.id) || !downs.has(n.id) ? left : right).push(n);
+    const TH = LiteGraph.NODE_TITLE_HEIGHT, ROW = LiteGraph.NODE_SLOT_HEIGHT * 1.4 + TH + 26, COLW = 300;
+    const column = (list, x) => { const per = Math.max(1, Math.ceil(list.length / Math.ceil(list.length / 14))); list.forEach((n, i) => { n.pos = [x + Math.floor(i / per) * COLW * Math.sign(x), TH + (i % per) * ROW]; }); return Math.min(list.length, per); };
+    const rows = Math.max(column(left, -COLW), column(right, COLW), 1);
+    root.pos = [0, TH + ((rows - 1) * ROW) / 2];
+    for (const g of [...graph._groups]) graph.remove(g);
+    canvas.setDirty(true, true);
+  }
   function descendants(n, kids) { const out = []; for (const k of kids(n)) out.push(k, ...descendants(k, kids)); return out; }
 
   // A box round each system that has parts: it and them. (Saved positions keep their own boxes.)
   function regroup(saved) {
     for (const g of [...graph._groups]) graph.remove(g);
+    if (st.focus) return;
     const nodes = graph._nodes.filter((n) => n.sys);
     for (const p of nodes) {
       const kids = nodes.filter((n) => n.parentId === p.sysId);
@@ -445,7 +528,7 @@
       <h3>draws from (${ins.length})</h3><ul class="wires">${ins.map((l) => wire(l, graph.getNodeById(l.origin_id))).join('')}</ul>
       <h3>feeds (${outs.length})</h3><ul class="wires">${outs.map((l) => wire(l, graph.getNodeById(l.target_id))).join('')}</ul>
       ${Object.keys(others).length ? `<h3>other fields</h3><textarea data-json="others">${esc(JSON.stringify(others, null, 1))}</textarea>` : ''}
-      <div class="actions"><button id="centre">Centre</button><button id="del-node" class="danger">Delete system</button></div>`;
+      <div class="actions"><button id="centre">Centre</button><button id="root-here" title="Show just it and what it draws from and feeds, in this view">Root here</button><button id="del-node" class="danger">Delete system</button></div>`;
   }
   // A wire: its bundle, a block of settings per resource.
   function linkPanel(l) {
@@ -467,7 +550,7 @@
       <div class="about">A bundle: what <b>${esc(b ? label(b) : '?')}</b> draws from <b>${esc(a ? label(a) : '?')}</b>, a resource each. Stored on ${esc(b?.sysId)}, under upstream.${esc(a?.sysId)}.</div>
       <p class="hint">false: never. warn: allowed, not advised (a confirming tap). true: allowed, off at load. auto: allowed and on at load.</p>
       ${Object.entries(bundle).map(([r, p]) => block(r, p)).join('') || '<p class="hint">It carries nothing yet.</p>'}
-      ${left.length ? `<p><select id="bundle-add">${left.map((r) => opt(r, '')).join('')}</select> <button id="bundle-add-go">+ resource</button></p>` : ''}
+      ${left.length && st.view === 'all' ? `<p><select id="bundle-add">${left.map((r) => opt(r, '')).join('')}</select> <button id="bundle-add-go">+ resource</button></p>` : ''}
       <div class="actions"><button id="del-link" class="danger">Delete wire</button></div>`;
   }
   function vesselPanel() {
@@ -539,6 +622,7 @@
       }));
       p.querySelectorAll('[data-goto-link]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); const l = linkOf(Number(el.dataset.gotoLink)); if (l) select({ kind: 'link', link: l }); }));
       $('centre')?.addEventListener('click', () => centreOn(n));
+      $('root-here')?.addEventListener('click', () => setView(st.view, n.sysId));
       $('del-node')?.addEventListener('click', () => { graph.remove(n); select(null); });
     } else if (sel?.kind === 'link') {
       const l = sel.link; l.bundle ||= {};
@@ -584,17 +668,27 @@
       }));
     }
   }
-  // An id changed: what refers to it (places, via, parents) follows. Links are by node.
+  // An id changed: what refers to it (links, places, via, parents) follows, on the canvas and in
+  // the rest of the design. (Wires are by node.)
   function renameSystem(n, id) {
     const was = n.sysId;
+    const renameKey = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k === was ? id : k, v]));
     for (const m of graph._nodes) {
       if (!m.sys) continue;
       if (m.parentId === was) m.parentId = id;
       if (m.sys.place === was) m.sys.place = id;
       if (m.sys.via === was) m.sys.via = id;
-      const i = m.upOrder.indexOf(was); if (i >= 0) m.upOrder[i] = id;
     }
-    const j = st.order.indexOf(was); if (j >= 0) st.order[j] = id;
+    const fix = (systems) => {
+      for (const sys of Object.values(systems || {})) {
+        if (sys.upstream && was in sys.upstream) sys.upstream = renameKey(sys.upstream);
+        if (sys.place === was) sys.place = id;
+        if (sys.via === was) sys.via = id;
+        if (sys.systems) { if (was in sys.systems) sys.systems = renameKey(sys.systems); fix(sys.systems); }
+      }
+    };
+    if (was in st.model.systems) st.model.systems = renameKey(st.model.systems);
+    fix(st.model.systems);
     for (const g of graph._groups) if (g.sysId === was) g.sysId = id;
     n.sysId = id;
   }
@@ -630,14 +724,14 @@
     if (asId) g.class = asId;
     const v = await api('PUT', `/api/ship-designs/${encodeURIComponent(id)}`, { graph: g, layout: layoutOf(), asNew });
     if (!v.saved) { problems(v.problems || ['not saved']); status('Not saved: see the problems below'); return false; }
-    problems([], v.note, v.warnings);
     if (asId || st.isNew) {
       st.id = id; st.isNew = false; st.root.class = g.class; await listDesigns(id);
       try { localStorage.setItem('shipdesigner.design', id); } catch { /* (no storage) */ }
     }
-    st.order = walk(g.systems, null, []).map((x) => x.id);
-    for (const n of graph._nodes) if (n.sys) { const s = findIn(g.systems, n.sysId); if (s) { n.keyOrder = Object.keys(s); n.upOrder = Object.keys(s.upstream || {}); } }
+    st.model = clone(g); st.removed = new Set(); st.removedParent = {};
+    for (const n of graph._nodes) if (n.sys) { const s = findIn(g.systems, n.sysId); if (s) n.keyOrder = Object.keys(s); }
     setDirty(false);
+    problems([], v.note, v.warnings);
     return true;
   }
   function findIn(systems, id) { for (const [k, s] of Object.entries(systems || {})) { if (k === id) return s; const x = findIn(s.systems, id); if (x) return x; } return null; }
@@ -682,6 +776,8 @@
     save(id).catch((err) => problems([err.message]));
   });
   $('arrange').addEventListener('click', () => { arrange(); fit(); });
+  $('view').addEventListener('change', (e) => setView(e.target.value, st.focus));
+  $('unfocus').addEventListener('click', () => setView(st.view, null));
   $('regroup').addEventListener('click', () => regroup());
   $('fit').addEventListener('click', fit);
   $('wire-mode').addEventListener('change', (e) => { st.wireMode = e.target.value; recolour(); });
@@ -695,6 +791,8 @@
       await listDesigns();
       st.types = st.lib.types; st.resources = st.lib.resources;
       EFFECTS = [...new Set([...EFFECTS, ...(st.lib.effects || [])])];
+      $('view').innerHTML = `<option value="all">all resources</option>${st.resources.map((r) => `<option value="${r}">${r}</option>`).join('')}`;
+      try { const v = localStorage.getItem('shipdesigner.view'); if (v === 'all' || st.resources.includes(v)) st.view = v; } catch { /* (no storage) */ }
       registerTypes();
       legend();
       let pick = null; try { pick = localStorage.getItem('shipdesigner.design'); } catch { /* (no storage) */ }

@@ -42,12 +42,64 @@ const step = (s) => console.log(`ok - ${s}`);
         const st = window.__shipdesigner, file = (await (await fetch(`/api/ship-designs/${id}`)).json()).graph;
         const sel = document.getElementById('design'); sel.value = id; sel.dispatchEvent(new Event('change'));
         for (let i = 0; i < 50 && st.id !== id; i++) await new Promise((r) => setTimeout(r, 50));
-        return JSON.stringify(st.toGraph()) === JSON.stringify(file);
+        // (In every view: each resource's, all of them, and rooted on its first bus.)
+        const wrong = [];
+        const viewSel = document.getElementById('view');
+        for (const v of ['power', 'eps', 'heat', 'all']) {
+          viewSel.value = v; viewSel.dispatchEvent(new Event('change'));
+          if (JSON.stringify(st.toGraph()) !== JSON.stringify(file)) wrong.push(v);
+        }
+        const bus = st.graph._nodes.find((n) => n.sys.type === 'bus' || n.sys.type === 'eps-manifold');
+        if (bus) {
+          viewSel.value = 'power'; viewSel.dispatchEvent(new Event('change'));
+          const n = st.graph._nodes.find((m) => m.sysId === bus.sysId);
+          if (n) { st.canvas.selectNode(n); st.canvas.onNodeSelected(n); document.getElementById('root-here').click(); if (JSON.stringify(st.toGraph()) !== JSON.stringify(file)) wrong.push(`rooted on ${bus.sysId}`); }
+          document.getElementById('unfocus').click();
+        }
+        return wrong;
       }, id);
-      assert.ok(same, `${id} written back as it was`);
+      assert.deepEqual(same, [], `${id} written back as it was, in every view`);
     }
-    step(`all ${ids.length} designs open and are written back unchanged`);
+    step(`all ${ids.length} designs open and are written back unchanged, in every view (power, EPS, heat, all, rooted on a bus)`);
 
+    // The power view: just the systems on power's graph; rooted on Bus B, just it and its neighbours.
+    await page.selectOption('#design', 'runabout');
+    await page.waitForFunction(() => window.__shipdesigner.id === 'runabout');
+    await page.selectOption('#view', 'all');
+    const counts = { all: await page.evaluate(() => window.__shipdesigner.graph._nodes.length) };
+    await page.selectOption('#view', 'deu');
+    counts.deu = await page.evaluate(() => window.__shipdesigner.graph._nodes.length);
+    await page.selectOption('#view', 'power');
+    await page.evaluate(() => { const st = window.__shipdesigner, n = st.graph._nodes.find((m) => m.sysId === 'bus-b'); st.canvas.selectNode(n); st.canvas.onNodeSelected(n); });
+    await page.click('#root-here');
+    const rooted = await page.evaluate(() => {
+      const st = window.__shipdesigner, all = [];
+      const walk = (ss) => { for (const [id, x] of Object.entries(ss || {})) { all.push([id, x]); walk(x.systems); } };
+      walk(st.toGraph().systems);
+      const near = new Set(['bus-b']);
+      for (const [id, x] of all) for (const [u, rs] of Object.entries(x.upstream || {})) if (rs.power) { if (id === 'bus-b') near.add(u); if (u === 'bus-b') near.add(id); }
+      return { shown: st.graph._nodes.map((n) => n.sysId).sort(), near: [...near].sort() };
+    });
+    assert.ok(counts.deu < counts.all / 3, `the deuterium view is a fraction of the whole: ${counts.deu} of ${counts.all}`);
+    assert.deepEqual(rooted.shown, rooted.near, 'rooted on Bus B: it, what it draws power from and what draws power from it');
+    await page.click('#unfocus');
+    // An edit in a view lands in the whole design, and nothing else changes.
+    await page.selectOption('#view', 'eps');
+    const merged = await page.evaluate(async () => {
+      const st = window.__shipdesigner, file = (await (await fetch('/api/ship-designs/runabout')).json()).graph;
+      const bus = st.graph._nodes.find((n) => n.sysId === 'bus-b'), l = st.graph.links.get(bus.inputs.find((i) => i.link != null && st.graph.getNodeById(st.graph.links.get(i.link).origin_id).sysId === 'eps').link);
+      l.bundle.eps.rate = 99;
+      const g = st.toGraph();
+      file.systems['bus-b'].upstream.eps.eps.rate = 99;
+      return JSON.stringify(g) === JSON.stringify(file);
+    });
+    assert.ok(merged, 'a rate changed in the EPS view: that, and only that, in the design');
+    await page.selectOption('#view', 'all');
+    assert.equal(await page.evaluate(() => window.__shipdesigner.toGraph().systems['bus-b'].upstream.eps.eps.rate), 99, 'and still there in the all-resources view');
+    await page.evaluate(() => { const st = window.__shipdesigner; const bus = st.graph._nodes.find((n) => n.sysId === 'bus-b'); const l = st.graph.links.get(bus.inputs.find((i) => i.link != null && st.graph.links.get(i.link).bundle.eps).link); l.bundle.eps.rate = 100; });
+    step(`a view per resource (deuterium: ${counts.deu} of ${counts.all} systems); rooted on Bus B, ${rooted.shown.length} systems`);
+
+    // (The rest in the all-resources view.)
     // The node menu: a node per feature (effect), and one with none; nothing of litegraph's own.
     const kinds = await page.evaluate(() => Object.keys(window.litegraph.js.LiteGraph.registered_node_types).sort());
     assert.ok(kinds.includes('feature/shields') && kinds.includes('feature/ftl') && kinds.includes('feature/seat') && kinds.includes('system/no feature'), `the node kinds: ${kinds}`);
@@ -56,8 +108,6 @@ const step = (s) => console.log(`ok - ${s}`);
     assert.ok(kinds.includes('feature/antimatter-transfer'), 'an effect a design uses (not in the docs list) is a feature');
 
     // A shields node, near Bus B; Bus B's out dragged to its in, then Bus A's onto the same in.
-    await page.selectOption('#design', 'runabout');
-    await page.waitForFunction(() => window.__shipdesigner.id === 'runabout');
     const added = await page.evaluate(() => {
       const st = window.__shipdesigner, L = window.litegraph.js.LiteGraph, bus = st.graph._nodes.find((n) => n.sysId === 'bus-b');
       // (Out to the left of everything, so the wires' centres are clear of other nodes.)
