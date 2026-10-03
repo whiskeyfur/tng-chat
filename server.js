@@ -2901,7 +2901,7 @@ function flow(k) {
   const emergUsed = Object.fromEntries(EMERG.names.map((n) => [n, usedOf(n)]));
   const f = {
     cells, totals, buses, xferOk, emergUsed, consoleOk, demand, capacity, delivered, containmentOk, containFeed, tankFeed, coreSubsOk, subOk, tractorOk, tied, trippable, thrusting,
-    crossflow, storeUsed: used, coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps, epsGen,
+    crossflow, storeUsed: used, coreUsed: usedOf('core'), impulseUsed: usedOf('impulsePort') + usedOf('impulseStarboard'), charging, drawn, viaEps, epsGen, srcCap: cap,
   };
   flowCache.set(k, { at: Date.now(), f });
   return f;
@@ -2959,6 +2959,10 @@ function nearShip(k) {
   return o ? shipName(o) : null;
 }
 
+// What each power source is made of, as damage counts (combat, overdrive): Distribution shows a
+// source DAMAGED while any of it is. The EPS tap into a bus: the EPS; a bus's battery: its bus.
+const SRC_DAMAGE = { core: ['conduits', 'constriction', 'injector', 'amConduit'], impulsePort: ['portChamber'], impulseStarboard: ['starboardChamber'], aux1: ['aux1Chamber'], aux2: ['aux2Chamber'],
+  'tap:A': ['busEPS'], 'tap:B': ['busEPS'], 'tap:C': ['busEPS'], 'battery:A': ['busA'], 'battery:B': ['busB'], 'battery:C': ['busC'], 'battery:EPS': ['busEPS'] };
 function gridView(k) {
   const e = engOf(k), f = flow(k);
   const near = isBase(k) ? null : STARBASES.find((b) => navState.has(k) && Math.hypot(navState.get(k).x - b.x, navState.get(k).y - b.y) <= DOCK_RANGE);
@@ -3026,6 +3030,10 @@ function gridView(k) {
     conduits: CONDUITS.filter((c) => c === 'system:lifeSupport' || placesOf(k).some((pl) => `place:${pl.name}` === c)), systemChildren: SYSTEM_CHILDREN, systemParents: SYSTEM_PARENTS, ratings: Object.fromEntries(SYSTEMS.map((x) => [x, ratingOf(x)])), powerMax: POWER_MAX, forcefields: e.forcefields, fieldsUp: e.forcefields.length > 0 && f.subOk.forcefields !== false, brigField: !!e.brigField, brigSealed: brigSealed(k), stationSystems: stationSystemsOf(k), starbase: isBase(k), subsystems: Object.fromEntries(Object.entries(SUBSYSTEMS).map(([x, v]) => [x, { parent: v.parent, name: v.name }])),
     tieNodes: Object.fromEntries(Object.keys(e.ties).filter((key) => aboardKey(k, key)).map((key) => [key, tieNodes(key)])), multi: Object.keys(e.ties).filter((key) => isMulti(key) && aboardKey(k, key)), busMax: busMaxOf(k), solarOut: designOf(k).solar?.output ?? 0,
     delivered: r(f.delivered), demand: f.demand, drawn: Math.round(f.drawn),
+    // What each source could give now (MW): tied and giving nothing, it's either not needed (ready) or has nothing to give.
+    srcCap: Object.fromEntries(Object.entries(f.srcCap || {}).map(([x, v]) => [x, Math.round(v)])),
+    // Each source's damage (%: the worst of what it's made of), shown on Distribution even when it's off.
+    srcDamage: (() => { const d = combatOf(k).damage || {}, worst = (xs) => Math.round(Math.max(0, ...xs.map((x) => d[x] || 0))); return Object.fromEntries(Object.entries(SRC_DAMAGE).map(([x, xs]) => [x, worst(xs)]).filter(([, v]) => v >= 1)); })(),
   };
 }
 

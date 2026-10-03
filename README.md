@@ -179,7 +179,15 @@ Three low-power buses, **A**, **B** and **C** (300 each at most), and the high-p
 
 **All on / All off.** Under each bus's column heading in the grid (and for every bus at once, in the Controls column): **All on** ties every row that can go on that bus (but the emergency batteries: used up, they're tied by hand only) (a row with a single possible tie only if it's untied), **All off** unties them, keeping what must stay: the Engineering console, antimatter containment while its tank holds antimatter, the core's constriction while it runs, the antimatter bus's containment while there's antimatter on it, and the power paths (places, parent systems) those rows run through. A notice says what stayed tied. On the fuel buses (Deu., AM) they tie and untie the tanks and the connections; under the ODN they link every console to the optical data network, or cut them off but Engineering's. All off never unties (or cuts off) your own console.
 
-**State words, everywhere** (the grid, Distribution, the MSD, consoles): **standby**, switched off on purpose but intact (untied, a breaker open, a limiter at 0: "100% · standby"); **CUT OFF**, a conduit above it untied; **no power**, tied and wanted but the bus can't supply it; **dead**, truly empty (no charge, no fuel).
+**State words, everywhere** (the grid, Distribution, the MSD, consoles): **standby**, switched off on purpose but intact (untied, a breaker open, a limiter at 0: "100% · standby"); **CUT OFF**, a conduit above it untied; **no power**, tied and wanted but the bus can't supply it; **dead**, truly empty (no charge, no fuel). Distribution's **sources** use five states:
+
+- **LIVE** (blue): giving power.
+- **READY** (gold): tied or open and able to give, but not needed now. Its bus is covered by sources tied straight to it, and an EPS tap only gives what they can't.
+- **NO OUTPUT**: tied, with nothing to give. For an EPS tap this reads "EPS not energized".
+- **STANDBY**: untied, a tap closed or a breaker open.
+- **DAMAGED** (red), with how much of it still works ("DAMAGED · 40%"): over all the other states, off too, until it's repaired. A source counts as damaged when any of its parts is: for the warp core, its conduits, constriction, injector or antimatter conduit; for a fusion reactor, its chamber; for an EPS tap, the EPS; for a battery, its bus.
+
+Tap a source to tie or untie it. Tapping the EPS tap closes it, or opens it to the bus's limit.
 
 **The data network map** (Ops' Data link, Communications) is laid out like Distribution: the vessel being viewed in the middle, the vessels linked with it in a column on each side (the subspace relay first, then hard links, then data links), each further hop a column further out beside the vessel it's reached through; a vessel reached more than one way sits at its fewest hops with its other links drawn too; vessels on no link with it in a row underneath. Links are elbows (lit; dashed while requested; dotted with the signal lost). It's drawn at a readable size and scrolls (a drag) when it's bigger than its panel; it only changes when the vessels or links do.
 

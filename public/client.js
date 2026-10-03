@@ -779,7 +779,7 @@ let distBus = 'EPS';
 function renderDistribution(grid) {
   const box = document.querySelector('[data-distribution]');
   if (!box || !grid) return;
-  const sig = JSON.stringify([distBus, grid.ties, grid.cells, grid.cutOff, grid.totals, grid.stores, grid.fuel, grid.taps, grid.crossflow]);
+  const sig = JSON.stringify([distBus, grid.ties, grid.cells, grid.cutOff, grid.totals, grid.stores, grid.fuel, grid.taps, grid.crossflow, grid.srcCap, grid.epsLive, grid.srcDamage]);
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig;
   const NS = 'http://www.w3.org/2000/svg';
@@ -797,17 +797,29 @@ function renderDistribution(grid) {
   const left = [], right = [];
   let mid;
   if (!fuel) {
-    for (const [key, label] of Object.entries(SRC)) if (grid.tieNodes[key]?.includes(X)) { const v = Math.max(0, grid.cells[key]?.[X] || 0); { const st = state(key, v); left.push({ key, label, value: `${Math.round(v)} MW`, st, amount: v, ...(st === 'dead' || st === 'open' ? { word: 'standby' } : {}) }); } }
+    // A source: live (giving), standby (untied: off on purpose), ready (tied, able to give, not
+    // needed: the bus is covered by others first), or no output (tied, with nothing to give);
+    // and damaged, over all of those (off too, so it's seen): how much of it still works.
+    const hurt = (n, dk) => { const d = grid.srcDamage?.[dk] || 0; return d >= 1 ? { ...n, st: 'damaged', word: `DAMAGED · ${Math.max(0, 100 - d)}%`, flow: n.flow ?? (n.amount > 0.5 ? 1 : 0) } : n; };
+    for (const [key, label] of Object.entries(SRC)) if (grid.tieNodes[key]?.includes(X)) {
+      const v = Math.max(0, grid.cells[key]?.[X] || 0); let st = state(key, v);
+      if (st === 'dead' && (grid.srcCap?.[key] || 0) > 0.5) st = 'idle';
+      left.push(hurt({ key, label, value: `${Math.round(v)} MW`, st, amount: v, ...(st === 'dead' ? { word: 'no output' } : {}) }, key));
+    }
     const store = grid.stores?.[X];
-    if (store) left.push({ label: X === 'EPS' ? 'EPS pressure' : `Battery ${X}`, value: `${store.level}%${store.supplying ? ` · ${store.supplying} out` : store.charging ? ` · charging ${store.charging}` : ''}`, st: store.supplying > 0 ? 'live' : store.breaker === false ? 'open' : 'dead', ...(store.supplying > 0 ? {} : { word: store.level > 0 ? 'standby' : 'dead' }),
+    // (A battery: its breaker open is standby; closed and charged, it's ready to cover a shortfall.)
+    if (store) left.push(hurt({ label: X === 'EPS' ? 'EPS pressure' : `Battery ${X}`, value: `${store.level}%${store.supplying ? ` · ${store.supplying} out` : store.charging ? ` · charging ${store.charging}` : ''}`, st: store.supplying > 0 ? 'live' : store.breaker === false ? 'open' : store.level > 0 ? 'idle' : 'dead', ...(store.supplying > 0 || store.breaker === false ? {} : { word: store.level > 0 ? (store.charging > 0 ? 'charging' : 'ready') : 'dead' }),
       // (Out to the bus while it supplies; in from it while it charges.)
-      flow: store.supplying > 0 ? 1 : store.charging > 0 ? -1 : 0, amount: store.supplying || store.charging || 0 });
+      flow: store.supplying > 0 ? 1 : store.charging > 0 ? -1 : 0, amount: store.supplying || store.charging || 0 }, `battery:${X}`));
     // The low buses' crosslink (power crossing from another bus: a source; to one: a load) and the EPS tap.
     const across = (Y) => { const k = [X, Y].sort().join(''), v = grid.crossflow?.[k] || 0; return Y < X ? v : -v; }; // + : from Y into X
     const LOW = ['A', 'B', 'C'];
     if (LOW.includes(X)) {
       const tapIn = Math.max(0, grid.cells?.taps?.[X] || 0), tapMax = grid.taps?.[X] || 0;
-      left.push({ label: 'EPS tap', value: `${Math.round(tapIn)} of ${tapMax} MW`, st: tapIn > 0.5 ? 'live' : tapMax ? 'dead' : 'open', ...(tapIn > 0.5 ? {} : { word: tapMax ? 'standby' : 'closed' }), amount: tapIn, crosslink: true });
+      // The EPS tap: closed (standby), open and carrying (live), open and not needed (ready), or
+      // open with the EPS not energized (no output). A tap opens it to the bus's limit, or closes it.
+      const tapSt = tapIn > 0.5 ? 'live' : !tapMax ? 'open' : grid.epsLive ? 'idle' : 'dead';
+      left.push(hurt({ label: 'EPS tap', value: `${Math.round(tapIn)} of ${tapMax} MW`, st: tapSt, ...(tapSt === 'dead' ? { word: 'EPS not energized' } : tapSt === 'open' ? { word: 'closed · standby' } : {}), amount: tapIn, crosslink: true, tapBus: X }, `tap:${X}`));
       for (const Y of LOW.filter((y) => y !== X)) { const v = across(Y); if (v > 0.5) left.push({ label: `From Bus ${Y}`, value: `+${Math.round(v)} MW`, st: 'live', amount: v, crosslink: true }); }
     }
     const t = grid.totals?.[X] || {};
@@ -843,12 +855,13 @@ function renderDistribution(grid) {
   const rowsH = (n) => n * (PH + GAP);
   const H = Math.max(rowsH(left.length), rowsH(right.length), 160) + 40;
   const svg = svgEl('svg', { class: 'dist-map', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `${busName} flow schematic` });
-  const COLOR = { live: 'var(--lcars-sky)', dead: 'var(--lcars-tan)', open: '#3a3550', cut: '#5a1f22' };
+  const COLOR = { live: 'var(--lcars-sky)', idle: 'var(--lcars-gold)', damaged: 'var(--lcars-red)', dead: 'var(--lcars-tan)', open: '#3a3550', cut: '#5a1f22' };
   const pill = (x, y, n, w = 260) => {
-    const g = svgEl('g', { class: `dist-node dist-node--${n.st}`, transform: `translate(${x} ${y})`, role: 'button', tabindex: 0, 'data-key': n.key || n.tank || n.label });
+    const g = svgEl('g', { class: `dist-node dist-node--${n.st}`, transform: `translate(${x} ${y})`, role: 'button', tabindex: 0, 'data-key': n.key || n.tank || (n.tapBus ? `tap:${n.tapBus}` : n.label) });
     g.append(svgEl('rect', { width: w, height: PH, rx: PH / 2, fill: COLOR[n.st], opacity: n.st === 'dead' ? 0.6 : 1, ...(n.st === 'cut' ? { stroke: 'var(--lcars-red)', 'stroke-width': 2 } : {}) }),
       svgEl('text', { x: 16, y: 17, 'font-size': 14, fill: n.st === 'open' || n.st === 'cut' ? 'var(--lcars-text)' : '#000' }, n.label.toUpperCase()),
-      svgEl('text', { x: 16, y: 32, 'font-size': 11, fill: n.st === 'open' || n.st === 'cut' ? '#aaa' : '#000' }, `${n.value} · ${n.word || { live: 'live', dead: 'no power', open: 'standby', cut: 'CUT OFF' }[n.st]}`));
+      svgEl('text', { x: 16, y: 32, 'font-size': 11, fill: n.st === 'open' || n.st === 'cut' ? '#aaa' : '#000' }, `${n.value} · ${n.word || { live: 'live', idle: 'ready', dead: 'no power', open: 'standby', cut: 'CUT OFF' }[n.st]}`));
+    if (n.tapBus) g.addEventListener('click', () => send({ type: 'grid', tap: { bus: n.tapBus, on: !(grid.taps?.[n.tapBus] > 0) } }));
     if (n.key || n.tank) g.addEventListener('click', () => (n.tank ? send({ type: 'grid', tank: { bus: X === 'Deu' ? 'deu' : 'am', name: n.tank, tied: n.st === 'open' } }) : toggle(n.key)));
     svg.append(g);
     return { x, y, w };

@@ -110,12 +110,12 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     const was = await tiedA();
     await page.click('[data-distribution] .dist-node[data-key="console:Helm"]');
     await page.waitForFunction((w) => window.__nav.last.own.grid.ties['console:Helm'].includes('A') !== w, was);
-    // Switched off on purpose reads "standby" (dead is for empty): the untied console, and a charged battery not feeding.
+    // Switched off on purpose reads "standby" (dead is for empty): the untied console; a charged battery not feeding, its breaker closed, is ready.
     const helmWord = async () => page.textContent('[data-distribution] .dist-node[data-key="console:Helm"]');
     if (was) await page.waitForFunction(() => /standby/.test(document.querySelector('[data-distribution] .dist-node[data-key="console:Helm"]').textContent));
     const battery = await page.evaluate(() => [...document.querySelectorAll('[data-distribution] .dist-node')].map((n) => n.textContent).find((t) => /^battery a/i.test(t)));
     const store = await page.evaluate(() => window.__nav.last.own.grid.stores.A);
-    if (store.level > 0 && !store.supplying) assert.match(battery, /standby/, battery);
+    if (store.level > 0 && !store.supplying && !store.charging) assert.match(battery, store.breaker === false ? /standby/ : /ready/, battery);
     const standbySeen = `${was ? await helmWord() : ''} / ${battery}`;
     // Which way things flow: a battery supplying runs out to the bus; charging, in from it.
     const batteryFlow = (store) => page.evaluate((st) => {
@@ -128,6 +128,38 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     assert.deepEqual(await batteryFlow({ level: 60, supplying: 40, charging: 0, breaker: true }), ['Battery A → Bus A', 'url(#dist-arrow)'], 'discharging: battery → bus');
     assert.deepEqual(await batteryFlow({ level: 60, supplying: 0, charging: 12, breaker: true }), ['Bus A → Battery A', 'url(#dist-arrow)'], 'charging: bus → battery');
     assert.equal(await batteryFlow({ level: 60, supplying: 0, charging: 0, breaker: true }), null, 'idle: no flow drawn');
+    // Each source's word: live (giving), ready (tied and able, not needed), no output (tied,
+    // nothing to give), standby (untied, or a tap closed, or a breaker open). The EPS tap too.
+    const words = await page.evaluate(() => {
+      const base = window.__nav.last.own.grid, out = {};
+      const word = (label) => [...document.querySelectorAll('[data-distribution] .dist-node')].map((n) => n.textContent).find((t) => t.toLowerCase().startsWith(label.toLowerCase()))?.split(' · ').filter((x) => !/^\d+%$/.test(x)).pop();
+      const show = (fn, label) => { const g = structuredClone(base); fn(g); distBus = 'B'; renderDistribution(g); return word(label); };
+      const keys = ['solar', 'dock', 'ship', 'emergB', 'aux1', 'core'].filter((k) => base.tieNodes[k]?.includes('B'));
+      const label = { solar: 'Solar', dock: 'Dock power', ship: 'Docked ship', emergB: 'Emergency battery B', aux1: 'Aux fusion 1', core: 'Warp core' };
+      for (const k of keys) {
+        const set = (tied, flowing, cap) => (g) => { g.ties[k] = tied ? ['B'] : []; g.cells[k] = { ...(g.cells[k] || {}), B: flowing }; g.srcCap = { ...g.srcCap, [k]: cap }; delete g.cutOff?.[k]; };
+        const hit = (d) => (g) => { set(true, 40, 60)(g); g.srcDamage = { ...g.srcDamage, [k]: d }; };
+        out[k] = [show(set(true, 40, 60), label[k]), show(set(true, 0, 60), label[k]), show(set(true, 0, 0), label[k]), show(set(false, 0, 60), label[k]), show(hit(60), label[k]), show((g) => { hit(60)(g); g.ties[k] = []; }, label[k]), show(hit(0), label[k])];
+      }
+      const tap = (max, used, live) => (g) => { g.taps.B = max; g.cells.taps = { ...g.cells.taps, B: used }; g.epsLive = live; };
+      out.tap = [show(tap(100, 40, true), 'EPS tap'), show(tap(100, 0, true), 'EPS tap'), show(tap(100, 0, false), 'EPS tap'), show(tap(0, 0, true), 'EPS tap'), show((g) => { tap(100, 40, true)(g); g.srcDamage = { 'tap:B': 25 }; }, 'EPS tap')];
+      const bat = (s) => (g) => { g.stores.B = { ...g.stores.B, ...s }; };
+      out.battery = [show(bat({ level: 60, supplying: 30, charging: 0, breaker: true }), 'Battery B').replace(/^\d+ out$/, 'live'), show(bat({ level: 60, supplying: 0, charging: 0, breaker: true }), 'Battery B'), show(bat({ level: 0, supplying: 0, charging: 0, breaker: true }), 'Battery B'), show(bat({ level: 60, supplying: 0, charging: 0, breaker: false }), 'Battery B')];
+      distBus = 'A'; renderDistribution(base);
+      return { out, keys };
+    });
+    assert.ok(words.keys.length >= 2, `sources on Bus B to try: ${words.keys}`);
+    // (Damaged: 60% → 40% working, shown untied too; repaired, back to what it was.)
+    for (const k of words.keys) assert.deepEqual(words.out[k], ['live', 'ready', 'no output', 'standby', 'DAMAGED', 'DAMAGED', 'live'], `${k}: ${words.out[k]}`);
+    assert.deepEqual(words.out.tap, ['live', 'ready', 'EPS not energized', 'standby', 'DAMAGED'], `EPS tap: ${words.out.tap}`);
+    assert.deepEqual(words.out.battery, ['live', 'ready', 'dead', 'standby'], `battery: ${words.out.battery}`);
+    // A tap on the EPS tap closes it (or opens it to the bus's limit), and back.
+    const tapWas = await page.evaluate(() => window.__nav.last.own.grid.taps.A);
+    await page.click('[data-distribution] .dist-node[data-key="tap:A"]');
+    await page.waitForFunction((w) => (window.__nav.last.own.grid.taps.A > 0) !== (w > 0), tapWas);
+    await page.click('[data-distribution] .dist-node[data-key="tap:A"]');
+    await page.waitForFunction((w) => (window.__nav.last.own.grid.taps.A > 0) === (w > 0), tapWas);
+    step(`Distribution's sources on Bus B (${words.keys.join(', ')}, the EPS tap, Battery B) each read live, ready (tied, not needed), no output and standby as fed, and DAMAGED (with how much works, untied too) until repaired; a tap on the EPS tap closed and reopened it`);
     // The bus ladder and the crosslink: power crossing from Bus B to Bus C shows on the B–C tie
     // (lit, B → C) and on Bus C's schematic as a source from Bus B, on Bus B's as a load to Bus C.
     const crossing = await page.evaluate(() => {
@@ -152,7 +184,7 @@ const run = (args) => { const p = spawn(process.execPath, args, { cwd: ROOT, env
     await page.waitForFunction((w) => JSON.stringify(window.__nav.last.own.grid.ties.crosslink) === JSON.stringify(w), xlWas);
     await page.click('[data-distribution] .dist-node[data-key="console:Helm"]');
     await page.waitForFunction((w) => window.__nav.last.own.grid.ties['console:Helm'].includes('A') === w, was);
-    step(`Distribution: the EPS schematic (Main Engineering on it); Bus A, where a tap on the Helm console untied it (standby) and another tied it back; a charged battery not feeding reads standby (${standbySeen}); a battery's line runs battery → bus discharging, bus → battery charging; the bus ladder showed power crossing B → C on its tie and on each bus's schematic, and a tap on a tie toggled it`);
+    step(`Distribution: the EPS schematic (Main Engineering on it); Bus A, where a tap on the Helm console untied it (standby) and another tied it back; a charged battery not feeding reads ready (${standbySeen}); a battery's line runs battery → bus discharging, bus → battery charging; the bus ladder showed power crossing B → C on its tie and on each bus's schematic, and a tap on a tie toggled it`);
     // The sidebar: two columns (ship-wide on the left, this station's screens on the right), each
     // scrolling by itself when it's taller than the screen.
     for (const col of ['.lcars-sidebar__col--right', '.lcars-sidebar__col--left']) {
